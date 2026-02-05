@@ -12,6 +12,9 @@ The current product and engineering contract is documented at:
 
 - `apps/web`: primary product web UI
 - `apps/docs-site`: static documentation website
+- `crates/oored`: daemon runtime
+- `crates/oore`: operator CLI/TUI bootstrap surface
+- `crates/oore-contract`: shared backend API contracts
 - `docs/features`: required feature documentation entries
 - `docs/templates/feature-doc-template.md`: required feature doc template
 
@@ -41,3 +44,10 @@ Feature docs are validated by:
 
 - local: `bun run docs:check`
 - CI: `.github/workflows/docs-guard.yml`
+
+## Backend Bootstrap
+
+- check workspace: `cargo check --workspace`
+- run daemon: `cargo run -p oored -- run --listen 127.0.0.1:8787`
+- check setup status: `curl http://127.0.0.1:8787/v1/public/setup-status`
+- run CLI: `cargo run -p oore -- setup open --ttl 15m`
