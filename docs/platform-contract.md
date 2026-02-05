@@ -1,7 +1,16 @@
 # oore.build Platform Contract
 
-Status: Active draft with locked V1 decisions.
-Last updated: 2026-02-05
+Status: Active contract with locked V1 decisions.
+Last updated: 2026-02-06
+
+## 0) Contract Discipline
+
+- `MUST` means non-optional.
+- `SHOULD` means strongly recommended unless there is a justified exception.
+- Any change to a `MUST` rule requires:
+- an ADR entry
+- a contract update in this file
+- a feature doc update in `docs/features/`
 
 ## 1) Product Definition
 
@@ -53,6 +62,11 @@ oore.build is a self-hosted, Flutter-first mobile CI platform focused on interna
 - `oore config set`
 - `oore config get`
 - `oore doctor`
+
+Command stability rules:
+
+- `oored` and `oore` command names are stable contract surfaces.
+- New commands may be added, but existing command names and core semantics must remain backward compatible in V1.
 
 ## 7) Auth and Bootstrap Contract
 
@@ -110,6 +124,13 @@ Core backend stack:
 - RBAC policy layer: `casbin-rs`
 - Observability: `tracing`, OpenTelemetry, Prometheus metrics
 
+Backend implementation rules:
+
+- Backend runtime support in V1 is macOS only.
+- Public setup read endpoint must remain non-sensitive.
+- Setup mutating endpoints must be disabled once state is `ready`.
+- Hosted UI flow and local CLI setup flow must both be supported.
+
 ## 11) Frontend Technology Contract (locked direction)
 
 - Framework: React + TypeScript
@@ -122,6 +143,22 @@ Core backend stack:
 - Package manager/runtime for frontend toolchain: Bun
 - Unit/integration tests: `bun test`
 - E2E tests: Playwright
+
+## 11.1) Frontend Implementation Rules (strict)
+
+- Router mode MUST be file-based TanStack Router.
+- Next.js is out of scope for V1 frontend architecture.
+- Shared shadcn configuration MUST be equivalent across `apps/web` and `apps/docs-site`.
+- shadcn primitive base MUST be Base UI (not Radix).
+- Shared style constraints MUST include:
+- `style: base-vega`
+- `iconLibrary: hugeicons`
+- `baseColor: neutral`
+- `theme: amber`
+- `menuAccent: subtle`
+- `menuColor: default`
+- `radius: none`
+- `font: inter`
 
 ## 12) Frontend State Boundaries
 
@@ -175,6 +212,12 @@ Architecture must remain open for:
 - Every feature must include a document in the predefined feature format.
 - CI must fail when code changes are present without required feature documentation updates.
 - CI must fail when feature documentation does not match required template sections.
+
+Additional documentation rules:
+
+- This contract file is the source of truth for finalized platform decisions.
+- `docs/documentation-policy.md` defines the minimum release gate for docs.
+- Feature docs describe increments; this contract describes cross-cutting invariants.
 
 ## 16) Finalized V1 Decisions
 

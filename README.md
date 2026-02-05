@@ -7,6 +7,7 @@ Self-hosted, Flutter-first mobile CI and internal app distribution.
 The current product and engineering contract is documented at:
 
 - `docs/platform-contract.md`
+- `docs/strict-guidelines.md`
 
 ## Workspace Layout
 
