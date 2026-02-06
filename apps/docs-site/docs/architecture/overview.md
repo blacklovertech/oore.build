@@ -36,7 +36,7 @@ oore.build/
 | Database | SQLite via sqlx |
 | Authentication | OIDC via `openidconnect` |
 | Encryption | AES-256-GCM via `ring` |
-| Observability | `tracing` + `tracing-subscriber` |
+| Observability | `tracing`, OpenTelemetry, Prometheus metrics |
 
 ### Frontend (TypeScript)
 

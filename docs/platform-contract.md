@@ -117,8 +117,8 @@ Core backend stack:
 
 - Runtime: `tokio`
 - API: `axum`
-- Database: `PostgreSQL` with `sqlx`
-- Queue/event bus: `NATS JetStream` via `async-nats`
+- Database: `SQLite` with `sqlx` (see [ADR-0001](../adr/0001-sqlite-over-postgresql-for-v1.md))
+- Queue/event bus: in-process (`tokio` channels) (see [ADR-0003](../adr/0003-in-process-queuing-over-nats-for-v1.md))
 - Artifact storage: S3-compatible using `aws-sdk-s3`
 - Auth: OIDC via `openidconnect`
 - RBAC policy layer: `casbin-rs`

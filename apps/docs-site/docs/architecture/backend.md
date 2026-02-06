@@ -7,20 +7,25 @@ The oore.build backend consists of two Rust binaries (`oored` and `oore`) and on
 When you run `oored run`, the daemon performs these initialization steps:
 
 1. **Parse CLI args** -- listen address, optional state file path
-2. **Resolve database path** -- from `--state-file`, `OORE_SETUP_STATE_FILE` env, or default (`~/Library/Application Support/oore/oore.db`)
-3. **Connect to SQLite** -- create the database file and run embedded migrations
-4. **Initialize state** -- if no state row exists, create one with `BootstrapPending` and a fresh UUID instance ID
-5. **Load encryption key** -- from `~/Library/Application Support/oore/encryption.key` (auto-generated on first run)
-6. **Build Axum router** -- mount all route handlers with shared application state
-7. **Start HTTP server** -- bind to the listen address and serve requests
+2. **Initialize tracing** -- `tracing_subscriber` with `fmt` layer + optional OpenTelemetry layer (enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set)
+3. **Install Prometheus metrics** -- recorder for `http_requests_total` and `http_request_duration_seconds`
+4. **Resolve database path** -- from `--state-file`, `OORE_SETUP_STATE_FILE` env, or default (`~/Library/Application Support/oore/oore.db`)
+5. **Connect to SQLite** -- create the database file and run embedded migrations
+6. **Initialize state** -- if no state row exists, create one with `BootstrapPending` and a fresh UUID instance ID
+7. **Load encryption key** -- from `~/Library/Application Support/oore/encryption.key` (auto-generated on first run)
+8. **Build Axum router** -- mount all route handlers, `/metrics` endpoint, and request metrics middleware
+9. **Start HTTP server** -- bind to the listen address and serve requests
 
 ```rust
 // Simplified daemon bootstrap (crates/oored/src/main.rs)
+observability::init_tracing();
+let metrics_handle = observability::init_metrics();
 let store = SetupStore::connect(db_path).await?;
 let initial = store.init_if_missing().await?;
 let encryption_key = crypto::load_or_generate_key(&key_path)?;
-let app = build_router(store, encryption_key);
+let app = build_router(store, encryption_key, metrics_handle);
 axum::serve(listener, app).await?;
+observability::shutdown_tracing();
 ```
 
 ## Application state
@@ -173,4 +178,8 @@ Key Rust crates used by the daemon:
 | `ring` | 0.17 | AES-256-GCM encryption |
 | `tower-http` | 0.6 | CORS middleware |
 | `tracing` | 0.1 | Structured logging |
+| `opentelemetry` | 0.28 | OpenTelemetry API (opt-in via `OTEL_EXPORTER_OTLP_ENDPOINT`) |
+| `tracing-opentelemetry` | 0.29 | Bridge tracing spans to OpenTelemetry |
+| `metrics` | 0.24 | Metrics facade (request counters and histograms) |
+| `metrics-exporter-prometheus` | 0.16 | Prometheus text format exporter (`GET /metrics`) |
 | `serde` / `serde_json` | 1.0 | Serialization |

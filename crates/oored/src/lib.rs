@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod crypto;
+pub mod observability;
 pub mod oidc;
 pub mod session;
 pub mod store;
@@ -11,8 +12,10 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::middleware as axum_mw;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use metrics_exporter_prometheus::PrometheusHandle;
 use oore_contract::{
     ApiError, BootstrapTokenVerifyRequest, BootstrapTokenVerifyResponse, OidcConfigRecord,
     OidcConfigureRequest, OidcConfigureResponse, OidcSecretRecord, OwnerRecord,
@@ -751,10 +754,10 @@ async fn complete_setup(
 
 // ── Router builder ──────────────────────────────────────────────
 
-/// Build the Axum router with all setup and auth endpoints, given a `SetupStore`
-/// and the AES-256 encryption key for secrets at rest.
-pub fn build_router(store: SetupStore, encryption_key: Vec<u8>) -> Router {
-    build_router_inner(store, encryption_key, false)
+/// Build the Axum router with all setup and auth endpoints, given a `SetupStore`,
+/// the AES-256 encryption key for secrets at rest, and a Prometheus metrics handle.
+pub fn build_router(store: SetupStore, encryption_key: Vec<u8>, metrics_handle: PrometheusHandle) -> Router {
+    build_router_inner(store, encryption_key, false, metrics_handle)
 }
 
 /// Build a test router that skips real OIDC discovery in `configure_oidc`.
@@ -763,10 +766,13 @@ pub fn build_router(store: SetupStore, encryption_key: Vec<u8>) -> Router {
 /// making any network calls.
 #[cfg(any(test, feature = "test-support"))]
 pub fn build_test_router(store: SetupStore, encryption_key: Vec<u8>) -> Router {
-    build_router_inner(store, encryption_key, true)
+    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .install_recorder()
+        .expect("failed to install test metrics recorder");
+    build_router_inner(store, encryption_key, true, metrics_handle)
 }
 
-fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oidc_discovery: bool) -> Router {
+fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oidc_discovery: bool, metrics_handle: PrometheusHandle) -> Router {
     let shared_state = Arc::new(AppState {
         store: Mutex::new(store),
         sessions: Mutex::new(SessionStore::new()),
@@ -803,4 +809,8 @@ fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oidc_dis
         .route("/v1/auth/logout", post(auth::logout))
         .layer(cors)
         .with_state(shared_state)
+        // Merge the Prometheus /metrics endpoint (uses its own state)
+        .merge(observability::metrics_router(metrics_handle))
+        // Request metrics middleware wraps all routes (including /metrics)
+        .layer(axum_mw::from_fn(observability::track_http_metrics))
 }

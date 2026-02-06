@@ -4,6 +4,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use oored::build_router;
 use oored::crypto;
+use oored::observability;
 use oored::store::SetupStore;
 use tracing::info;
 
@@ -38,7 +39,11 @@ struct RunArgs {
 // ── Server bootstrap ─────────────────────────────────────────────
 
 async fn run_server(args: RunArgs) -> anyhow::Result<()> {
-    tracing_subscriber::fmt().with_env_filter("info").init();
+    // Initialise tracing (+ optional OTel layer when OTEL_EXPORTER_OTLP_ENDPOINT is set)
+    observability::init_tracing();
+
+    // Install the Prometheus metrics recorder
+    let metrics_handle = observability::init_metrics();
 
     let addr: SocketAddr = args
         .listen
@@ -71,7 +76,7 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
         .context("failed to load or generate encryption key")?;
     info!(path = %key_path.display(), "encryption key ready");
 
-    let app = build_router(store, encryption_key);
+    let app = build_router(store, encryption_key, metrics_handle);
 
     info!(listen = %addr, "starting oored daemon");
 
@@ -79,6 +84,9 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
     axum::serve(listener, app)
         .await
         .context("oored server failed")?;
+
+    // Best-effort flush of OTel spans on shutdown
+    observability::shutdown_tracing();
 
     Ok(())
 }

@@ -31,6 +31,14 @@ base64.workspace = true
 sqlx.workspace = true
 zeroize.workspace = true
 
+# Observability
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
+tracing-opentelemetry.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+
 [dev-dependencies]
 tower.workspace = true
 hyper.workspace = true

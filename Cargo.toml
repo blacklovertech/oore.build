@@ -36,3 +36,11 @@ ring = "0.17"
 base64 = "0.22"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 zeroize = { version = "1", features = ["derive"] }
+
+# Observability: OpenTelemetry + Prometheus
+opentelemetry = "0.28"
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic"] }
+tracing-opentelemetry = "0.29"
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
