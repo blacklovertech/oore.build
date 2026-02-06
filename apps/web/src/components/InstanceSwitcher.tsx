@@ -1,116 +1,156 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
+import { HugeiconsIcon } from '@hugeicons/react'
+import {
+  Add01Icon,
+  ArrowUpDownIcon,
+  Delete02Icon,
+  PencilEdit02Icon,
+  Tick02Icon,
+} from '@hugeicons/core-free-icons'
+import type { Instance } from '@/lib/types'
+import { getInstanceIcon } from '@/lib/instance-icons'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from '@/components/ui/sidebar'
 import { useActiveInstance, useInstanceStore } from '@/stores/instance-store'
 import AddInstanceDialog from '@/components/AddInstanceDialog'
+import EditInstanceDialog from '@/components/EditInstanceDialog'
 
 export default function InstanceSwitcher() {
+  const { isMobile } = useSidebar()
   const instance = useActiveInstance()
   const instances = useInstanceStore((s) => s.instances)
   const setActiveInstance = useInstanceStore((s) => s.setActiveInstance)
-  const [isOpen, setIsOpen] = useState(false)
+  const removeInstance = useInstanceStore((s) => s.removeInstance)
   const [showAddDialog, setShowAddDialog] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-
-  const close = useCallback(() => setIsOpen(false), [])
-
-  // Close on outside click
-  useEffect(() => {
-    if (!isOpen) return
-    function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        close()
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [isOpen, close])
-
-  // Close on Escape
-  useEffect(() => {
-    if (!isOpen) return
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') close()
-    }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [isOpen, close])
+  const [editingInstance, setEditingInstance] = useState<Instance | null>(null)
 
   const instanceList = Object.values(instances)
 
   if (!instance && instanceList.length === 0) return null
 
+  const hostname = instance
+    ? (() => {
+        try {
+          return new URL(instance.url).hostname
+        } catch {
+          return instance.url || 'local'
+        }
+      })()
+    : ''
+
   return (
     <>
-      <div className="relative" ref={dropdownRef}>
-        <button
-          onClick={() => setIsOpen((v) => !v)}
-          className="flex items-center gap-1.5 px-2 py-1 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-          aria-label="Switch instance"
-        >
-          <span className="truncate max-w-[140px]">
-            {instance?.label ?? 'No instance'}
-          </span>
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 12 12"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            className={`transition-transform ${isOpen ? 'rotate-180' : ''}`}
-          >
-            <path d="M3 4.5l3 3 3-3" />
-          </svg>
-        </button>
-
-        {isOpen ? (
-          <div className="absolute right-0 top-full mt-1 w-56 bg-popover border border-border shadow-lg z-50">
-            {instanceList.map((inst) => (
-              <button
-                key={inst.id}
-                onClick={() => {
-                  setActiveInstance(inst.id)
-                  close()
-                }}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors flex items-center gap-2 ${
-                  inst.id === instance?.id ? 'bg-accent' : ''
-                }`}
-              >
-                <span className="truncate flex-1">{inst.label}</span>
-                {inst.id === instance?.id ? (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 14 14"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <SidebarMenuButton
+                  size="lg"
+                  className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
+                />
+              }
+            >
+              <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center">
+                <HugeiconsIcon icon={getInstanceIcon(instance?.icon)} size={16} />
+              </div>
+              <div className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate font-medium">
+                  {instance?.label ?? 'No instance'}
+                </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {hostname}
+                </span>
+              </div>
+              <HugeiconsIcon
+                icon={ArrowUpDownIcon}
+                className="ml-auto"
+                size={16}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              className="w-(--radix-dropdown-menu-trigger-width) min-w-56"
+              align="start"
+              side={isMobile ? 'bottom' : 'right'}
+              sideOffset={4}
+            >
+              {instanceList.map((inst) => (
+                <DropdownMenuItem
+                  key={inst.id}
+                  onClick={() => setActiveInstance(inst.id)}
+                  className="group gap-2 p-2"
+                >
+                  <div className="flex size-6 items-center justify-center border">
+                    <HugeiconsIcon icon={getInstanceIcon(inst.icon)} size={14} />
+                  </div>
+                  <span className="truncate flex-1">{inst.label}</span>
+                  <button
+                    type="button"
+                    className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      requestAnimationFrame(() => setEditingInstance(inst))
+                    }}
+                    title={`Edit ${inst.label}`}
                   >
-                    <path d="M3 7l3 3 5-6" />
-                  </svg>
-                ) : null}
-              </button>
-            ))}
-            <div className="border-t border-border">
-              <button
+                    <HugeiconsIcon icon={PencilEdit02Icon} size={14} />
+                  </button>
+                  {inst.id === instance?.id ? (
+                    <HugeiconsIcon
+                      icon={Tick02Icon}
+                      size={14}
+                      className="text-primary"
+                    />
+                  ) : null}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="gap-2 p-2"
                 onClick={() => {
-                  close()
-                  setShowAddDialog(true)
+                  requestAnimationFrame(() => setShowAddDialog(true))
                 }}
-                className="w-full text-left px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
               >
-                + Add Instance
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
+                <div className="flex size-6 items-center justify-center border bg-background">
+                  <HugeiconsIcon icon={Add01Icon} size={14} />
+                </div>
+                Add instance
+              </DropdownMenuItem>
+              {instance ? (
+                <DropdownMenuItem
+                  className="gap-2 p-2 text-destructive focus:text-destructive"
+                  onClick={() => removeInstance(instance.id)}
+                >
+                  <div className="flex size-6 items-center justify-center border">
+                    <HugeiconsIcon icon={Delete02Icon} size={14} />
+                  </div>
+                  Remove {instance.label}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarMenuItem>
+      </SidebarMenu>
 
-      {showAddDialog ? (
-        <AddInstanceDialog onClose={() => setShowAddDialog(false)} />
-      ) : null}
+      <AddInstanceDialog open={showAddDialog} onOpenChange={setShowAddDialog} />
+      <EditInstanceDialog
+        instance={editingInstance}
+        open={editingInstance !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingInstance(null)
+        }}
+      />
     </>
   )
 }

@@ -4,6 +4,7 @@ export interface Instance {
   id: string
   label: string
   url: string
+  icon?: string
   addedAt: number
 }
 
@@ -77,6 +78,7 @@ export interface AuthenticatedUser {
   oidc_subject: string
   user_id?: string
   role?: UserRole
+  avatar_url?: string
 }
 
 export interface OidcCallbackResponse {
@@ -97,6 +99,7 @@ export interface User {
   display_name?: string
   role: UserRole
   status: UserStatus
+  avatar_url?: string
   created_at: number
   updated_at: number
 }
@@ -123,7 +126,7 @@ export interface ReEnableUserResponse {
 }
 
 export interface ListUsersResponse {
-  users: User[]
+  users: Array<User>
 }
 
 export interface UserProfileResponse {

@@ -7,10 +7,12 @@ import { clearAuthStorageForInstance } from '@/stores/auth-store'
 interface InstanceStoreState {
   instances: Record<string, Instance>
   activeInstanceId: string | null
-  addInstance: (label: string, url: string) => string
+  addInstance: (label: string, url: string, icon?: string) => string
   removeInstance: (id: string) => void
   setActiveInstance: (id: string) => void
+  updateInstance: (id: string, fields: Partial<Pick<Instance, 'label' | 'url' | 'icon'>>) => void
   updateInstanceLabel: (id: string, label: string) => void
+  updateInstanceIcon: (id: string, icon: string) => void
 }
 
 export const useInstanceStore = create<InstanceStoreState>()(
@@ -19,9 +21,9 @@ export const useInstanceStore = create<InstanceStoreState>()(
       instances: {},
       activeInstanceId: null,
 
-      addInstance: (label, url) => {
+      addInstance: (label, url, icon) => {
         const id = crypto.randomUUID()
-        const instance: Instance = { id, label, url, addedAt: Date.now() }
+        const instance: Instance = { id, label, url, ...(icon ? { icon } : {}), addedAt: Date.now() }
         const state = get()
         const isFirst = state.activeInstanceId === null
         set({
@@ -67,6 +69,20 @@ export const useInstanceStore = create<InstanceStoreState>()(
         }
       },
 
+      updateInstance: (id, fields) => {
+        const state = get()
+        const instance = state.instances[id]
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- id may not exist in record
+        if (instance) {
+          set({
+            instances: {
+              ...state.instances,
+              [id]: { ...instance, ...fields },
+            },
+          })
+        }
+      },
+
       updateInstanceLabel: (id, label) => {
         const state = get()
         const instance = state.instances[id]
@@ -76,6 +92,20 @@ export const useInstanceStore = create<InstanceStoreState>()(
             instances: {
               ...state.instances,
               [id]: { ...instance, label },
+            },
+          })
+        }
+      },
+
+      updateInstanceIcon: (id, icon) => {
+        const state = get()
+        const instance = state.instances[id]
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- id may not exist in record
+        if (instance) {
+          set({
+            instances: {
+              ...state.instances,
+              [id]: { ...instance, icon },
             },
           })
         }

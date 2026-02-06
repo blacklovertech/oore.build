@@ -1,7 +1,13 @@
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { HugeiconsIcon } from '@hugeicons/react'
+import type { Instance } from '@/lib/types'
+import {
+  DEFAULT_INSTANCE_ICON_KEY,
+  INSTANCE_ICONS,
+} from '@/lib/instance-icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,12 +20,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useInstanceStore } from '@/stores/instance-store'
-import {
-  DEFAULT_INSTANCE_ICON_KEY,
-  INSTANCE_ICONS,
-} from '@/lib/instance-icons'
 
-const addInstanceSchema = z.object({
+const editInstanceSchema = z.object({
   label: z.string().min(1, 'Label is required'),
   url: z
     .string()
@@ -35,19 +37,20 @@ const addInstanceSchema = z.object({
   icon: z.string(),
 })
 
-type AddInstanceForm = z.infer<typeof addInstanceSchema>
+type EditInstanceForm = z.infer<typeof editInstanceSchema>
 
-interface AddInstanceDialogProps {
+interface EditInstanceDialogProps {
+  instance: Instance | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-export default function AddInstanceDialog({
+export default function EditInstanceDialog({
+  instance,
   open,
   onOpenChange,
-}: AddInstanceDialogProps) {
-  const addInstance = useInstanceStore((s) => s.addInstance)
-  const setActiveInstance = useInstanceStore((s) => s.setActiveInstance)
+}: EditInstanceDialogProps) {
+  const updateInstance = useInstanceStore((s) => s.updateInstance)
 
   const {
     register,
@@ -56,18 +59,35 @@ export default function AddInstanceDialog({
     reset,
     watch,
     setValue,
-  } = useForm<AddInstanceForm>({
-    resolver: zodResolver(addInstanceSchema),
-    defaultValues: { label: '', url: '', icon: DEFAULT_INSTANCE_ICON_KEY },
+  } = useForm<EditInstanceForm>({
+    resolver: zodResolver(editInstanceSchema),
+    defaultValues: {
+      label: '',
+      url: '',
+      icon: DEFAULT_INSTANCE_ICON_KEY,
+    },
     mode: 'onBlur',
   })
 
+  useEffect(() => {
+    if (instance && open) {
+      reset({
+        label: instance.label,
+        url: instance.url,
+        icon: instance.icon ?? DEFAULT_INSTANCE_ICON_KEY,
+      })
+    }
+  }, [instance, open, reset])
+
   const selectedIcon = watch('icon')
 
-  function onSubmit(data: AddInstanceForm) {
-    const id = addInstance(data.label.trim(), data.url, data.icon)
-    setActiveInstance(id)
-    reset()
+  function onSubmit(data: EditInstanceForm) {
+    if (!instance) return
+    updateInstance(instance.id, {
+      label: data.label.trim(),
+      url: data.url,
+      icon: data.icon,
+    })
     onOpenChange(false)
   }
 
@@ -82,18 +102,17 @@ export default function AddInstanceDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Instance</DialogTitle>
+          <DialogTitle>Edit Instance</DialogTitle>
           <DialogDescription>
-            Connect to an oore.build backend. Leave URL empty to use the local
-            dev proxy.
+            Update the details for this backend instance.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="instance-label">Label</Label>
+            <Label htmlFor="edit-instance-label">Label</Label>
             <Input
-              id="instance-label"
+              id="edit-instance-label"
               type="text"
               placeholder="My CI Server"
               {...register('label')}
@@ -105,14 +124,14 @@ export default function AddInstanceDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="instance-url">
+            <Label htmlFor="edit-instance-url">
               Backend URL{' '}
               <span className="text-muted-foreground font-normal">
                 (optional)
               </span>
             </Label>
             <Input
-              id="instance-url"
+              id="edit-instance-url"
               type="text"
               placeholder="https://ci.example.com"
               {...register('url')}
@@ -154,7 +173,7 @@ export default function AddInstanceDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={!isValid}>
-              Add
+              Save
             </Button>
           </DialogFooter>
         </form>
