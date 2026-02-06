@@ -1,19 +1,19 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type {
-  SetupState,
-  SetupStatus,
+  ApiError,
   BootstrapTokenVerifyResponse,
   OidcConfigureRequest,
   OidcConfigureResponse,
+  SetupCompleteResponse,
   SetupOidcStartResponse,
   SetupOidcVerifyResponse,
-  SetupCompleteResponse,
-  ApiError,
+  SetupState,
+  SetupStatus,
 } from '@/lib/types'
 
 describe('types', () => {
   it('SetupState accepts valid states', () => {
-    const states: SetupState[] = [
+    const states: Array<SetupState> = [
       'uninitialized',
       'bootstrap_pending',
       'idp_configured',

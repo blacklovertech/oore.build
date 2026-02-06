@@ -1,11 +1,11 @@
+import { URL, fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
-import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    setupFiles: [],
+    setupFiles: ['./src/test/setup.ts'],
   },
   resolve: {
     alias: {

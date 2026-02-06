@@ -1,5 +1,5 @@
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
-import { useEffect, useCallback, useRef } from 'react'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -10,6 +10,7 @@ import {
 } from '@/hooks/use-setup'
 import { useSetupStore } from '@/stores/setup-store'
 import { ApiClientError } from '@/lib/api'
+import { getActiveInstanceOrRedirect, requireSetupSessionOrRedirect } from '@/lib/instance-context'
 
 const ownerSearchSchema = z.object({
   code: z.string().optional(),
@@ -19,10 +20,8 @@ const ownerSearchSchema = z.object({
 export const Route = createFileRoute('/setup/owner')({
   validateSearch: ownerSearchSchema,
   beforeLoad: () => {
-    const sessionToken = useSetupStore.getState().sessionToken
-    if (!sessionToken) {
-      throw redirect({ to: '/setup' })
-    }
+    const instance = getActiveInstanceOrRedirect()
+    requireSetupSessionOrRedirect(instance.id)
   },
   component: OwnerStep,
   errorComponent: OwnerStepError,
@@ -98,7 +97,7 @@ function OwnerStep() {
         },
       )
     }
-  }, [code, oidcState, sessionToken]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [code, oidcState, sessionToken])
 
   // Navigate based on backend state, not mutation response. The setup-status
   // query polls every 3 seconds. Once the backend transitions to owner_created
@@ -130,7 +129,7 @@ function OwnerStep() {
         },
       },
     )
-  }, [sessionToken]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionToken])
 
   // Show verifying state while processing the callback
   if (code && oidcState) {

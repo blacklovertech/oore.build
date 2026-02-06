@@ -1,8 +1,16 @@
 import { Link } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
+import InstanceSwitcher from '@/components/InstanceSwitcher'
+import { useActiveInstance, useInstanceStore } from '@/stores/instance-store'
+import AddInstanceDialog from '@/components/AddInstanceDialog'
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false)
+  const [showAddInstance, setShowAddInstance] = useState(false)
+  const instances = useInstanceStore((s) => s.instances)
+  const activeInstance = useActiveInstance()
+  const setActiveInstance = useInstanceStore((s) => s.setActiveInstance)
+  const removeInstance = useInstanceStore((s) => s.removeInstance)
 
   const close = useCallback(() => setIsOpen(false), [])
 
@@ -28,9 +36,10 @@ export default function Header() {
             <path d="M3 5h14M3 10h14M3 15h14" />
           </svg>
         </button>
-        <Link to="/" className="text-sidebar-foreground hover:text-sidebar-primary transition-colors">
+        <Link to="/" className="text-sidebar-foreground hover:text-sidebar-primary transition-colors flex-1">
           <span className="text-lg font-semibold tracking-tight">oore.build</span>
         </Link>
+        <InstanceSwitcher />
       </header>
 
       {/* Backdrop */}
@@ -78,10 +87,57 @@ export default function Header() {
           </Link>
         </nav>
 
+        {/* Instance management */}
+        <div className="px-3 py-3 border-t border-sidebar-border space-y-1">
+          <p className="px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
+            Instances
+          </p>
+          {Object.values(instances).map((inst) => (
+            <div
+              key={inst.id}
+              className={`flex items-center gap-2 px-3 py-1.5 text-sm ${
+                inst.id === activeInstance?.id ? 'bg-sidebar-accent' : ''
+              }`}
+            >
+              <button
+                onClick={() => {
+                  setActiveInstance(inst.id)
+                  close()
+                }}
+                className="flex-1 text-left truncate hover:text-sidebar-primary transition-colors"
+              >
+                {inst.label}
+              </button>
+              <button
+                onClick={() => removeInstance(inst.id)}
+                className="p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                aria-label={`Remove ${inst.label}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M4 4l6 6M10 4l-6 6" />
+                </svg>
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={() => {
+              close()
+              setShowAddInstance(true)
+            }}
+            className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:text-sidebar-primary transition-colors"
+          >
+            + Add Instance
+          </button>
+        </div>
+
         <div className="px-4 py-3 border-t border-sidebar-border">
           <p className="text-xs text-muted-foreground">oore.build v0.1.0</p>
         </div>
       </aside>
+
+      {showAddInstance ? (
+        <AddInstanceDialog onClose={() => setShowAddInstance(false)} />
+      ) : null}
     </>
   )
 }

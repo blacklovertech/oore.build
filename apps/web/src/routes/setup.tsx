@@ -1,15 +1,17 @@
-import { createFileRoute, isRedirect, Outlet, redirect, useNavigate } from '@tanstack/react-router'
+import { Outlet, createFileRoute, isRedirect, redirect, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { useSetupStore } from '@/stores/setup-store'
 import { useSessionCountdown } from '@/hooks/use-session-countdown'
 import { getSetupStatus } from '@/lib/api'
+import { getActiveInstanceOrRedirect } from '@/lib/instance-context'
 
 export const Route = createFileRoute('/setup')({
   beforeLoad: async () => {
+    const instance = getActiveInstanceOrRedirect()
     try {
-      const status = await getSetupStatus()
+      const status = await getSetupStatus(instance.url)
       if (status.is_configured) {
         throw redirect({ to: '/' })
       }

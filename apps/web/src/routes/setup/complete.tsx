@@ -1,4 +1,4 @@
-import { createFileRoute, Link, redirect } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -6,13 +6,12 @@ import { Badge } from '@/components/ui/badge'
 import { useCompleteSetup, useSetupStatus } from '@/hooks/use-setup'
 import { useSetupStore } from '@/stores/setup-store'
 import { getApiErrorMessage } from '@/lib/api'
+import { getActiveInstanceOrRedirect, requireSetupSessionOrRedirect } from '@/lib/instance-context'
 
 export const Route = createFileRoute('/setup/complete')({
   beforeLoad: () => {
-    const sessionToken = useSetupStore.getState().sessionToken
-    if (!sessionToken) {
-      throw redirect({ to: '/setup' })
-    }
+    const instance = getActiveInstanceOrRedirect()
+    requireSetupSessionOrRedirect(instance.id)
   },
   component: CompleteStep,
   errorComponent: CompleteStepError,

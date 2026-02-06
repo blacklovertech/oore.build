@@ -1,3 +1,12 @@
+// ── Instance registry ───────────────────────────────────────────
+
+export interface Instance {
+  id: string
+  label: string
+  url: string
+  addedAt: number
+}
+
 // ── Setup state machine ─────────────────────────────────────────
 
 export type SetupState =

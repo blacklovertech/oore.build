@@ -12,13 +12,19 @@ apps/web/
 │   │   ├── index.tsx     # Dashboard / home
 │   │   └── setup/        # Setup wizard routes
 │   ├── components/
-│   │   ├── Header.tsx    # Navigation header
-│   │   └── ui/           # shadcn component library
+│   │   ├── Header.tsx            # Navigation header
+│   │   ├── InstanceSwitcher.tsx  # Instance dropdown switcher
+│   │   ├── AddInstanceDialog.tsx # Modal for adding new instances
+│   │   └── ui/                   # shadcn component library
 │   ├── hooks/            # Custom React hooks
-│   ├── stores/           # Zustand stores (UI-local state only)
+│   ├── stores/
+│   │   ├── instance-store.ts  # Instance registry (Zustand + persist)
+│   │   └── ...                # Other Zustand stores (UI-local state only)
 │   ├── lib/
-│   │   ├── api.ts        # API client utilities
-│   │   └── types.ts      # TypeScript type definitions
+│   │   ├── api.ts              # API client utilities
+│   │   ├── types.ts            # TypeScript type definitions
+│   │   ├── instance-context.ts # Route guard helpers
+│   │   └── query-client.ts     # Shared QueryClient singleton
 │   └── main.tsx          # Application entry point
 ├── package.json
 ├── vite.config.ts
@@ -40,9 +46,25 @@ The root layout (`__root.tsx`) wraps the entire application with:
 - Development tools (TanStack DevTools, loaded lazily in dev mode)
 
 ```tsx
+export const Route = createRootRoute({
+  beforeLoad: () => {
+    // Sync setup store instance context before child route guards
+    const activeId = useInstanceStore.getState().activeInstanceId
+    if (activeId) {
+      syncSetupStoreContext(activeId)
+    }
+  },
+  component: RootLayout,
+})
+
 function RootLayout() {
   const matches = useMatches()
   const isSetupRoute = matches.some((m) => m.fullPath.startsWith('/setup'))
+  const activeInstanceId = useInstanceStore((s) => s.activeInstanceId)
+
+  useEffect(() => {
+    useSetupStore.getState().setInstanceContext(activeInstanceId)
+  }, [activeInstanceId])
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -68,6 +90,8 @@ All data fetched from the backend API is managed by TanStack Query. This include
 
 TanStack Query handles caching, background refetching, and cache invalidation.
 
+The `QueryClient` is exported as a shared singleton from `lib/query-client.ts`:
+
 ```tsx
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -79,6 +103,8 @@ const queryClient = new QueryClient({
 })
 ```
 
+Query keys are prefixed with the active instance ID to partition caches between instances. For example, the setup status query uses `[instanceId, 'setup-status']` as its key. When an instance is removed, its query cache entries are evicted via `queryClient.removeQueries({ queryKey: [instanceId] })`.
+
 ### UI state -- Zustand
 
 Zustand manages UI-local state only. It is never used for server data.
@@ -87,8 +113,8 @@ Examples of UI-local state:
 
 - Active setup wizard step
 - Panel layout preferences
-- Selected backend instance context
-- Sidebar open/closed state
+- Instance registry (add, remove, switch active backend)
+- Per-instance setup session context
 
 ::: danger
 Server data must never be duplicated in Zustand. This is a strict rule from the platform contract.
@@ -127,15 +153,58 @@ make ui-init
 
 ## Multi-instance support
 
-The frontend is designed to support connecting to multiple backend instances. This is a V1 requirement.
+The frontend supports connecting to multiple backend instances simultaneously. This is a V1 requirement from the [platform contract](/guide/overview).
 
-Key constraints:
+### Instance registry
 
-- Frontend must support add, remove, and switch operations for backend instances
-- Auth/session tokens are **isolated per instance**
-- TanStack Query caches are **partitioned by instance identifier**
-- Every API request is scoped to the currently active instance context
-- The UI must clearly show which instance is active in the navigation/header
+The `useInstanceStore` (Zustand with `persist` middleware) manages the list of known instances in `localStorage`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Client-generated UUID |
+| `label` | `string` | User-facing display name |
+| `url` | `string` | Backend base URL (empty string = same origin / Vite proxy) |
+| `addedAt` | `number` | Timestamp when instance was added |
+
+Actions: `addInstance`, `removeInstance`, `setActiveInstance`, `updateInstanceLabel`.
+
+When an instance is removed:
+1. Instance metadata is deleted from the registry
+2. Namespaced `sessionStorage` keys are cleared (`oore_setup_session_{id}`, `oore_setup_session_expires_{id}`)
+3. Query cache entries scoped to that instance are evicted
+4. If the removed instance was active, the next available instance is auto-selected (or `null` if none remain)
+
+### API client scoping
+
+All API functions accept `baseUrl` as their first parameter:
+- **Empty string** (`''`): requests use relative paths, hitting the Vite dev proxy in development
+- **Full URL** (e.g. `https://ci.example.com`): requests are routed to that backend
+
+### Query cache partitioning
+
+Query keys are prefixed with the active instance ID:
+```ts
+// Example: setup status query
+queryKey: [instanceId, 'setup-status']
+```
+
+Queries are automatically disabled when no instance is active (`enabled: !!instance`).
+
+### Route guards
+
+Setup routes use **guard-first** helpers in `lib/instance-context.ts` that run synchronously in TanStack Router's `beforeLoad`:
+
+- `getActiveInstanceOrRedirect()` — returns the active instance or redirects to `/`
+- `requireSetupSessionOrRedirect(instanceId)` — returns the session token or redirects to `/setup`
+
+These read directly from Zustand stores and `sessionStorage` (not React hooks). On full-page reloads (e.g. after OIDC redirects), a `localStorage` fallback handles the Zustand persist rehydration race.
+
+### Instance switcher
+
+The `InstanceSwitcher` component in the header provides:
+- Active instance label with dropdown toggle
+- List of all instances with click-to-switch
+- "Add Instance" action that opens the `AddInstanceDialog` modal
 
 ## Forms and validation
 

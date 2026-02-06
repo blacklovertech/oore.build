@@ -27,13 +27,12 @@ export class ApiClientError extends Error {
 
 // ── Fetch wrapper ───────────────────────────────────────────────
 
-const BASE_URL = ''
-
 async function request<T>(
+  baseUrl: string,
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -78,14 +77,16 @@ export function getApiErrorMessage(
 
 // ── API functions ───────────────────────────────────────────────
 
-export function getSetupStatus(): Promise<SetupStatus> {
-  return request<SetupStatus>('/v1/public/setup-status')
+export function getSetupStatus(baseUrl: string): Promise<SetupStatus> {
+  return request<SetupStatus>(baseUrl, '/v1/public/setup-status')
 }
 
 export function verifyBootstrapToken(
+  baseUrl: string,
   token: string,
 ): Promise<BootstrapTokenVerifyResponse> {
   return request<BootstrapTokenVerifyResponse>(
+    baseUrl,
     '/v1/setup/bootstrap-token/verify',
     {
       method: 'POST',
@@ -95,10 +96,11 @@ export function verifyBootstrapToken(
 }
 
 export function configureOidc(
+  baseUrl: string,
   sessionToken: string,
   data: OidcConfigureRequest,
 ): Promise<OidcConfigureResponse> {
-  return request<OidcConfigureResponse>('/v1/setup/oidc/configure', {
+  return request<OidcConfigureResponse>(baseUrl, '/v1/setup/oidc/configure', {
     method: 'POST',
     headers: authHeaders(sessionToken),
     body: JSON.stringify(data),
@@ -106,10 +108,11 @@ export function configureOidc(
 }
 
 export function setupOidcStart(
+  baseUrl: string,
   sessionToken: string,
   redirectUri: string,
 ): Promise<SetupOidcStartResponse> {
-  return request<SetupOidcStartResponse>('/v1/setup/owner/start-oidc', {
+  return request<SetupOidcStartResponse>(baseUrl, '/v1/setup/owner/start-oidc', {
     method: 'POST',
     headers: authHeaders(sessionToken),
     body: JSON.stringify({ redirect_uri: redirectUri }),
@@ -117,11 +120,12 @@ export function setupOidcStart(
 }
 
 export function setupOidcVerify(
+  baseUrl: string,
   sessionToken: string,
   code: string,
   state: string,
 ): Promise<SetupOidcVerifyResponse> {
-  return request<SetupOidcVerifyResponse>('/v1/setup/owner/verify-oidc', {
+  return request<SetupOidcVerifyResponse>(baseUrl, '/v1/setup/owner/verify-oidc', {
     method: 'POST',
     headers: authHeaders(sessionToken),
     body: JSON.stringify({ code, state }),
@@ -129,9 +133,10 @@ export function setupOidcVerify(
 }
 
 export function completeSetup(
+  baseUrl: string,
   sessionToken: string,
 ): Promise<SetupCompleteResponse> {
-  return request<SetupCompleteResponse>('/v1/setup/complete', {
+  return request<SetupCompleteResponse>(baseUrl, '/v1/setup/complete', {
     method: 'POST',
     headers: authHeaders(sessionToken),
   })

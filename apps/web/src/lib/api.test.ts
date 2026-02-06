@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiClientError,
+  completeSetup,
+  configureOidc,
   getApiErrorMessage,
   getSetupStatus,
   verifyBootstrapToken,
-  configureOidc,
-  completeSetup,
 } from '@/lib/api'
 
 // ── Mock global fetch ──────────────────────────────────────────
@@ -91,7 +91,7 @@ function mockJsonResponse(status: number, body: unknown) {
 }
 
 describe('getSetupStatus', () => {
-  it('calls GET /v1/public/setup-status', async () => {
+  it('calls GET /v1/public/setup-status with baseUrl', async () => {
     const payload = {
       instance_id: 'test-id',
       state: 'uninitialized',
@@ -100,21 +100,38 @@ describe('getSetupStatus', () => {
     }
     mockFetch.mockReturnValue(mockJsonResponse(200, payload))
 
-    const result = await getSetupStatus()
+    const result = await getSetupStatus('')
 
     expect(mockFetch).toHaveBeenCalledWith('/v1/public/setup-status', {
       headers: { 'Content-Type': 'application/json' },
     })
     expect(result).toEqual(payload)
   })
+
+  it('prepends baseUrl to path', async () => {
+    const payload = {
+      instance_id: 'test-id',
+      state: 'uninitialized',
+      setup_mode: true,
+      is_configured: false,
+    }
+    mockFetch.mockReturnValue(mockJsonResponse(200, payload))
+
+    await getSetupStatus('https://ci.example.com')
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://ci.example.com/v1/public/setup-status',
+      { headers: { 'Content-Type': 'application/json' } },
+    )
+  })
 })
 
 describe('verifyBootstrapToken', () => {
-  it('calls POST /v1/setup/bootstrap-token/verify with token', async () => {
+  it('calls POST /v1/setup/bootstrap-token/verify with baseUrl and token', async () => {
     const payload = { session_token: 'sess-abc', expires_at: 9999999 }
     mockFetch.mockReturnValue(mockJsonResponse(200, payload))
 
-    const result = await verifyBootstrapToken('my-token')
+    const result = await verifyBootstrapToken('', 'my-token')
 
     expect(mockFetch).toHaveBeenCalledWith(
       '/v1/setup/bootstrap-token/verify',
@@ -129,14 +146,14 @@ describe('verifyBootstrapToken', () => {
 })
 
 describe('configureOidc', () => {
-  it('calls POST /v1/setup/oidc/configure with auth header', async () => {
+  it('calls POST /v1/setup/oidc/configure with baseUrl and auth header', async () => {
     const payload = {
       state: 'idp_configured',
       discovered_issuer: 'https://issuer.example.com',
     }
     mockFetch.mockReturnValue(mockJsonResponse(200, payload))
 
-    const result = await configureOidc('sess-token', {
+    const result = await configureOidc('', 'sess-token', {
       issuer_url: 'https://issuer.example.com',
       client_id: 'cid',
     })
@@ -157,11 +174,11 @@ describe('configureOidc', () => {
 })
 
 describe('completeSetup', () => {
-  it('calls POST /v1/setup/complete with auth header', async () => {
+  it('calls POST /v1/setup/complete with baseUrl and auth header', async () => {
     const payload = { state: 'ready', instance_id: 'inst-1' }
     mockFetch.mockReturnValue(mockJsonResponse(200, payload))
 
-    const result = await completeSetup('sess-token')
+    const result = await completeSetup('', 'sess-token')
 
     expect(mockFetch).toHaveBeenCalledWith('/v1/setup/complete', {
       method: 'POST',
@@ -181,6 +198,6 @@ describe('completeSetup', () => {
       }),
     )
 
-    await expect(completeSetup('bad-token')).rejects.toThrow(ApiClientError)
+    await expect(completeSetup('', 'bad-token')).rejects.toThrow(ApiClientError)
   })
 })

@@ -31,10 +31,15 @@ A real-time countdown timer displays the remaining setup session time in `MM:SS`
 
 ## Route Guards
 
-Each step beyond Token uses a TanStack Router `beforeLoad` guard:
+Setup routes use a **guard-first** architecture with synchronous checks in TanStack Router's `beforeLoad`:
 
-- If no session token is present in the Zustand store, the guard redirects to `/setup`
-- The parent `/setup` route checks `is_configured` from the setup status API -- if `true`, it redirects to `/` (dashboard)
+- The parent `/setup` route checks `is_configured` from the setup status API — if `true`, it redirects to `/` (dashboard). It also requires an active instance via `getActiveInstanceOrRedirect()`.
+- Each step beyond Token uses `requireSetupSessionOrRedirect(instanceId)` which reads the session token directly from `sessionStorage` (namespaced by instance ID), not from the Zustand store.
+- Guards read directly from stores and `sessionStorage` — no React hooks, no `useEffect`. This avoids race conditions on full-page reloads (e.g. after OIDC provider redirects back).
+
+::: tip
+On full-page reloads, Zustand's persist middleware may not have rehydrated the instance store yet. Route guards fall back to reading `localStorage` directly to handle this race condition.
+:::
 
 ## Step Details
 
@@ -83,15 +88,16 @@ Warning text is displayed: "Make sure this matches your OIDC provider email -- t
 
 | Field | Type | Description |
 |---|---|---|
+| `instanceId` | `string \| null` | Active instance context |
 | `currentStep` | `number` | Active wizard step (0-3) |
 | `sessionToken` | `string \| null` | Setup session token |
 | `sessionExpiresAt` | `number \| null` | Session expiry (Unix epoch) |
 
-Session data is persisted to `sessionStorage` under:
-- `oore_setup_session` -- session token
-- `oore_setup_session_expires` -- expiry timestamp
+Session data is persisted to `sessionStorage`, namespaced by instance ID:
+- `oore_setup_session_{instanceId}` — session token
+- `oore_setup_session_expires_{instanceId}` — expiry timestamp
 
-The `reset()` method clears all state and removes `sessionStorage` entries.
+Calling `setInstanceContext(instanceId)` re-hydrates the token and expiry from the namespaced keys for that instance. The `reset()` method clears state and removes the namespaced `sessionStorage` entries for the current instance.
 
 ### TanStack Query Hooks
 
@@ -104,6 +110,8 @@ The `reset()` method clears all state and removes `sessionStorage` entries.
 | `useSetupOidcVerify` | `POST /v1/setup/owner/verify-oidc` | Invalidates status on success |
 | `useCompleteSetup` | `POST /v1/setup/complete` | Invalidates status on success |
 
+All query keys are prefixed with the active instance ID (e.g. `[instanceId, 'setup-status']`), partitioning caches between instances. Queries are disabled when no instance is active. Mutation functions throw a descriptive error if called without an active instance.
+
 ### Session Countdown Hook (`useSessionCountdown`)
 
 Returns:
@@ -113,7 +121,7 @@ Returns:
 
 ## Security Considerations
 
-- **Session token in `sessionStorage`**: Scoped to the browser tab, cleared on tab close (not `localStorage`)
+- **Session tokens in `sessionStorage`**: Namespaced by instance ID (`oore_setup_session_{instanceId}`), scoped to the browser tab, cleared on tab close
 - **Route guards**: Prevent accessing later steps without authentication
 - **Setup-complete redirect**: Prevents re-entry after setup is finished
 - **Session expiry auto-reset**: Prevents stale tokens from being used

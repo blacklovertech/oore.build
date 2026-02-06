@@ -56,6 +56,7 @@ export default defineConfig({
             link: "/features/oidc-authentication",
           },
           { text: "Setup Wizard UI", link: "/features/setup-wizard-ui" },
+          { text: "Multi-Instance", link: "/features/multi-instance" },
         ],
       },
       {

@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useConfigureOidc } from '@/hooks/use-setup'
 import { useSetupStore } from '@/stores/setup-store'
 import { getApiErrorMessage } from '@/lib/api'
+import { getActiveInstanceOrRedirect, requireSetupSessionOrRedirect } from '@/lib/instance-context'
 
 const oidcConfigSchema = z.object({
   issuerUrl: z.url('Please enter a valid URL'),
@@ -21,10 +22,8 @@ type OidcConfigForm = z.infer<typeof oidcConfigSchema>
 
 export const Route = createFileRoute('/setup/oidc')({
   beforeLoad: () => {
-    const sessionToken = useSetupStore.getState().sessionToken
-    if (!sessionToken) {
-      throw redirect({ to: '/setup' })
-    }
+    const instance = getActiveInstanceOrRedirect()
+    requireSetupSessionOrRedirect(instance.id)
   },
   component: OidcConfigStep,
   errorComponent: OidcConfigError,

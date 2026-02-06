@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { useVerifyBootstrapToken, useSetupStatus } from '@/hooks/use-setup'
+import { useSetupStatus, useVerifyBootstrapToken } from '@/hooks/use-setup'
 import { useSetupStore } from '@/stores/setup-store'
 import { getApiErrorMessage } from '@/lib/api'
 
@@ -18,6 +18,10 @@ const bootstrapTokenSchema = z.object({
 type BootstrapTokenForm = z.infer<typeof bootstrapTokenSchema>
 
 export const Route = createFileRoute('/setup/')({
+  beforeLoad: () => {
+    // Instance guard is handled by the parent /setup route.
+    // No session token required for the bootstrap step.
+  },
   component: BootstrapTokenStep,
   errorComponent: BootstrapTokenError,
 })
