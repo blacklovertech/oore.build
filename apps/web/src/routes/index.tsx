@@ -46,17 +46,25 @@ function IndexPage() {
 
   if (status?.is_configured) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            oore.build
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Instance <code className="bg-muted px-1 py-0.5 text-xs">{status.instance_id}</code> is ready.
-          </p>
-          <p className="text-muted-foreground text-xs">
-            Dashboard coming soon.
-          </p>
+      <div className="min-h-screen bg-background">
+        <div className="max-w-4xl mx-auto px-6 py-16 space-y-8">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Dashboard
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Instance{' '}
+              <code className="bg-muted px-1.5 py-0.5 text-xs font-mono">
+                {status.instance_id}
+              </code>
+            </p>
+          </div>
+          <div className="border border-border bg-card p-6">
+            <p className="text-sm text-muted-foreground">
+              Your oore.build instance is configured and ready. Build pipelines
+              and runner management are coming in the next release.
+            </p>
+          </div>
         </div>
       </div>
     )

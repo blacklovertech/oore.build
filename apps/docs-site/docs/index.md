@@ -1,15 +1,23 @@
-# oore.build Documentation
+---
+layout: home
 
-This is the VitePress placeholder for the static documentation site.
+hero:
+  name: oore.build
+  text: Self-hosted mobile CI
+  tagline: Flutter-first build system with internal app distribution. OIDC-secured, macOS-native, no vendor lock-in.
+  actions:
+    - theme: brand
+      text: Get Started
+      link: /guide/overview
+    - theme: alt
+      text: View on GitHub
+      link: https://github.com/devaryakjha/oore.build
 
-## Purpose
-
-- Host product and engineering documentation.
-- Publish versioned docs for self-hosted users.
-- Serve as the canonical docs frontend for release docs.
-
-## Next Steps
-
-- Wire content sync from root `docs/` into this site structure.
-- Add versioning and search.
-- Add API reference pages.
+features:
+  - title: Self-Hosted CI
+    details: Run your own build infrastructure on macOS. Full control over your build pipeline, signing keys, and artifacts with no data leaving your network.
+  - title: Flutter-First
+    details: Purpose-built for Flutter with first-class Android, iOS, and macOS build support. Optimized workflows for the Flutter development lifecycle.
+  - title: OIDC Security
+    details: Enterprise-grade authentication via OpenID Connect. Integrate with your existing identity provider — no local passwords, no shared secrets.
+---
