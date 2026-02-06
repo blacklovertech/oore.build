@@ -40,7 +40,7 @@ async fn create_test_app(db_path: &Path) -> Router {
         .init_if_missing()
         .await
         .expect("failed to init database");
-    build_test_router(store, TEST_ENCRYPTION_KEY.to_vec())
+    build_test_router(store, TEST_ENCRYPTION_KEY.to_vec()).await
 }
 
 /// Connect to the test database at `path` and return the store.
@@ -757,7 +757,7 @@ async fn test_all_setup_endpoints_blocked_after_ready() {
     let store = SetupStore::connect(db_path.to_path_buf())
         .await
         .expect("failed to connect to database");
-    let app = build_test_router(store, TEST_ENCRYPTION_KEY.to_vec());
+    let app = build_test_router(store, TEST_ENCRYPTION_KEY.to_vec()).await;
 
     // 1. Bootstrap token verify → 409
     let resp = app

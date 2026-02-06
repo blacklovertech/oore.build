@@ -8,6 +8,7 @@ use oore_contract::{
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::util::now_unix;
@@ -138,6 +139,61 @@ impl SetupStore {
         Ok(())
     }
 
+    /// Return a reference to the underlying connection pool.
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
+    /// Ensure the owner user row exists in the `users` table.
+    ///
+    /// Called on startup after migrations. If `setup_state == Ready` and the
+    /// `users` table has zero rows, backfill the owner from the setup state
+    /// file. This handles existing instances upgraded from before migration 002.
+    pub async fn ensure_owner_user(&self) -> anyhow::Result<()> {
+        let sf = self.load().await?;
+        if sf.setup_state != SetupState::Ready {
+            return Ok(());
+        }
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&self.pool)
+            .await
+            .context("failed to count users")?;
+
+        if count > 0 {
+            return Ok(());
+        }
+
+        let owner = sf.owner.as_ref().context("setup is Ready but no owner record exists")?;
+        let oidc_subject = owner
+            .oidc_subject
+            .as_ref()
+            .context("owner record missing oidc_subject")?;
+
+        let user_id = Uuid::new_v4().to_string();
+        let now = now_unix();
+
+        sqlx::query(
+            "INSERT INTO users (id, email, oidc_subject, display_name, role, status, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'owner', 'active', ?5, ?5)",
+        )
+        .bind(&user_id)
+        .bind(&owner.email)
+        .bind(oidc_subject)
+        .bind(&owner.email)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .context("failed to backfill owner user")?;
+
+        // Audit log
+        write_audit_log(&self.pool, Some(&user_id), "owner_backfilled", "user", Some(&user_id), None)
+            .await?;
+
+        info!(email = %owner.email, "backfilled owner user from setup state");
+        Ok(())
+    }
+
     /// If no setup state row exists, create one with initial
     /// `BootstrapPending` state, a fresh UUID instance id, and the current
     /// timestamp. If it already exists, just load and return it.
@@ -199,6 +255,32 @@ fn str_to_setup_state(s: &str) -> anyhow::Result<SetupState> {
         "ready" => Ok(SetupState::Ready),
         other => bail!("unknown setup state: {other}"),
     }
+}
+
+/// Write an entry to the audit_logs table.
+pub async fn write_audit_log(
+    pool: &SqlitePool,
+    actor_id: Option<&str>,
+    action: &str,
+    resource_type: &str,
+    resource_id: Option<&str>,
+    details: Option<&str>,
+) -> anyhow::Result<()> {
+    let now = now_unix();
+    sqlx::query(
+        "INSERT INTO audit_logs (actor_id, action, resource_type, resource_id, details, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+    .bind(actor_id)
+    .bind(action)
+    .bind(resource_type)
+    .bind(resource_id)
+    .bind(details)
+    .bind(now)
+    .execute(pool)
+    .await
+    .context("failed to write audit log")?;
+    Ok(())
 }
 
 fn row_to_state_file(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<SetupStateFile> {

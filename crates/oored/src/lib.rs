@@ -1,10 +1,13 @@
 pub mod auth;
 pub mod crypto;
+pub mod extractors;
 pub mod observability;
 pub mod oidc;
+pub mod rbac;
 pub mod session;
 pub mod store;
 pub mod token;
+pub mod users;
 pub mod util;
 
 use std::collections::HashMap;
@@ -37,7 +40,7 @@ use tracing::{error, info, warn};
 
 use crate::auth::{PendingAuth, build_http_client, load_oidc_config_for_setup};
 use crate::session::SessionStore;
-use crate::store::SetupStore;
+use crate::store::{SetupStore, write_audit_log};
 use crate::token::{generate_session_token, hash_token};
 use crate::util::{api_err, extract_bearer, now_unix};
 
@@ -45,11 +48,13 @@ use crate::util::{api_err, extract_bearer, now_unix};
 
 pub struct AppState {
     pub store: Mutex<SetupStore>,
-    pub sessions: Mutex<SessionStore>,
+    pub sessions: SessionStore,
     pub pending_auth: Mutex<HashMap<String, PendingAuth>>,
     /// AES-256 encryption key used to encrypt secrets at rest.
     /// Wrapped in Zeroizing so the key is zeroed on drop.
     pub encryption_key: Zeroizing<Vec<u8>>,
+    /// Casbin RBAC enforcer for permission checks.
+    pub enforcer: rbac::CasbinEnforcer,
     /// When true, `configure_oidc` skips the real OIDC discovery HTTP call
     /// and populates the config from the raw request values with placeholder
     /// endpoint URLs. Only available with test-support feature or in tests.
@@ -88,7 +93,7 @@ fn should_skip_oidc_discovery(state: &AppState) -> bool {
 }
 
 /// Validate a redirect_uri: must be http://localhost or http://127.0.0.1 (any port).
-fn validate_redirect_uri(uri: &str) -> Result<(), (StatusCode, Json<ApiError>)> {
+pub fn validate_redirect_uri(uri: &str) -> Result<(), (StatusCode, Json<ApiError>)> {
     let parsed = url::Url::parse(uri).map_err(|_| {
         api_err(StatusCode::BAD_REQUEST, "invalid_redirect_uri", "redirect_uri is not a valid URL")
     })?;
@@ -98,6 +103,15 @@ fn validate_redirect_uri(uri: &str) -> Result<(), (StatusCode, Json<ApiError>)> 
             StatusCode::BAD_REQUEST,
             "invalid_redirect_uri",
             "redirect_uri must use http scheme",
+        ));
+    }
+
+    // Reject URLs with embedded credentials
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_redirect_uri",
+            "redirect_uri must not contain credentials",
         ));
     }
 
@@ -746,6 +760,34 @@ async fn complete_setup(
         api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to save setup state")
     })?;
 
+    // Insert owner into users table
+    if let Some(ref owner) = sf.owner {
+        if let Some(ref oidc_subject) = owner.oidc_subject {
+            let user_id = uuid::Uuid::new_v4().to_string();
+            let pool = store.pool();
+
+            sqlx::query(
+                "INSERT OR IGNORE INTO users (id, email, oidc_subject, display_name, role, status, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, 'owner', 'active', ?5, ?5)",
+            )
+            .bind(&user_id)
+            .bind(&owner.email)
+            .bind(oidc_subject)
+            .bind(&owner.email)
+            .bind(now)
+            .execute(pool)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to insert owner user");
+                api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to create owner user")
+            })?;
+
+            let _ = write_audit_log(pool, Some(&user_id), "owner_created", "user", Some(&user_id), None).await;
+
+            info!(email = %owner.email, "owner user created in users table");
+        }
+    }
+
     Ok(Json(SetupCompleteResponse {
         state: SetupState::Ready,
         instance_id,
@@ -756,8 +798,8 @@ async fn complete_setup(
 
 /// Build the Axum router with all setup and auth endpoints, given a `SetupStore`,
 /// the AES-256 encryption key for secrets at rest, and a Prometheus metrics handle.
-pub fn build_router(store: SetupStore, encryption_key: Vec<u8>, metrics_handle: PrometheusHandle) -> Router {
-    build_router_inner(store, encryption_key, false, metrics_handle)
+pub async fn build_router(store: SetupStore, encryption_key: Vec<u8>, metrics_handle: PrometheusHandle) -> Router {
+    build_router_inner(store, encryption_key, false, metrics_handle).await
 }
 
 /// Build a test router that skips real OIDC discovery in `configure_oidc`.
@@ -765,19 +807,28 @@ pub fn build_router(store: SetupStore, encryption_key: Vec<u8>, metrics_handle: 
 /// This allows integration tests to exercise the full setup flow without
 /// making any network calls.
 #[cfg(any(test, feature = "test-support"))]
-pub fn build_test_router(store: SetupStore, encryption_key: Vec<u8>) -> Router {
-    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .install_recorder()
-        .expect("failed to install test metrics recorder");
-    build_router_inner(store, encryption_key, true, metrics_handle)
+pub async fn build_test_router(store: SetupStore, encryption_key: Vec<u8>) -> Router {
+    use std::sync::OnceLock;
+    static TEST_METRICS: OnceLock<PrometheusHandle> = OnceLock::new();
+    let metrics_handle = TEST_METRICS
+        .get_or_init(|| {
+            metrics_exporter_prometheus::PrometheusBuilder::new()
+                .install_recorder()
+                .expect("failed to install test metrics recorder")
+        })
+        .clone();
+    build_router_inner(store, encryption_key, true, metrics_handle).await
 }
 
-fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oidc_discovery: bool, metrics_handle: PrometheusHandle) -> Router {
+async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oidc_discovery: bool, metrics_handle: PrometheusHandle) -> Router {
+    let session_store = SessionStore::new(store.pool().clone());
+    let enforcer = rbac::init_enforcer().await.expect("failed to initialise RBAC enforcer");
     let shared_state = Arc::new(AppState {
         store: Mutex::new(store),
-        sessions: Mutex::new(SessionStore::new()),
+        sessions: session_store,
         pending_auth: Mutex::new(HashMap::new()),
         encryption_key: Zeroizing::new(encryption_key),
+        enforcer,
         #[cfg(any(test, feature = "test-support"))]
         skip_oidc_discovery: _skip_oidc_discovery,
         bootstrap_failures: Mutex::new(HashMap::new()),
@@ -789,7 +840,7 @@ fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oidc_dis
 
     let cors = CorsLayer::new()
         .allow_origin([cors_origin.parse().expect("OORE_CORS_ORIGIN must be a valid header value")])
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     Router::new()
@@ -805,8 +856,15 @@ fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oidc_dis
         .route("/v1/setup/complete", post(complete_setup))
         // Auth endpoints (only functional when setup_state == Ready)
         .route("/v1/auth/oidc/start", get(auth::oidc_start))
-        .route("/v1/auth/oidc/callback", get(auth::oidc_callback))
+        .route("/v1/auth/oidc/callback", post(auth::oidc_callback))
         .route("/v1/auth/logout", post(auth::logout))
+        // User management endpoints
+        .route("/v1/users/me", get(users::get_me))
+        .route("/v1/users", get(users::list_users))
+        .route("/v1/users/invite", post(users::invite_user))
+        .route("/v1/users/{user_id}/role", axum::routing::patch(users::update_user_role))
+        .route("/v1/users/{user_id}", axum::routing::delete(users::delete_user))
+        .route("/v1/users/{user_id}/enable", post(users::re_enable_user))
         .layer(cors)
         .with_state(shared_state)
         // Merge the Prometheus /metrics endpoint (uses its own state)

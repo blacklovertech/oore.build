@@ -244,13 +244,121 @@ pub struct OidcCallbackResponse {
     pub user: AuthenticatedUser,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticatedUser {
     pub email: String,
     pub oidc_subject: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LogoutResponse {
     pub ok: bool,
+}
+
+// ── User management types ───────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UserRole {
+    Owner,
+    Admin,
+    Developer,
+    QaViewer,
+}
+
+impl std::fmt::Display for UserRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Owner => "owner",
+            Self::Admin => "admin",
+            Self::Developer => "developer",
+            Self::QaViewer => "qa_viewer",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::str::FromStr for UserRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "owner" => Ok(Self::Owner),
+            "admin" => Ok(Self::Admin),
+            "developer" => Ok(Self::Developer),
+            "qa_viewer" => Ok(Self::QaViewer),
+            other => Err(format!("unknown user role: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UserStatus {
+    Active,
+    Disabled,
+    Invited,
+}
+
+impl std::fmt::Display for UserStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Active => "active",
+            Self::Disabled => "disabled",
+            Self::Invited => "invited",
+        };
+        f.write_str(s)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: String,
+    pub email: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub role: String,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InviteUserRequest {
+    pub email: String,
+    pub role: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InviteUserResponse {
+    pub user: User,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateUserRoleRequest {
+    pub role: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateUserRoleResponse {
+    pub user: User,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReEnableUserResponse {
+    pub user: User,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListUsersResponse {
+    pub users: Vec<User>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserProfileResponse {
+    pub user: User,
 }

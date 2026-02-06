@@ -57,6 +57,14 @@ export default defineConfig({
           },
           { text: "Setup Wizard UI", link: "/features/setup-wizard-ui" },
           { text: "Multi-Instance", link: "/features/multi-instance" },
+          {
+            text: "Roles & Permissions",
+            link: "/features/rbac",
+          },
+          {
+            text: "User Management",
+            link: "/features/user-management",
+          },
         ],
       },
       {
@@ -65,6 +73,7 @@ export default defineConfig({
           { text: "Overview", link: "/api/overview" },
           { text: "Setup API", link: "/api/setup" },
           { text: "Auth API", link: "/api/auth" },
+          { text: "Users API", link: "/api/users" },
         ],
       },
       {

@@ -1,12 +1,20 @@
 import type {
   ApiError,
   BootstrapTokenVerifyResponse,
+  InviteUserRequest,
+  InviteUserResponse,
+  ListUsersResponse,
+  LogoutResponse,
   OidcConfigureRequest,
   OidcConfigureResponse,
+  ReEnableUserResponse,
   SetupCompleteResponse,
   SetupOidcStartResponse,
   SetupOidcVerifyResponse,
   SetupStatus,
+  UpdateUserRoleRequest,
+  UpdateUserRoleResponse,
+  UserProfileResponse,
 } from '@/lib/types'
 
 // ── Error class ─────────────────────────────────────────────────
@@ -139,5 +147,82 @@ export function completeSetup(
   return request<SetupCompleteResponse>(baseUrl, '/v1/setup/complete', {
     method: 'POST',
     headers: authHeaders(sessionToken),
+  })
+}
+
+// ── User management API ─────────────────────────────────────────
+
+export function getMe(
+  baseUrl: string,
+  token: string,
+): Promise<UserProfileResponse> {
+  return request<UserProfileResponse>(baseUrl, '/v1/users/me', {
+    headers: authHeaders(token),
+  })
+}
+
+export function listUsers(
+  baseUrl: string,
+  token: string,
+): Promise<ListUsersResponse> {
+  return request<ListUsersResponse>(baseUrl, '/v1/users', {
+    headers: authHeaders(token),
+  })
+}
+
+export function inviteUser(
+  baseUrl: string,
+  token: string,
+  data: InviteUserRequest,
+): Promise<InviteUserResponse> {
+  return request<InviteUserResponse>(baseUrl, '/v1/users/invite', {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateUserRole(
+  baseUrl: string,
+  token: string,
+  userId: string,
+  data: UpdateUserRoleRequest,
+): Promise<UpdateUserRoleResponse> {
+  return request<UpdateUserRoleResponse>(baseUrl, `/v1/users/${userId}/role`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify(data),
+  })
+}
+
+export function reEnableUser(
+  baseUrl: string,
+  token: string,
+  userId: string,
+): Promise<ReEnableUserResponse> {
+  return request<ReEnableUserResponse>(baseUrl, `/v1/users/${userId}/enable`, {
+    method: 'POST',
+    headers: authHeaders(token),
+  })
+}
+
+export function deleteUser(
+  baseUrl: string,
+  token: string,
+  userId: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(baseUrl, `/v1/users/${userId}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  })
+}
+
+export function logout(
+  baseUrl: string,
+  token: string,
+): Promise<LogoutResponse> {
+  return request<LogoutResponse>(baseUrl, '/v1/auth/logout', {
+    method: 'POST',
+    headers: authHeaders(token),
   })
 }

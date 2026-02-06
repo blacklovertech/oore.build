@@ -2,6 +2,8 @@ import { Link } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
 import InstanceSwitcher from '@/components/InstanceSwitcher'
 import { useActiveInstance, useInstanceStore } from '@/stores/instance-store'
+import { useAuthStore } from '@/stores/auth-store'
+import { useLogout } from '@/hooks/use-auth'
 import AddInstanceDialog from '@/components/AddInstanceDialog'
 
 export default function Header() {
@@ -11,6 +13,10 @@ export default function Header() {
   const activeInstance = useActiveInstance()
   const setActiveInstance = useInstanceStore((s) => s.setActiveInstance)
   const removeInstance = useInstanceStore((s) => s.removeInstance)
+  const authUser = useAuthStore((s) => s.user)
+  const authToken = useAuthStore((s) => s.token)
+  const logoutMutation = useLogout()
+  const isAdmin = authUser?.role === 'owner' || authUser?.role === 'admin'
 
   const close = useCallback(() => setIsOpen(false), [])
 
@@ -39,6 +45,20 @@ export default function Header() {
         <Link to="/" className="text-sidebar-foreground hover:text-sidebar-primary transition-colors flex-1">
           <span className="text-lg font-semibold tracking-tight">oore.build</span>
         </Link>
+        {authToken && authUser ? (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground hidden sm:inline">
+              {authUser.email}
+            </span>
+            <button
+              onClick={() => logoutMutation.mutate()}
+              disabled={logoutMutation.isPending}
+              className="text-xs text-muted-foreground hover:text-sidebar-foreground transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        ) : null}
         <InstanceSwitcher />
       </header>
 
@@ -85,6 +105,19 @@ export default function Header() {
           >
             Dashboard
           </Link>
+          {isAdmin ? (
+            <Link
+              to="/settings/users"
+              onClick={close}
+              className="flex items-center gap-3 px-3 py-2 text-sm font-medium hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              activeProps={{
+                className:
+                  'flex items-center gap-3 px-3 py-2 text-sm font-medium bg-sidebar-primary text-sidebar-primary-foreground',
+              }}
+            >
+              Users
+            </Link>
+          ) : null}
         </nav>
 
         {/* Instance management */}

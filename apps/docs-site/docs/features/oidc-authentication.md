@@ -6,6 +6,8 @@ oore.build uses OpenID Connect (OIDC) as its sole authentication mechanism. Ther
 
 After [setup is complete](/features/setup-wizard), users authenticate through the configured OIDC identity provider (e.g., Google, Okta, Auth0). The authentication flow uses the Authorization Code grant with PKCE (Proof Key for Code Exchange) for security.
 
+Only users who have been [invited](/features/user-management) (or the owner created during setup) can log in. Unknown OIDC identities are rejected with `403 Forbidden`.
+
 ::: info
 Auth endpoints are only available when the instance is in `ready` state. They return `409 Conflict` if setup is not complete.
 :::
@@ -25,7 +27,7 @@ Browser                  oore daemon              Identity Provider
   |                          |                          |
   |<- Redirect with code, state -----------------------|
   |                          |                          |
-  |-- GET /auth/oidc/callback ->|                       |
+  |-- POST /auth/oidc/callback ->|                      |
   |                          |-- Exchange code -------->|
   |                          |<- ID token + tokens -----|
   |                          |                          |
@@ -54,7 +56,7 @@ The client redirects the user to the `authorization_url`. The user authenticates
 
 ### Step 3: Callback
 
-The IdP redirects back to the callback URL with `code` and `state` query parameters. The daemon handles `GET /v1/auth/oidc/callback`:
+The frontend receives the authorization code and state from the IdP redirect, then calls `POST /v1/auth/oidc/callback` with a JSON body:
 
 1. Validates the CSRF state parameter against stored pending auth entries
 2. Checks that the pending auth request has not expired (10-minute TTL)
@@ -64,8 +66,11 @@ The IdP redirects back to the callback URL with `code` and `state` query paramet
    - Nonce validation
    - Standard claim validation
 5. Extracts `email` and `subject` from the ID token claims
-6. Creates a session with a 24-hour TTL
-7. Returns the session token, expiry, and user info
+6. Looks up the user by OIDC subject in the `users` table (must be `active` or `invited`)
+7. If the user is `invited`, activates them (sets their OIDC subject and status to `active`)
+8. If no matching user exists, rejects the login with `403 Forbidden`
+9. Creates a session with a 24-hour TTL, linked to the user record
+10. Returns the session token, expiry, and user info (including `user_id` and `role`)
 
 ## Session Management
 
@@ -75,17 +80,17 @@ Sessions are created after a successful OIDC callback. Each session contains:
 
 | Field | Description |
 |---|---|
-| `user_email` | Email address from the ID token |
-| `oidc_subject` | OIDC subject identifier |
+| `token_hash` | SHA-256 hash of the session token (primary key) |
+| `user_id` | Foreign key to the `users` table |
 | `created_at` | Unix timestamp of session creation |
 | `expires_at` | Unix timestamp of session expiry (24 hours from creation) |
 
 ### Session Storage
 
-- Sessions are stored **in-memory** using a `HashMap` behind a `Mutex`
-- Session tokens are hashed with SHA-256 before use as map keys
-- The plaintext session token is returned to the client and never stored
-- Sessions do not survive daemon restarts (by design in V1)
+- Sessions are stored in **SQLite** and survive daemon restarts
+- Session tokens are hashed with SHA-256 before storage
+- The plaintext session token is returned to the client exactly once and never persisted
+- Sessions are linked to user records via a foreign key with `CASCADE` delete (disabling a user removes their sessions)
 
 ### Session Validation
 
@@ -95,11 +100,19 @@ To validate a session, the client includes the session token as a Bearer token:
 Authorization: Bearer <session_token>
 ```
 
-The daemon hashes the provided token and looks up the session in the store. The session is valid if it exists and has not expired.
+The daemon hashes the provided token and looks up the session in SQLite, JOINing with the `users` table to retrieve the user's current role and status. A session is valid if:
+
+- It exists in the database
+- It has not expired
+- The associated user's status is `active`
+
+This means that if a user is disabled, all their sessions become immediately invalid even before explicit revocation.
 
 ### Session Revocation
 
-Sessions can be explicitly revoked via `POST /v1/auth/logout`. This removes the session entry from the in-memory store. The session token becomes immediately invalid.
+Sessions can be explicitly revoked via `POST /v1/auth/logout`. This removes the session entry from SQLite. The session token becomes immediately invalid.
+
+When a user is [disabled](/features/user-management), all their sessions are revoked automatically.
 
 ## Scopes Requested
 

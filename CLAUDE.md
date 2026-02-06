@@ -10,6 +10,7 @@ Before making any code or architecture change, read these files (they are the so
 - `docs/strict-guidelines.md` — mandatory rules
 - `docs/documentation-policy.md` — CI documentation requirements
 - `AGENTS.md` — agent-specific guidance
+- `docs/v1-roadmap.md` — implementation phases and progress
 
 ## What This Project Is
 
@@ -102,6 +103,10 @@ When adding new build scripts, test commands, or tooling workflows, add a corres
 - shadcn uses Base UI primitives (not Radix)
 - Every user-facing feature requires a doc in `docs/features/` following `docs/templates/feature-doc-template.md`
 - Changing a finalized decision requires: ADR + contract update + feature doc update
+
+## V1 Roadmap
+
+`docs/v1-roadmap.md` tracks remaining implementation phases. Update it when completing phases or discovering new work. The roadmap sequences existing platform-contract commitments — it does not override them.
 
 ## Documentation Standards
 When generating or updating documentation, always check for existing CLAUDE.md, README.md, and docs/ directory first. Preserve existing content and append/update rather than overwriting.

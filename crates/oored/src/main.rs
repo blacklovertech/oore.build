@@ -69,6 +69,12 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
         "database ready"
     );
 
+    // Backfill owner user if upgrading from before migration 002
+    store
+        .ensure_owner_user()
+        .await
+        .context("failed to ensure owner user")?;
+
     // Load or generate the AES-256 encryption key for secrets at rest
     let key_path = crypto::resolve_key_path()
         .context("failed to resolve encryption key path")?;
@@ -76,7 +82,7 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
         .context("failed to load or generate encryption key")?;
     info!(path = %key_path.display(), "encryption key ready");
 
-    let app = build_router(store, encryption_key, metrics_handle);
+    let app = build_router(store, encryption_key, metrics_handle).await;
 
     info!(listen = %addr, "starting oored daemon");
 

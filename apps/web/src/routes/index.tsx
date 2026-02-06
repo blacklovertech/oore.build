@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { useSetupStatus } from '@/hooks/use-setup'
 import { useActiveInstance } from '@/stores/instance-store'
+import { useAuthStore } from '@/stores/auth-store'
 import AddInstanceDialog from '@/components/AddInstanceDialog'
 
 export const Route = createFileRoute('/')({
@@ -16,6 +17,9 @@ function IndexPage() {
   const { data: status, isLoading, error } = useSetupStatus()
   const navigate = useNavigate()
   const [showAddInstance, setShowAddInstance] = useState(false)
+  const authToken = useAuthStore((s) => s.token)
+  const authExpiresAt = useAuthStore((s) => s.expiresAt)
+  const clearAuth = useAuthStore((s) => s.clearAuth)
 
   useEffect(() => {
     document.title = 'oore.build'
@@ -26,6 +30,18 @@ function IndexPage() {
       void navigate({ to: '/setup' })
     }
   }, [status?.setup_mode, navigate])
+
+  // When configured but not authenticated (or token expired), redirect to login
+  useEffect(() => {
+    if (status?.is_configured) {
+      const now = Math.floor(Date.now() / 1000)
+      const valid = !!authToken && authExpiresAt != null && authExpiresAt > now
+      if (!valid) {
+        clearAuth()
+        void navigate({ to: '/login' })
+      }
+    }
+  }, [status?.is_configured, authToken, authExpiresAt, clearAuth, navigate])
 
   // No active instance — show onboarding
   if (!instance) {

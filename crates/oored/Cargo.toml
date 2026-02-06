@@ -10,6 +10,7 @@ test-support = []
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+casbin.workspace = true
 clap.workspace = true
 dirs.workspace = true
 hex.workspace = true

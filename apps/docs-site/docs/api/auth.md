@@ -72,19 +72,26 @@ curl "http://127.0.0.1:8787/v1/auth/oidc/start?redirect_uri=http://localhost:300
 
 ## OIDC Callback {#oidc-callback}
 
-Handle the OIDC callback from the identity provider. Validates the CSRF state, exchanges the authorization code for tokens using the PKCE verifier, verifies the ID token, and creates a session.
+Handle the OIDC callback. Validates the CSRF state, exchanges the authorization code for tokens using the PKCE verifier, verifies the ID token, looks up the user, and creates a session.
 
 ```
-GET /v1/auth/oidc/callback
+POST /v1/auth/oidc/callback
 ```
 
-**Authentication**: None (public -- called by the IdP redirect)
+**Authentication**: None (public)
 
 **State requirement**: `ready` only (enforced by the OIDC config loader)
 
-### Query Parameters
+### Request Body
 
-| Parameter | Type | Required | Description |
+```json
+{
+  "code": "4/0AX4XfWh...",
+  "state": "abc123-csrf-state-token"
+}
+```
+
+| Field | Type | Required | Description |
 |---|---|---|---|
 | `code` | `string` | Yes | Authorization code returned by the IdP |
 | `state` | `string` | Yes | CSRF state token (must match a pending auth entry) |
@@ -97,7 +104,9 @@ GET /v1/auth/oidc/callback
   "expires_at": 1738886400,
   "user": {
     "email": "user@example.com",
-    "oidc_subject": "110123456789012345678"
+    "oidc_subject": "110123456789012345678",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "role": "developer"
   }
 }
 ```
@@ -108,6 +117,20 @@ GET /v1/auth/oidc/callback
 | `expires_at` | `integer` | Session expiry as Unix epoch (seconds) |
 | `user.email` | `string` | Email address from the ID token |
 | `user.oidc_subject` | `string` | OIDC subject identifier from the ID token |
+| `user.user_id` | `string` | User UUID from the `users` table |
+| `user.role` | `string` | User's role (`owner`, `admin`, `developer`, `qa_viewer`) |
+
+### User Lookup
+
+After verifying the ID token, the callback performs user lookup:
+
+1. Looks up the user by `oidc_subject` in the `users` table
+2. If found and `active`, proceeds to create a session
+3. If not found by subject, looks for an `invited` user with a matching email
+4. If an invited user is found, activates them (sets `oidc_subject`, transitions to `active`)
+5. If no matching user exists, rejects the login with `403 Forbidden`
+
+This means only [invited users](/features/user-management) or the instance owner can log in. Unknown OIDC identities are rejected.
 
 ### ID Token Verification
 
@@ -123,6 +146,8 @@ The callback performs the following verification on the ID token:
 |---|---|---|
 | 400 | `invalid_state` | Unknown or expired OIDC state parameter (possible CSRF attempt) |
 | 400 | `auth_expired` | OIDC authorization request has expired (10-minute TTL) |
+| 403 | `unknown_user` | OIDC identity does not match any invited or active user |
+| 403 | `user_disabled` | User account has been disabled |
 | 409 | `setup_incomplete` | Setup is not yet complete |
 | 500 | `oidc_config_error` | Invalid issuer URL, redirect URI, or missing token endpoint |
 | 500 | `decryption_error` | Failed to decrypt OIDC client secret |
@@ -137,12 +162,14 @@ The callback performs the following verification on the ID token:
 
 ::: code-group
 ```bash [curl]
-curl "http://127.0.0.1:8787/v1/auth/oidc/callback?code=4/0AX4XfWh...&state=abc123-csrf-state-token"
+curl -X POST http://127.0.0.1:8787/v1/auth/oidc/callback \
+  -H "Content-Type: application/json" \
+  -d '{"code": "4/0AX4XfWh...", "state": "abc123-csrf-state-token"}'
 ```
 :::
 
 ::: tip
-In a typical browser flow, the user does not call this endpoint directly. The IdP redirects the user's browser to this URL after authentication.
+In a typical browser flow, the frontend receives the authorization code from the IdP redirect and sends it to this endpoint via a POST request.
 :::
 
 ---

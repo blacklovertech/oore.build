@@ -5,6 +5,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import Header from '../components/Header'
 import { syncSetupStoreContext } from '@/lib/instance-context'
 import { queryClient } from '@/lib/query-client'
+import { useAuthStore } from '@/stores/auth-store'
 import { useInstanceStore } from '@/stores/instance-store'
 import { useSetupStore } from '@/stores/setup-store'
 
@@ -53,6 +54,7 @@ export const Route = createRootRoute({
     }
     if (activeId) {
       syncSetupStoreContext(activeId)
+      useAuthStore.getState().setInstanceContext(activeId)
     }
   },
   component: RootLayout,
@@ -66,6 +68,7 @@ function RootLayout() {
   // Re-sync when active instance changes at runtime (user switches or removes instance)
   useEffect(() => {
     useSetupStore.getState().setInstanceContext(activeInstanceId)
+    useAuthStore.getState().setInstanceContext(activeInstanceId)
   }, [activeInstanceId])
 
   return (

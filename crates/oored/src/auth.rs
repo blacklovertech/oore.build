@@ -14,9 +14,11 @@ use openidconnect::{
     IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
 };
 use serde::Deserialize;
+use sqlx::Row;
 use tracing::{error, warn};
 
 use crate::session::DEFAULT_SESSION_TTL;
+use crate::store::write_audit_log;
 use crate::util::{api_err, extract_bearer, now_unix};
 use crate::{AppState, MAX_PENDING_AUTH};
 
@@ -170,6 +172,9 @@ pub async fn oidc_start(
         .redirect_uri
         .unwrap_or_else(|| "http://127.0.0.1:8787/v1/auth/oidc/callback".to_string());
 
+    // Validate redirect_uri to prevent open redirects
+    crate::validate_redirect_uri(&redirect_uri)?;
+
     // Parse issuer URL
     let issuer = IssuerUrl::new(oidc_config.issuer_url).map_err(|e| {
         error!(error = %e, "invalid issuer URL");
@@ -265,20 +270,21 @@ pub async fn oidc_start(
     }))
 }
 
-/// `GET /v1/auth/oidc/callback`
+/// `POST /v1/auth/oidc/callback`
 ///
 /// Handles the OIDC callback from the identity provider. Exchanges the
 /// authorization code for tokens, validates the ID token, and creates a
-/// session.
+/// session. Uses POST to keep the authorization code out of URL query
+/// params, server logs, and browser history.
 pub async fn oidc_callback(
     State(state): State<Arc<AppState>>,
-    Query(params): Query<OidcCallbackParams>,
+    Json(params): Json<OidcCallbackParams>,
 ) -> Result<Json<OidcCallbackResponse>, (StatusCode, Json<ApiError>)> {
     // Retrieve and remove the pending auth entry (validates CSRF state)
     let pending = {
         let mut pending_map = state.pending_auth.lock().await;
         pending_map.remove(&params.state).ok_or_else(|| {
-            warn!(state = %params.state, "unknown or expired OIDC state parameter");
+            warn!(state_len = params.state.len(), "unknown or expired OIDC state parameter");
             api_err(
                 StatusCode::BAD_REQUEST,
                 "invalid_state",
@@ -402,23 +408,105 @@ pub async fn oidc_callback(
             )
         })?;
 
-    // Create a session
-    let (session_token, expires_at) = {
-        let mut sessions = state.sessions.lock().await;
-        let token = sessions.create_session(&email, &subject, DEFAULT_SESSION_TTL);
-        let session = sessions
-            .validate_session(&token)
-            .expect("just-created session must be valid");
-        let expires = session.expires_at;
-        (token, expires)
+    // Look up user by oidc_subject
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    let user_row = sqlx::query(
+        "SELECT id, email, role FROM users WHERE oidc_subject = ?1 AND status = 'active'",
+    )
+    .bind(&subject)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to look up user by oidc_subject");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to look up user")
+    })?;
+
+    // If not found by subject, check for invited user by email and activate
+    let (user_id, user_email, user_role) = if let Some(row) = user_row {
+        let uid: String = row.get("id");
+        let uemail: String = row.get("email");
+        let urole: String = row.get("role");
+        (uid, uemail, urole)
+    } else {
+        // Check for invited user by email
+        let invited = sqlx::query(
+            "SELECT id, email, role FROM users WHERE email = ?1 AND status = 'invited'",
+        )
+        .bind(&email)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to look up invited user");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to look up user")
+        })?;
+
+        if let Some(inv_row) = invited {
+            let uid: String = inv_row.get("id");
+            let uemail: String = inv_row.get("email");
+            let urole: String = inv_row.get("role");
+            // Activate the invited user and set their oidc_subject
+            let now = now_unix();
+            sqlx::query(
+                "UPDATE users SET oidc_subject = ?1, status = 'active', updated_at = ?2 WHERE id = ?3",
+            )
+            .bind(&subject)
+            .bind(now)
+            .bind(&uid)
+            .execute(pool)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to activate invited user");
+                api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to activate user")
+            })?;
+
+            let _ = write_audit_log(pool, Some(&uid), "user_activated", "user", Some(&uid), None).await;
+
+            (uid, uemail, urole)
+        } else {
+            // No matching user — reject login
+            warn!(email = %email, subject = %subject, "OIDC login rejected: no matching user");
+            return Err(api_err(
+                StatusCode::FORBIDDEN,
+                "user_not_found",
+                "No user account exists for this identity. Contact an administrator.",
+            ));
+        }
     };
+    drop(store);
+
+    // Create session linked to user_id
+    let session_token = state
+        .sessions
+        .create_session(&user_id, DEFAULT_SESSION_TTL)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to create session");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "session_error", "Failed to create session")
+        })?;
+
+    let session_info = state
+        .sessions
+        .validate_session(&session_token)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to validate just-created session");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "session_error", "Failed to validate session")
+        })?
+        .ok_or_else(|| {
+            error!("just-created session could not be validated — possible race condition");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "session_error", "Session created but could not be validated")
+        })?;
 
     Ok(Json(OidcCallbackResponse {
         session_token,
-        expires_at,
+        expires_at: session_info.expires_at,
         user: AuthenticatedUser {
-            email,
+            email: user_email,
             oidc_subject: subject,
+            user_id: Some(user_id),
+            role: Some(user_role),
         },
     }))
 }
@@ -439,10 +527,17 @@ pub async fn logout(
         )
     })?;
 
-    let mut sessions = state.sessions.lock().await;
-
     // Validate the session exists before revoking
-    if sessions.validate_session(token).is_none() {
+    let session = state
+        .sessions
+        .validate_session(token)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "session validation failed");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "session_error", "Session validation failed")
+        })?;
+
+    if session.is_none() {
         return Err(api_err(
             StatusCode::UNAUTHORIZED,
             "invalid_session",
@@ -450,7 +545,10 @@ pub async fn logout(
         ));
     }
 
-    sessions.revoke_session(token);
+    state.sessions.revoke_session(token).await.map_err(|e| {
+        error!(error = %e, "session revocation failed");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "session_error", "Session revocation failed")
+    })?;
 
     Ok(Json(LogoutResponse { ok: true }))
 }

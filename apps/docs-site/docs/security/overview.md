@@ -10,11 +10,12 @@ oore.build uses **OIDC-only authentication** in V1. There are no local usernames
 |---|---|
 | Auth protocol | OpenID Connect (Authorization Code + PKCE) |
 | Local passwords | Not supported in V1 |
-| Session storage | In-memory (server-side), hashed tokens |
+| Authorization | Role-based access control (Casbin) |
+| Session storage | SQLite (server-side), hashed tokens |
 | Session TTL | 24 hours |
 | Setup session TTL | 30 minutes (sliding window) |
 
-See [OIDC Authentication](/features/oidc-authentication) for the full authentication flow.
+See [OIDC Authentication](/features/oidc-authentication) for the full authentication flow and [Roles & Permissions](/features/rbac) for the RBAC model.
 
 ## Token Hashing {#token-hashing}
 
@@ -57,6 +58,41 @@ base64( nonce[12 bytes] || ciphertext || GCM_tag[16 bytes] )
 ::: warning
 If the encryption key file is lost or deleted, encrypted OIDC client secrets cannot be recovered. The OIDC provider must be reconfigured.
 :::
+
+## Role-Based Access Control {#rbac}
+
+All authenticated API endpoints enforce permissions through a Casbin RBAC policy. The system defines four roles with graduated permissions:
+
+| Role | Access Level |
+|------|-------------|
+| `owner` | Full instance control (one per instance, set during setup) |
+| `admin` | Manage users and all resources (cannot modify owner) |
+| `developer` | Create/manage projects, pipelines, builds; read runners |
+| `qa_viewer` | Read-only access to projects, pipelines, builds, artifacts |
+
+Permission checks happen on every request via the `AuthUser` extractor, which:
+
+1. Validates the session token against SQLite
+2. JOINs with the `users` table to retrieve the current role and status
+3. Rejects the request if the user is disabled (`403 Forbidden`)
+4. Passes the role to the Casbin enforcer, which checks `(role, resource, action)` against the policy
+
+See [Roles & Permissions](/features/rbac) for the full permission matrix.
+
+## Audit Logging {#audit-logging}
+
+Security-relevant actions are recorded in the `audit_logs` table:
+
+| Action | Trigger |
+|--------|---------|
+| `user_invited` | A new user is invited |
+| `role_changed` | A user's role is changed |
+| `user_disabled` | A user is disabled |
+| `user_enabled` | A disabled user is re-enabled |
+| `user_activated` | An invited user logs in for the first time |
+| `owner_created` | The owner user is created during setup |
+
+Each entry includes the acting user's ID, the action, target resource type/ID, optional JSON details, and a timestamp.
 
 ## PKCE Flow {#pkce-flow}
 
@@ -127,15 +163,19 @@ All setup mutating endpoints check the setup state before processing. When the s
 OIDC Callback ──> Create Session ──> Valid (24h) ──> Expired
                                          |
                                     POST /logout
+                                    or user disabled
                                          |
                                          v
                                       Revoked
 ```
 
 - Sessions are created on successful OIDC callback
-- Sessions are stored in-memory (do not survive daemon restarts)
+- Sessions are stored in **SQLite** and survive daemon restarts
+- Sessions are linked to user records via foreign key (`CASCADE` delete)
+- Session validation checks that the associated user is still `active`
 - Sessions expire after 24 hours
 - Sessions can be explicitly revoked via `POST /v1/auth/logout`
+- All sessions are revoked when a user is [disabled](/features/user-management)
 - Expired sessions are cleaned up via `cleanup_expired()`
 
 ### Setup Sessions
@@ -160,7 +200,7 @@ Bootstrap Verify ──> Create Session ──> Valid (30m sliding) ──> Expi
 | Setting | Value |
 |---|---|
 | Allowed origins | `http://localhost:3000` |
-| Allowed methods | `GET`, `POST`, `OPTIONS` |
+| Allowed methods | `GET`, `POST`, `PATCH`, `DELETE`, `OPTIONS` |
 | Allowed headers | `Content-Type`, `Authorization` |
 
 ### OIDC HTTP Client
@@ -184,5 +224,6 @@ The no-redirect policy follows the `openidconnect` crate's recommendation for pr
 | OIDC config | SQLite (plaintext) | Issuer URL, client ID, endpoints |
 | OIDC client secret | SQLite (AES-256-GCM encrypted) | Encryption at rest |
 | Encryption key | File (`encryption.key`) | `0o600` permissions |
-| User sessions | In-memory `HashMap` | SHA-256 hashed keys, TTL |
+| User sessions | SQLite `sessions` table | SHA-256 hashed keys, TTL, user FK |
+| Audit logs | SQLite `audit_logs` table | Actor ID, action, timestamp |
 | Pending auth | In-memory `HashMap` | 10-minute TTL, auto-cleanup |

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Instance } from '@/lib/types'
 import { queryClient } from '@/lib/query-client'
+import { clearAuthStorageForInstance } from '@/stores/auth-store'
 
 interface InstanceStoreState {
   instances: Record<string, Instance>
@@ -41,6 +42,9 @@ export const useInstanceStore = create<InstanceStoreState>()(
         } catch {
           // sessionStorage unavailable
         }
+
+        // Clear auth (localStorage) keys for this instance
+        clearAuthStorageForInstance(id)
 
         // Evict query cache entries scoped to this instance
         queryClient.removeQueries({ queryKey: [id] })

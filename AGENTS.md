@@ -69,3 +69,10 @@ Treat those as the source of truth.
 ## Validation Checklist (Before Handoff)
 
 - Run `make validate` (runs docs-check, build-web, build-docs, cargo-check).
+
+## V1 Roadmap
+
+- Implementation roadmap is tracked in `docs/v1-roadmap.md`.
+- Check off completed items and update gap summary after each phase.
+- When adding new work items, add them to the appropriate phase or create a new phase.
+- Roadmap does NOT override `docs/platform-contract.md` — it sequences existing commitments.

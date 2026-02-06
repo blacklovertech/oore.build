@@ -47,6 +47,7 @@ The `details` field is omitted when not applicable.
 | 401 | `session_expired` | Session token has expired |
 | 401 | `no_session` | No active setup session exists |
 | 409 | `already_configured` | Setup is already complete (state is `ready`) |
+| 403 | `forbidden` | Insufficient RBAC permissions |
 | 409 | `invalid_state` | Operation not valid in the current setup state |
 | 409 | `setup_incomplete` | Auth endpoints require setup to be complete |
 | 500 | `store_error` | Database or storage error |
@@ -56,7 +57,7 @@ The `details` field is omitted when not applicable.
 The API is configured with the following CORS policy:
 
 - **Allowed origins**: `http://localhost:3000`
-- **Allowed methods**: `GET`, `POST`, `OPTIONS`
+- **Allowed methods**: `GET`, `POST`, `PATCH`, `DELETE`, `OPTIONS`
 - **Allowed headers**: `Content-Type`, `Authorization`
 
 ## Endpoint Groups
@@ -81,8 +82,21 @@ Endpoints for OIDC authentication and session management. Only available when se
 | Method | Path | Auth |
 |---|---|---|
 | `GET` | [`/v1/auth/oidc/start`](/api/auth#oidc-start) | Public |
-| `GET` | [`/v1/auth/oidc/callback`](/api/auth#oidc-callback) | Public |
+| `POST` | [`/v1/auth/oidc/callback`](/api/auth#oidc-callback) | Public |
 | `POST` | [`/v1/auth/logout`](/api/auth#logout) | User session |
+
+### [Users API](/api/users)
+
+Endpoints for user management. Require a valid user session and appropriate RBAC permissions.
+
+| Method | Path | Auth |
+|---|---|---|
+| `GET` | [`/v1/users/me`](/api/users#get-me) | User session |
+| `GET` | [`/v1/users`](/api/users#list-users) | User session (owner/admin) |
+| `POST` | [`/v1/users/invite`](/api/users#invite-user) | User session (owner/admin) |
+| `PATCH` | [`/v1/users/{user_id}/role`](/api/users#update-user-role) | User session (owner/admin) |
+| `DELETE` | [`/v1/users/{user_id}`](/api/users#disable-user) | User session (owner/admin) |
+| `POST` | [`/v1/users/{user_id}/enable`](/api/users#re-enable-user) | User session (owner/admin) |
 
 ### Health Check
 

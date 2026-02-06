@@ -70,6 +70,70 @@ export interface SetupCompleteResponse {
   instance_id: string
 }
 
+// ── Auth response types ─────────────────────────────────────────
+
+export interface AuthenticatedUser {
+  email: string
+  oidc_subject: string
+  user_id?: string
+  role?: UserRole
+}
+
+export interface OidcCallbackResponse {
+  session_token: string
+  expires_at: number
+  user: AuthenticatedUser
+}
+
+// ── User management types ───────────────────────────────────────
+
+export type UserRole = 'owner' | 'admin' | 'developer' | 'qa_viewer'
+
+export type UserStatus = 'active' | 'disabled' | 'invited'
+
+export interface User {
+  id: string
+  email: string
+  display_name?: string
+  role: UserRole
+  status: UserStatus
+  created_at: number
+  updated_at: number
+}
+
+export interface InviteUserRequest {
+  email: string
+  role: UserRole
+}
+
+export interface InviteUserResponse {
+  user: User
+}
+
+export interface UpdateUserRoleRequest {
+  role: UserRole
+}
+
+export interface UpdateUserRoleResponse {
+  user: User
+}
+
+export interface ReEnableUserResponse {
+  user: User
+}
+
+export interface ListUsersResponse {
+  users: User[]
+}
+
+export interface UserProfileResponse {
+  user: User
+}
+
+export interface LogoutResponse {
+  ok: boolean
+}
+
 // ── Structured API error ────────────────────────────────────────
 
 export interface ApiError {

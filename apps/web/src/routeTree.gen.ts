@@ -10,15 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SetupRouteImport } from './routes/setup'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as SetupOwnerRouteImport } from './routes/setup/owner'
 import { Route as SetupOidcRouteImport } from './routes/setup/oidc'
 import { Route as SetupCompleteRouteImport } from './routes/setup/complete'
+import { Route as SettingsUsersRouteImport } from './routes/settings/users'
+import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 
 const SetupRoute = SetupRouteImport.update({
   id: '/setup',
   path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -46,10 +54,23 @@ const SetupCompleteRoute = SetupCompleteRouteImport.update({
   path: '/complete',
   getParentRoute: () => SetupRoute,
 } as any)
+const SettingsUsersRoute = SettingsUsersRouteImport.update({
+  id: '/settings/users',
+  path: '/settings/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
   '/setup': typeof SetupRouteWithChildren
+  '/auth/callback': typeof AuthCallbackRoute
+  '/settings/users': typeof SettingsUsersRoute
   '/setup/complete': typeof SetupCompleteRoute
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
@@ -57,6 +78,9 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/settings/users': typeof SettingsUsersRoute
   '/setup/complete': typeof SetupCompleteRoute
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
@@ -65,7 +89,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
   '/setup': typeof SetupRouteWithChildren
+  '/auth/callback': typeof AuthCallbackRoute
+  '/settings/users': typeof SettingsUsersRoute
   '/setup/complete': typeof SetupCompleteRoute
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
@@ -75,17 +102,31 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/login'
     | '/setup'
+    | '/auth/callback'
+    | '/settings/users'
     | '/setup/complete'
     | '/setup/oidc'
     | '/setup/owner'
     | '/setup/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/setup/complete' | '/setup/oidc' | '/setup/owner' | '/setup'
+  to:
+    | '/'
+    | '/login'
+    | '/auth/callback'
+    | '/settings/users'
+    | '/setup/complete'
+    | '/setup/oidc'
+    | '/setup/owner'
+    | '/setup'
   id:
     | '__root__'
     | '/'
+    | '/login'
     | '/setup'
+    | '/auth/callback'
+    | '/settings/users'
     | '/setup/complete'
     | '/setup/oidc'
     | '/setup/owner'
@@ -94,7 +135,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LoginRoute: typeof LoginRoute
   SetupRoute: typeof SetupRouteWithChildren
+  AuthCallbackRoute: typeof AuthCallbackRoute
+  SettingsUsersRoute: typeof SettingsUsersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -104,6 +148,13 @@ declare module '@tanstack/react-router' {
       path: '/setup'
       fullPath: '/setup'
       preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -141,6 +192,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SetupCompleteRouteImport
       parentRoute: typeof SetupRoute
     }
+    '/settings/users': {
+      id: '/settings/users'
+      path: '/settings/users'
+      fullPath: '/settings/users'
+      preLoaderRoute: typeof SettingsUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -162,7 +227,10 @@ const SetupRouteWithChildren = SetupRoute._addFileChildren(SetupRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LoginRoute: LoginRoute,
   SetupRoute: SetupRouteWithChildren,
+  AuthCallbackRoute: AuthCallbackRoute,
+  SettingsUsersRoute: SettingsUsersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
