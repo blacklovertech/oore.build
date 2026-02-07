@@ -33,6 +33,8 @@ hyper = "1"
 http-body-util = "0.1"
 tempfile = "3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+urlencoding = "2"
+jsonwebtoken = "9"
 ring = "0.17"
 base64 = "0.22"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }

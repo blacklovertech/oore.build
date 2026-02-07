@@ -1,0 +1,203 @@
+import { useEffect } from 'react'
+import { createFileRoute, Link, useSearch } from '@tanstack/react-router'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { Delete02Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
+import { toast } from 'sonner'
+
+import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
+import { useIntegrations, useDeleteIntegration } from '@/hooks/use-integrations'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+
+export const Route = createFileRoute('/settings/integrations/')({
+  validateSearch: (search: Record<string, unknown>): { github?: string; integration_id?: string } => ({
+    github: (search.github as string) || undefined,
+    integration_id: (search.integration_id as string) || undefined,
+  }),
+  beforeLoad: () => {
+    const instance = getActiveInstanceOrRedirect()
+    requireAuthOrRedirect(instance.id)
+  },
+  component: IntegrationsPage,
+})
+
+function IntegrationsPage() {
+  const search = useSearch({ from: '/settings/integrations/' })
+  const { data, isLoading, error } = useIntegrations()
+  const deleteMutation = useDeleteIntegration()
+
+  // Show success toast when redirected back from GitHub App creation
+  useEffect(() => {
+    if (search.github === 'success') {
+      toast.success('GitHub App connected successfully')
+      // Clean the URL params without navigation
+      window.history.replaceState({}, '', '/settings/integrations')
+    }
+  }, [search.github])
+
+  function handleDisconnect(id: string, name: string) {
+    deleteMutation.mutate(id, {
+      onSuccess: () => {
+        toast.success(`Disconnected ${name}`)
+      },
+      onError: (err) => {
+        toast.error(`Failed to disconnect: ${err.message}`)
+      },
+    })
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Integrations
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Connect your Git providers to enable build triggers.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>GitHub</CardTitle>
+            <CardDescription>
+              Connect a GitHub App to access repositories and receive webhooks.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button render={<Link to="/settings/integrations/github" />}>
+              Add GitHub Integration
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>GitLab</CardTitle>
+            <CardDescription>
+              Connect a GitLab instance via OAuth or personal access token.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button render={<Link to="/settings/integrations/gitlab" />}>
+              Add GitLab Integration
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="text-lg font-medium">Connected Integrations</h2>
+
+        {isLoading && (
+          <div className="space-y-3">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+          </div>
+        )}
+
+        {error && (
+          <Alert variant="destructive">
+            <HugeiconsIcon icon={InformationCircleIcon} size={16} />
+            <AlertDescription>
+              Failed to load integrations: {error.message}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {data && data.integrations.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No integrations connected yet.
+          </p>
+        )}
+
+        {data?.integrations.map((integration) => (
+          <Card key={integration.id}>
+            <CardContent className="flex items-center justify-between py-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">
+                    {integration.display_name ?? integration.provider}
+                  </span>
+                  <Badge variant={integration.status === 'active' ? 'default' : 'secondary'}>
+                    {integration.status}
+                  </Badge>
+                  <Badge variant="outline">{integration.provider}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {integration.host_url} &middot; {integration.auth_mode}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  render={
+                    <Link
+                      to="/settings/integrations/$integrationId"
+                      params={{ integrationId: integration.id }}
+                    />
+                  }
+                >
+                  Details
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger render={
+                    <Button variant="ghost" size="sm">
+                      <HugeiconsIcon icon={Delete02Icon} size={16} />
+                    </Button>
+                  } />
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Disconnect integration?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will remove the integration, all credentials, installations,
+                        and repository links. Webhooks will stop working.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() =>
+                          handleDisconnect(
+                            integration.id,
+                            integration.display_name ?? integration.provider,
+                          )
+                        }
+                      >
+                        Disconnect
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+}

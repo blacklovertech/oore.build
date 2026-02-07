@@ -1,0 +1,354 @@
+pub mod github;
+pub mod gitlab;
+pub mod webhooks;
+
+use std::sync::Arc;
+
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::Json;
+use oore_contract::{
+    ApiError, Integration, IntegrationDetailResponse, IntegrationInstallation,
+    IntegrationRepository, ListInstallationsResponse, ListIntegrationsResponse,
+    ListRepositoriesResponse,
+};
+use serde::Deserialize;
+use sqlx::Row;
+use tracing::{error, info};
+
+use crate::extractors::AuthUser;
+use crate::rbac::check_permission;
+use crate::store::write_audit_log;
+use crate::util::api_err;
+use crate::AppState;
+
+type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiError>)>;
+
+// ── Row conversion helpers ──────────────────────────────────────
+
+pub fn row_to_integration(row: &sqlx::sqlite::SqliteRow) -> Integration {
+    Integration {
+        id: row.get("id"),
+        provider: row.get("provider"),
+        host_url: row.get("host_url"),
+        auth_mode: row.get("auth_mode"),
+        status: row.get("status"),
+        display_name: row.get("display_name"),
+        app_id: row.get("app_id"),
+        app_slug: row.get("app_slug"),
+        created_by: row.get("created_by"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+pub fn row_to_installation(row: &sqlx::sqlite::SqliteRow) -> IntegrationInstallation {
+    IntegrationInstallation {
+        id: row.get("id"),
+        integration_id: row.get("integration_id"),
+        external_id: row.get("external_id"),
+        account_name: row.get("account_name"),
+        account_type: row.get("account_type"),
+        created_at: row.get("created_at"),
+    }
+}
+
+pub fn row_to_repository(row: &sqlx::sqlite::SqliteRow) -> IntegrationRepository {
+    IntegrationRepository {
+        id: row.get("id"),
+        installation_id: row.get("installation_id"),
+        external_id: row.get("external_id"),
+        full_name: row.get("full_name"),
+        default_branch: row.get("default_branch"),
+        is_private: row.get::<i32, _>("is_private") != 0,
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+// ── Query params ────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ListIntegrationsQuery {
+    pub provider: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListReposQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+// ── Common CRUD handlers ────────────────────────────────────────
+
+/// `GET /v1/integrations` — list all integrations (paginated, filterable).
+pub async fn list_integrations(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Query(params): Query<ListIntegrationsQuery>,
+) -> ApiResult<ListIntegrationsResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "integrations", "read").await?;
+
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    let limit = params.limit.unwrap_or(50).min(200);
+    let offset = params.offset.unwrap_or(0);
+
+    let (rows, total) = if let Some(ref provider) = params.provider {
+        let rows = sqlx::query(
+            "SELECT * FROM integrations WHERE provider = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+        )
+        .bind(provider)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to list integrations");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to list integrations")
+        })?;
+
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM integrations WHERE provider = ?1")
+                .bind(provider)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| {
+                    error!(error = %e, "failed to count integrations");
+                    api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to count integrations")
+                })?;
+
+        (rows, total)
+    } else {
+        let rows = sqlx::query(
+            "SELECT * FROM integrations ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to list integrations");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to list integrations")
+        })?;
+
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM integrations")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to count integrations");
+                api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to count integrations")
+            })?;
+
+        (rows, total)
+    };
+
+    let integrations = rows.iter().map(row_to_integration).collect();
+
+    Ok(Json(ListIntegrationsResponse {
+        integrations,
+        total,
+    }))
+}
+
+/// `GET /v1/integrations/{id}` — detail view with counts.
+pub async fn get_integration(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<IntegrationDetailResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "integrations", "read").await?;
+
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    let row = sqlx::query("SELECT * FROM integrations WHERE id = ?1")
+        .bind(&id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to fetch integration");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to fetch integration")
+        })?
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "not_found", "Integration not found"))?;
+
+    let integration = row_to_integration(&row);
+
+    let installation_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM integration_installations WHERE integration_id = ?1",
+    )
+    .bind(&id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
+    let repository_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM integration_repositories r \
+         JOIN integration_installations i ON i.id = r.installation_id \
+         WHERE i.integration_id = ?1",
+    )
+    .bind(&id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
+    let last_webhook_at: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(received_at) FROM integration_webhooks WHERE integration_id = ?1",
+    )
+    .bind(&id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(None);
+
+    Ok(Json(IntegrationDetailResponse {
+        integration,
+        installation_count,
+        repository_count,
+        last_webhook_at,
+    }))
+}
+
+/// `DELETE /v1/integrations/{id}` — disconnect and cascade delete.
+pub async fn delete_integration(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    check_permission(&state.enforcer, &auth.0.role, "integrations", "delete").await?;
+
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    // Verify it exists
+    let row = sqlx::query("SELECT provider, display_name FROM integrations WHERE id = ?1")
+        .bind(&id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to fetch integration");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to fetch integration")
+        })?
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "not_found", "Integration not found"))?;
+
+    let provider: String = row.get("provider");
+    let display_name: Option<String> = row.get("display_name");
+
+    // Cascade delete (credentials, installations, repos, webhooks all have ON DELETE CASCADE)
+    sqlx::query("DELETE FROM integrations WHERE id = ?1")
+        .bind(&id)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to delete integration");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to delete integration")
+        })?;
+
+    let details = serde_json::json!({
+        "provider": provider,
+        "display_name": display_name,
+        "deleted_by": auth.0.email,
+    })
+    .to_string();
+    let _ = write_audit_log(
+        pool,
+        Some(&auth.0.user_id),
+        "integration_deleted",
+        "integration",
+        Some(&id),
+        Some(&details),
+    )
+    .await;
+
+    info!(integration_id = %id, provider = %provider, "integration deleted");
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// `GET /v1/integrations/{id}/repositories` — list repos for an integration.
+pub async fn list_repositories(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+    Query(params): Query<ListReposQuery>,
+) -> ApiResult<ListRepositoriesResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "integrations", "read").await?;
+
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    // Verify integration exists
+    let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM integrations WHERE id = ?1")
+        .bind(&id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+
+    if !exists {
+        return Err(api_err(StatusCode::NOT_FOUND, "not_found", "Integration not found"));
+    }
+
+    let limit = params.limit.unwrap_or(100).min(500);
+    let offset = params.offset.unwrap_or(0);
+
+    let rows = sqlx::query(
+        "SELECT r.* FROM integration_repositories r \
+         JOIN integration_installations i ON i.id = r.installation_id \
+         WHERE i.integration_id = ?1 \
+         ORDER BY r.full_name ASC \
+         LIMIT ?2 OFFSET ?3",
+    )
+    .bind(&id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to list repositories");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to list repositories")
+    })?;
+
+    let repositories = rows.iter().map(row_to_repository).collect();
+
+    Ok(Json(ListRepositoriesResponse { repositories }))
+}
+
+/// `GET /v1/integrations/{id}/installations` — list installations for an integration.
+pub async fn list_installations(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<ListInstallationsResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "integrations", "read").await?;
+
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    // Verify integration exists
+    let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM integrations WHERE id = ?1")
+        .bind(&id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+
+    if !exists {
+        return Err(api_err(StatusCode::NOT_FOUND, "not_found", "Integration not found"));
+    }
+
+    let rows = sqlx::query(
+        "SELECT * FROM integration_installations WHERE integration_id = ?1 ORDER BY created_at DESC",
+    )
+    .bind(&id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to list installations");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to list installations")
+    })?;
+
+    let installations = rows.iter().map(row_to_installation).collect();
+
+    Ok(Json(ListInstallationsResponse { installations }))
+}

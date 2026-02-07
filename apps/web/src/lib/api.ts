@@ -1,8 +1,23 @@
 import type {
   ApiError,
   BootstrapTokenVerifyResponse,
+  BuildDetailResponse,
+  CancelBuildResponse,
+  CreateBuildRequest,
+  CreateBuildResponse,
+  GitHubAppCompleteRequest,
+  GitHubAppCompleteResponse,
+  GitHubAppStartRequest,
+  GitHubAppStartResponse,
+  GitLabCompleteResponse,
+  GitLabStartRequest,
+  IntegrationDetailResponse,
   InviteUserRequest,
   InviteUserResponse,
+  ListBuildsResponse,
+  ListInstallationsResponse,
+  ListIntegrationsResponse,
+  ListRepositoriesResponse,
   ListUsersResponse,
   LogoutResponse,
   OidcConfigureRequest,
@@ -12,6 +27,7 @@ import type {
   SetupOidcStartResponse,
   SetupOidcVerifyResponse,
   SetupStatus,
+  SyncInstallationsResponse,
   UpdateUserRoleRequest,
   UpdateUserRoleResponse,
   UserProfileResponse,
@@ -233,4 +249,205 @@ export function logout(
     method: 'POST',
     headers: authHeaders(token),
   })
+}
+
+// ── Integration API ─────────────────────────────────────────────
+
+export function listIntegrations(
+  baseUrl: string,
+  token: string,
+  params?: { provider?: string; limit?: number; offset?: number },
+): Promise<ListIntegrationsResponse> {
+  const query = new URLSearchParams()
+  if (params?.provider) query.set('provider', params.provider)
+  if (params?.limit) query.set('limit', String(params.limit))
+  if (params?.offset) query.set('offset', String(params.offset))
+  const qs = query.toString()
+  return request<ListIntegrationsResponse>(
+    baseUrl,
+    `/v1/integrations${qs ? `?${qs}` : ''}`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function getIntegration(
+  baseUrl: string,
+  token: string,
+  id: string,
+): Promise<IntegrationDetailResponse> {
+  return request<IntegrationDetailResponse>(
+    baseUrl,
+    `/v1/integrations/${id}`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function deleteIntegration(
+  baseUrl: string,
+  token: string,
+  id: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(baseUrl, `/v1/integrations/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  })
+}
+
+export function listIntegrationRepos(
+  baseUrl: string,
+  token: string,
+  integrationId: string,
+): Promise<ListRepositoriesResponse> {
+  return request<ListRepositoriesResponse>(
+    baseUrl,
+    `/v1/integrations/${integrationId}/repositories`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function githubAppStart(
+  baseUrl: string,
+  token: string,
+  data: GitHubAppStartRequest,
+): Promise<GitHubAppStartResponse> {
+  return request<GitHubAppStartResponse>(
+    baseUrl,
+    '/v1/integrations/github/start',
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function githubAppComplete(
+  baseUrl: string,
+  token: string,
+  data: GitHubAppCompleteRequest,
+): Promise<GitHubAppCompleteResponse> {
+  return request<GitHubAppCompleteResponse>(
+    baseUrl,
+    '/v1/integrations/github/complete',
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function syncInstallations(
+  baseUrl: string,
+  token: string,
+  integrationId: string,
+): Promise<SyncInstallationsResponse> {
+  return request<SyncInstallationsResponse>(
+    baseUrl,
+    `/v1/integrations/${integrationId}/installations`,
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({}),
+    },
+  )
+}
+
+export function listInstallations(
+  baseUrl: string,
+  token: string,
+  integrationId: string,
+): Promise<ListInstallationsResponse> {
+  return request<ListInstallationsResponse>(
+    baseUrl,
+    `/v1/integrations/${integrationId}/installations`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function gitlabStart(
+  baseUrl: string,
+  token: string,
+  data: GitLabStartRequest,
+): Promise<GitLabCompleteResponse> {
+  return request<GitLabCompleteResponse>(
+    baseUrl,
+    '/v1/integrations/gitlab/start',
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+// ── Build API ──────────────────────────────────────────────────
+
+export function createBuild(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  data: CreateBuildRequest,
+): Promise<CreateBuildResponse> {
+  return request<CreateBuildResponse>(
+    baseUrl,
+    `/v1/projects/${projectId}/builds`,
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function listBuilds(
+  baseUrl: string,
+  token: string,
+  params?: {
+    project_id?: string
+    pipeline_id?: string
+    status?: string
+    branch?: string
+    limit?: number
+    offset?: number
+  },
+): Promise<ListBuildsResponse> {
+  const query = new URLSearchParams()
+  if (params?.project_id) query.set('project_id', params.project_id)
+  if (params?.pipeline_id) query.set('pipeline_id', params.pipeline_id)
+  if (params?.status) query.set('status', params.status)
+  if (params?.branch) query.set('branch', params.branch)
+  if (params?.limit) query.set('limit', String(params.limit))
+  if (params?.offset) query.set('offset', String(params.offset))
+  const qs = query.toString()
+  return request<ListBuildsResponse>(
+    baseUrl,
+    `/v1/builds${qs ? `?${qs}` : ''}`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function getBuild(
+  baseUrl: string,
+  token: string,
+  buildId: string,
+): Promise<BuildDetailResponse> {
+  return request<BuildDetailResponse>(baseUrl, `/v1/builds/${buildId}`, {
+    headers: authHeaders(token),
+  })
+}
+
+export function cancelBuild(
+  baseUrl: string,
+  token: string,
+  buildId: string,
+): Promise<CancelBuildResponse> {
+  return request<CancelBuildResponse>(
+    baseUrl,
+    `/v1/builds/${buildId}/cancel`,
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+    },
+  )
 }

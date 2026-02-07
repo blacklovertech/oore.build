@@ -1,6 +1,6 @@
 import { Link, useLocation, useMatches } from '@tanstack/react-router'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { DashboardSquare01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
+import { DashboardSquare01Icon, GitBranchIcon, Settings02Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -28,6 +28,7 @@ const NAV_GROUPS: Array<NavGroup> = [
     label: 'Platform',
     items: [
       { title: 'Dashboard', to: '/', icon: DashboardSquare01Icon },
+      { title: 'Builds', to: '/builds', icon: GitBranchIcon },
     ],
   },
   {
@@ -37,6 +38,12 @@ const NAV_GROUPS: Array<NavGroup> = [
         title: 'Users',
         to: '/settings/users',
         icon: UserMultiple02Icon,
+        adminOnly: true,
+      },
+      {
+        title: 'Integrations',
+        to: '/settings/integrations',
+        icon: Settings02Icon,
         adminOnly: true,
       },
     ],

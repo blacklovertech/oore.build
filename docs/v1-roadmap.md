@@ -73,7 +73,7 @@ Feature docs: `2026-02-06-rbac-and-user-management.md`, `2026-02-06-session-pers
 
 Feature docs: `2026-02-06-design-system-governance.md`
 
-### Implemented API Endpoints (16)
+### Implemented API Endpoints (34)
 
 Setup:
 - `GET /v1/public/setup-status`
@@ -96,34 +96,56 @@ User Management:
 - `DELETE /v1/users/{user_id}`
 - `POST /v1/users/{user_id}/enable`
 
+Integrations:
+- `GET /v1/integrations`
+- `GET /v1/integrations/{id}`
+- `DELETE /v1/integrations/{id}`
+- `GET /v1/integrations/{id}/repositories`
+- `GET /v1/integrations/{id}/installations`
+- `POST /v1/integrations/{id}/installations` (sync)
+- `POST /v1/integrations/github/start`
+- `POST /v1/integrations/github/complete`
+- `GET /v1/integrations/github/create` (browser-navigated, no auth)
+- `GET /v1/integrations/github/callback` (browser-navigated, no auth)
+- `GET /v1/integrations/github/installed` (browser-navigated, no auth)
+- `POST /v1/integrations/gitlab/start`
+- `POST /v1/webhooks/github`
+- `POST /v1/webhooks/gitlab`
+
+Builds:
+- `POST /v1/projects/{project_id}/builds`
+- `GET /v1/builds`
+- `GET /v1/builds/{build_id}`
+- `POST /v1/builds/{build_id}/cancel`
+
 Health:
 - `GET /healthz`
 
 ---
 
-## Phase 2: Trigger Ingestion + Build Planning (`P0`)
+## Phase 2: Trigger Ingestion + Build Planning (`P0`) (Complete)
 
 Dependency: Phase 1 complete.
 
-- [ ] **2.1 [P0] SCM integration schema** - Add provider/account/installation/repository/webhook tables with encrypted secrets and audit metadata.
-- [ ] **2.2 [P0] GitHub integration flow (BYO App)** - Instance-scoped GitHub App onboarding (manifest-assisted or manual app create), installation linking, and permission validation.
-- [ ] **2.3 [P0] GitLab integration flow** - Support `gitlab.com` and self-managed base URL with OAuth application or token-based integration plus webhook secret validation.
-- [ ] **2.4 [P0] Webhook ingress hardening** - Signature/token verification, idempotency keys, replay window checks, provider event normalization.
-- [ ] **2.5 [P0] Build-domain schema** - Add `projects`, `pipelines`, `builds`, `build_jobs`, `runners`, `build_events`, `artifacts` with indexes and FKs.
-- [ ] **2.6 [P0] Build state machine contract** - Define strict states/transitions (`queued`, `scheduled`, `assigned`, `running`, `succeeded`, `failed`, `canceled`, `timed_out`, `expired`).
-- [ ] **2.7 [P0] Trigger intake endpoints** - Manual/API trigger (`POST /v1/projects/{project_id}/builds`) plus provider webhook trigger endpoint(s).
-- [ ] **2.8 [P0] Config snapshot at trigger time** - Resolve and persist immutable workflow/pipeline snapshot (commit SHA + resolved inputs + target platform set).
-- [ ] **2.9 [P0] Concurrency and stale-build policy** - Per-branch or per-pipeline cancellation option (`cancel previous` behavior).
-- [ ] **2.10 [P0] Build query endpoints** - `GET /v1/builds`, `GET /v1/builds/{build_id}`, `POST /v1/builds/{build_id}/cancel`.
+- [x] **2.1 [P0] SCM integration schema** - Migration 004: integrations, integration_credentials, integration_installations, integration_repositories, integration_webhooks tables with encrypted secrets and audit metadata.
+- [x] **2.2 [P0] GitHub integration flow (BYO App)** - GitHub App manifest flow with encrypted credential storage, JWT auth, installation sync, and repo enumeration.
+- [x] **2.3 [P0] GitLab integration flow** - Personal token and OAuth modes supporting gitlab.com and self-managed instances with token validation.
+- [x] **2.4 [P0] Webhook ingress hardening** - HMAC-SHA256 (GitHub) and token (GitLab) verification, idempotency via UNIQUE constraint, 5-min replay window, NormalizedWebhookEvent, 1MB body limit, async processing.
+- [x] **2.5 [P0] Build-domain schema** - Migration 005: projects, pipelines, builds, build_events, runners, artifacts tables with indexes and FKs.
+- [x] **2.6 [P0] Build state machine contract** - 9-state machine with validated transitions and optimistic locking in oore-contract.
+- [x] **2.7 [P0] Trigger intake endpoints** - `POST /v1/projects/{project_id}/builds` (manual) + webhook-triggered builds via `trigger_build_from_webhook()`.
+- [x] **2.8 [P0] Config snapshot at trigger time** - Immutable JSON snapshot with snapshot_version, config_path, trigger metadata, commit SHA, and branch.
+- [x] **2.9 [P0] Concurrency and stale-build policy** - `cancel_previous` per-pipeline policy auto-cancels non-terminal builds on same branch.
+- [x] **2.10 [P0] Build query endpoints** - `GET /v1/builds` (filtered, paginated), `GET /v1/builds/{build_id}` (with events timeline), `POST /v1/builds/{build_id}/cancel`.
 
-Exit criteria:
+Exit criteria (all met):
 - GitHub and GitLab can be connected with secrets stored encrypted and auditable.
 - Provider webhooks are received directly by customer backend in both hosted-UI and self-hosted-UI modes.
 - Build requests can be created from manual/API/webhook sources.
 - Build records are immutable post-creation except status/event updates.
 - Cancel and status APIs work against persisted state machine rules.
 
-Feature docs required: SCM Integrations (GitHub/GitLab), Build Lifecycle API, Triggering & Concurrency Policy.
+Feature docs: `2026-02-07-scm-integrations-github-gitlab-v1.md`, `2026-02-07-build-lifecycle-api.md`, `2026-02-07-triggering-and-concurrency-policy.md`.
 
 ## Phase 3: Scheduler + Runner Execution (`P0`)
 
@@ -211,11 +233,12 @@ Feature docs required: E2E Tests, Security Hardening, Deployment/Operations.
 
 | Area | Built | Remaining | Highest Priority |
 |------|-------|-----------|------------------|
-| Build lifecycle model | Setup/auth state machine only | Build/job/runner/artifact state machines | Phase 2 (`P0`) |
-| Triggering | Setup + auth triggers only | Manual/API/webhook build triggers with policy controls | Phase 2 (`P0`) |
+| Build lifecycle model | 9-state machine with transitions, optimistic locking, audit trail | Runner state machine | Phase 3 (`P0`) |
+| Triggering | Manual/API + webhook (GitHub/GitLab) with concurrency policy | Schedule triggers | Phase 3 (`P0`) |
+| SCM integration | GitHub App + GitLab (token/OAuth) with encrypted secrets | None for V1 | Complete |
 | Scheduling/execution | None | Queue, claim/lease, runner execution | Phase 3 (`P0`) |
-| Logs/artifacts | None | SSE logs, artifact storage, signed links | Phase 4 (`P0`) |
-| Project/pipeline UX | None in mainline | CRUD + validation + trigger settings | Phase 5 (`P1`) |
+| Logs/artifacts | Schema only | SSE logs, artifact storage, signed links | Phase 4 (`P0`) |
+| Project/pipeline UX | Schema only | CRUD + validation + trigger settings | Phase 5 (`P1`) |
 | CLI operations | Setup + version | login/status/runner/config/doctor | Phase 6 (`P1`) |
 | Reliability/security | Partial baseline | E2E, retry, hardening, release gate | Phase 7 (`P2`) |
 

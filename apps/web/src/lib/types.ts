@@ -144,3 +144,169 @@ export interface ApiError {
   code: string
   details?: string
 }
+
+// ── SCM Integration types ──────────────────────────────────────
+
+export type ScmProvider = 'github' | 'gitlab'
+
+export type IntegrationAuthMode = 'github_app' | 'oauth_app' | 'personal_token'
+
+export type IntegrationStatus = 'active' | 'inactive' | 'error'
+
+export interface Integration {
+  id: string
+  provider: ScmProvider
+  host_url: string
+  auth_mode: IntegrationAuthMode
+  status: IntegrationStatus
+  display_name?: string
+  app_id?: string
+  app_slug?: string
+  created_by: string
+  created_at: number
+  updated_at: number
+}
+
+export interface IntegrationInstallation {
+  id: string
+  integration_id: string
+  external_id: string
+  account_name: string
+  account_type?: string
+  created_at: number
+}
+
+export interface IntegrationRepository {
+  id: string
+  installation_id: string
+  external_id: string
+  full_name: string
+  default_branch?: string
+  is_private: boolean
+  created_at: number
+  updated_at: number
+}
+
+export interface GitHubAppStartRequest {
+  webhook_url: string
+  redirect_url: string
+}
+
+export interface GitHubAppStartResponse {
+  create_url: string
+}
+
+export interface GitHubAppCompleteRequest {
+  code: string
+}
+
+export interface GitHubAppCompleteResponse {
+  integration: Integration
+}
+
+export interface SyncInstallationsResponse {
+  installations: Array<IntegrationInstallation>
+}
+
+export interface GitLabStartRequest {
+  host_url: string
+  auth_mode: string
+  client_id?: string
+  client_secret?: string
+  access_token?: string
+}
+
+export interface GitLabCompleteResponse {
+  integration: Integration
+}
+
+export interface ListIntegrationsResponse {
+  integrations: Array<Integration>
+  total: number
+}
+
+export interface IntegrationDetailResponse {
+  integration: Integration
+  installation_count: number
+  repository_count: number
+  last_webhook_at?: number
+}
+
+export interface ListInstallationsResponse {
+  installations: Array<IntegrationInstallation>
+}
+
+export interface ListRepositoriesResponse {
+  repositories: Array<IntegrationRepository>
+}
+
+// ── Build domain types ─────────────────────────────────────────
+
+export type BuildStatus =
+  | 'queued'
+  | 'scheduled'
+  | 'assigned'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+  | 'timed_out'
+  | 'expired'
+
+export type TriggerType = 'manual' | 'api' | 'webhook' | 'schedule'
+
+export interface Build {
+  id: string
+  project_id: string
+  pipeline_id: string
+  build_number: number
+  status: BuildStatus
+  trigger_type: TriggerType
+  trigger_actor?: string
+  trigger_event?: string
+  trigger_ref?: string
+  commit_sha?: string
+  branch?: string
+  config_snapshot: Record<string, unknown>
+  runner_id?: string
+  queued_at: number
+  started_at?: number
+  finished_at?: number
+  created_at: number
+  updated_at: number
+}
+
+export interface BuildEvent {
+  id: string
+  build_id: string
+  from_status?: string
+  to_status: string
+  actor?: string
+  reason?: string
+  created_at: number
+}
+
+export interface CreateBuildRequest {
+  pipeline_id: string
+  branch?: string
+  commit_sha?: string
+  trigger_ref?: string
+}
+
+export interface CreateBuildResponse {
+  build: Build
+}
+
+export interface BuildDetailResponse {
+  build: Build
+  events: Array<BuildEvent>
+}
+
+export interface ListBuildsResponse {
+  builds: Array<Build>
+  total: number
+}
+
+export interface CancelBuildResponse {
+  build: Build
+}

@@ -14,11 +14,14 @@ casbin.workspace = true
 clap.workspace = true
 dirs.workspace = true
 hex.workspace = true
+jsonwebtoken.workspace = true
 oore-contract = { path = "../oore-contract" }
 openidconnect.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 url.workspace = true
+urlencoding.workspace = true
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

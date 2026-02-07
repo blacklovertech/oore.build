@@ -1,6 +1,8 @@
 pub mod auth;
+pub mod builds;
 pub mod crypto;
 pub mod extractors;
+pub mod integrations;
 pub mod observability;
 pub mod oidc;
 pub mod rbac;
@@ -843,6 +845,20 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
+    // Webhook routes are mounted OUTSIDE the CORS layer since they're called by providers
+    let webhook_routes = Router::new()
+        .route("/v1/webhooks/github", post(integrations::webhooks::github_webhook))
+        .route("/v1/webhooks/gitlab", post(integrations::webhooks::gitlab_webhook))
+        .with_state(shared_state.clone());
+
+    // GitHub App manifest flow routes — browser-navigated, return HTML, no auth middleware
+    // (authentication is via encrypted state token in query params)
+    let github_flow_routes = Router::new()
+        .route("/v1/integrations/github/create", get(integrations::github::github_create_page))
+        .route("/v1/integrations/github/callback", get(integrations::github::github_callback))
+        .route("/v1/integrations/github/installed", get(integrations::github::github_installed))
+        .with_state(shared_state.clone());
+
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/public/setup-status", get(setup_status))
@@ -865,8 +881,26 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .route("/v1/users/{user_id}/role", axum::routing::patch(users::update_user_role))
         .route("/v1/users/{user_id}", axum::routing::delete(users::delete_user))
         .route("/v1/users/{user_id}/enable", post(users::re_enable_user))
+        // Integration management endpoints
+        .route("/v1/integrations", get(integrations::list_integrations))
+        .route("/v1/integrations/{id}", get(integrations::get_integration))
+        .route("/v1/integrations/{id}", axum::routing::delete(integrations::delete_integration))
+        .route("/v1/integrations/{id}/repositories", get(integrations::list_repositories))
+        .route("/v1/integrations/github/start", post(integrations::github::github_start))
+        .route("/v1/integrations/github/complete", post(integrations::github::github_complete))
+        .route("/v1/integrations/{id}/installations", get(integrations::list_installations).post(integrations::github::sync_installations))
+        .route("/v1/integrations/gitlab/start", post(integrations::gitlab::gitlab_start))
+        // Build endpoints
+        .route("/v1/projects/{project_id}/builds", post(builds::create_build))
+        .route("/v1/builds", get(builds::list_builds))
+        .route("/v1/builds/{build_id}", get(builds::get_build))
+        .route("/v1/builds/{build_id}/cancel", post(builds::cancel_build))
         .layer(cors)
         .with_state(shared_state)
+        // Merge webhook routes (outside CORS)
+        .merge(webhook_routes)
+        // Merge GitHub App manifest flow routes (outside CORS — browser-navigated HTML pages)
+        .merge(github_flow_routes)
         // Merge the Prometheus /metrics endpoint (uses its own state)
         .merge(observability::metrics_router(metrics_handle))
         // Request metrics middleware wraps all routes (including /metrics)

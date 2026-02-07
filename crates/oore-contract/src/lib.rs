@@ -366,3 +366,415 @@ pub struct ListUsersResponse {
 pub struct UserProfileResponse {
     pub user: User,
 }
+
+// ── SCM Integration types ──────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScmProvider {
+    Github,
+    Gitlab,
+}
+
+impl fmt::Display for ScmProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Github => f.write_str("github"),
+            Self::Gitlab => f.write_str("gitlab"),
+        }
+    }
+}
+
+impl FromStr for ScmProvider {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "github" => Ok(Self::Github),
+            "gitlab" => Ok(Self::Gitlab),
+            other => Err(format!("unknown SCM provider: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationAuthMode {
+    GithubApp,
+    OauthApp,
+    PersonalToken,
+}
+
+impl fmt::Display for IntegrationAuthMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::GithubApp => f.write_str("github_app"),
+            Self::OauthApp => f.write_str("oauth_app"),
+            Self::PersonalToken => f.write_str("personal_token"),
+        }
+    }
+}
+
+impl FromStr for IntegrationAuthMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "github_app" => Ok(Self::GithubApp),
+            "oauth_app" => Ok(Self::OauthApp),
+            "personal_token" => Ok(Self::PersonalToken),
+            other => Err(format!("unknown integration auth mode: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationStatus {
+    Active,
+    Inactive,
+    Error,
+}
+
+impl fmt::Display for IntegrationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Active => f.write_str("active"),
+            Self::Inactive => f.write_str("inactive"),
+            Self::Error => f.write_str("error"),
+        }
+    }
+}
+
+impl FromStr for IntegrationStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(Self::Active),
+            "inactive" => Ok(Self::Inactive),
+            "error" => Ok(Self::Error),
+            other => Err(format!("unknown integration status: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Integration {
+    pub id: String,
+    pub provider: String,
+    pub host_url: String,
+    pub auth_mode: String,
+    pub status: String,
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_slug: Option<String>,
+    pub created_by: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntegrationInstallation {
+    pub id: String,
+    pub integration_id: String,
+    pub external_id: String,
+    pub account_name: String,
+    pub account_type: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntegrationRepository {
+    pub id: String,
+    pub installation_id: String,
+    pub external_id: String,
+    pub full_name: String,
+    pub default_branch: Option<String>,
+    pub is_private: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+// ── SCM Integration API types ──────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitHubAppStartRequest {
+    pub webhook_url: String,
+    /// Frontend URL to redirect to after GitHub App creation completes.
+    pub redirect_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitHubAppStartResponse {
+    /// URL to navigate the browser to — serves an auto-submitting form that POSTs the manifest to GitHub.
+    pub create_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitHubAppCompleteRequest {
+    pub code: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitHubAppCompleteResponse {
+    pub integration: Integration,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SyncInstallationsRequest {
+    pub installation_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SyncInstallationsResponse {
+    pub installations: Vec<IntegrationInstallation>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitLabStartRequest {
+    pub host_url: String,
+    pub auth_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitLabCompleteResponse {
+    pub integration: Integration,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListIntegrationsResponse {
+    pub integrations: Vec<Integration>,
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IntegrationDetailResponse {
+    pub integration: Integration,
+    pub installation_count: i64,
+    pub repository_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_webhook_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListInstallationsResponse {
+    pub installations: Vec<IntegrationInstallation>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListRepositoriesResponse {
+    pub repositories: Vec<IntegrationRepository>,
+}
+
+// ── Build domain types ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BuildStatus {
+    Queued,
+    Scheduled,
+    Assigned,
+    Running,
+    Succeeded,
+    Failed,
+    Canceled,
+    TimedOut,
+    Expired,
+}
+
+impl BuildStatus {
+    /// Returns true if this status is a terminal state (no further transitions).
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::Canceled | Self::TimedOut | Self::Expired
+        )
+    }
+
+    /// Returns the set of valid statuses this status can transition to.
+    pub fn valid_transitions(self) -> &'static [BuildStatus] {
+        match self {
+            Self::Queued => &[Self::Scheduled, Self::Canceled, Self::Expired],
+            Self::Scheduled => &[Self::Assigned, Self::Canceled, Self::Expired],
+            Self::Assigned => &[Self::Running, Self::Canceled, Self::TimedOut],
+            Self::Running => &[Self::Succeeded, Self::Failed, Self::Canceled, Self::TimedOut],
+            // Terminal states have no valid transitions
+            Self::Succeeded | Self::Failed | Self::Canceled | Self::TimedOut | Self::Expired => &[],
+        }
+    }
+
+    /// Check if transitioning from this status to `target` is valid.
+    pub fn can_transition_to(self, target: BuildStatus) -> bool {
+        self.valid_transitions().contains(&target)
+    }
+}
+
+impl fmt::Display for BuildStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Queued => "queued",
+            Self::Scheduled => "scheduled",
+            Self::Assigned => "assigned",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+            Self::TimedOut => "timed_out",
+            Self::Expired => "expired",
+        };
+        f.write_str(s)
+    }
+}
+
+impl FromStr for BuildStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "queued" => Ok(Self::Queued),
+            "scheduled" => Ok(Self::Scheduled),
+            "assigned" => Ok(Self::Assigned),
+            "running" => Ok(Self::Running),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "canceled" => Ok(Self::Canceled),
+            "timed_out" => Ok(Self::TimedOut),
+            "expired" => Ok(Self::Expired),
+            other => Err(format!("unknown build status: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerType {
+    Manual,
+    Api,
+    Webhook,
+    Schedule,
+}
+
+impl fmt::Display for TriggerType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Manual => f.write_str("manual"),
+            Self::Api => f.write_str("api"),
+            Self::Webhook => f.write_str("webhook"),
+            Self::Schedule => f.write_str("schedule"),
+        }
+    }
+}
+
+impl FromStr for TriggerType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "manual" => Ok(Self::Manual),
+            "api" => Ok(Self::Api),
+            "webhook" => Ok(Self::Webhook),
+            "schedule" => Ok(Self::Schedule),
+            other => Err(format!("unknown trigger type: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConcurrencyPolicy {
+    #[serde(default)]
+    pub cancel_previous: bool,
+    #[serde(default)]
+    pub max_concurrent: Option<u32>,
+}
+
+impl Default for ConcurrencyPolicy {
+    fn default() -> Self {
+        Self {
+            cancel_previous: false,
+            max_concurrent: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Build {
+    pub id: String,
+    pub project_id: String,
+    pub pipeline_id: String,
+    pub build_number: i64,
+    pub status: String,
+    pub trigger_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_actor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_event: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub config_snapshot: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_id: Option<String>,
+    pub queued_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildEvent {
+    pub id: String,
+    pub build_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_status: Option<String>,
+    pub to_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub created_at: i64,
+}
+
+// ── Build API types ────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateBuildRequest {
+    pub pipeline_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_ref: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateBuildResponse {
+    pub build: Build,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BuildDetailResponse {
+    pub build: Build,
+    pub events: Vec<BuildEvent>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListBuildsResponse {
+    pub builds: Vec<Build>,
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CancelBuildResponse {
+    pub build: Build,
+}
