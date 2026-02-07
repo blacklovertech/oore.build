@@ -534,6 +534,7 @@ pub struct SyncInstallationsResponse {
 pub struct GitLabStartRequest {
     pub host_url: String,
     pub auth_mode: String,
+    pub webhook_secret: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

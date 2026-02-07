@@ -64,6 +64,7 @@ Stored in `pipelines.concurrency` JSON column:
   - Log cancellation in build events with actor and reason
 - Deterministic: all matching builds are canceled before the new build is created
 - Branch-scoped: only affects builds on the same branch
+- Integration-scoped: webhook-triggered project resolution matches `integration_id + repository_full_name`
 
 ### Trigger Metadata (Immutable)
 
@@ -78,6 +79,9 @@ Every build stores:
 | `commit_sha` | HEAD commit at trigger time |
 | `webhook_id` | FK to integration_webhooks for traceability |
 | `config_snapshot` | pipeline config + trigger context captured at creation |
+
+Build-number allocation:
+- Build numbers are allocated inside the INSERT statement using `COALESCE(MAX(build_number), 0) + 1` scoped by project, avoiding stale read/compute/write races during concurrent triggers.
 
 ## Security Considerations
 
@@ -103,7 +107,7 @@ Every build stores:
 - [x] Every trigger source is auditable via build_events and trigger metadata.
 - [x] Duplicate webhook deliveries are idempotent (200 OK, no duplicate builds).
 - [x] Only actionable events (push, pull_request) trigger builds.
-- [x] Webhook-to-build resolution follows repository → project → pipeline chain.
+- [x] Webhook-to-build resolution follows integration + repository → project → pipeline chain.
 
 ## Owner
 

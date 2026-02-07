@@ -197,6 +197,24 @@ fn create_config_snapshot(
     })
 }
 
+async fn fetch_build_number(
+    pool: &sqlx::SqlitePool,
+    build_id: &str,
+) -> Result<i64, (StatusCode, Json<ApiError>)> {
+    sqlx::query_scalar("SELECT build_number FROM builds WHERE id = ?1")
+        .bind(build_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, build_id = %build_id, "failed to fetch build number");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to fetch build number",
+            )
+        })
+}
+
 // ── Query parameters ────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -322,16 +340,6 @@ pub async fn create_build(
         }
     }
 
-    // Get next build number for this project
-    let max_number: Option<i64> = sqlx::query_scalar(
-        "SELECT MAX(build_number) FROM builds WHERE project_id = ?1",
-    )
-    .bind(&project_id)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(None);
-
-    let build_number = max_number.unwrap_or(0) + 1;
     let now = now_unix();
     let build_id = Uuid::new_v4().to_string();
 
@@ -346,12 +354,13 @@ pub async fn create_build(
         "INSERT INTO builds (id, project_id, pipeline_id, build_number, status, \
          trigger_type, trigger_actor, trigger_ref, commit_sha, branch, \
          config_snapshot, queued_at, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, 'queued', 'manual', ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?10)",
+         VALUES (?1, ?2, ?3, \
+                 (SELECT COALESCE(MAX(build_number), 0) + 1 FROM builds WHERE project_id = ?2), \
+                 'queued', 'manual', ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?9)",
     )
     .bind(&build_id)
     .bind(&project_id)
     .bind(&req.pipeline_id)
-    .bind(build_number)
     .bind(&auth.0.email)
     .bind(&req.trigger_ref)
     .bind(&req.commit_sha)
@@ -364,6 +373,8 @@ pub async fn create_build(
         error!(error = %e, "failed to create build");
         api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to create build")
     })?;
+
+    let build_number = fetch_build_number(pool, &build_id).await?;
 
     // Insert initial build event
     sqlx::query(
@@ -588,6 +599,7 @@ pub async fn cancel_build(
 pub async fn trigger_build_from_webhook(
     pool: &sqlx::SqlitePool,
     webhook_id: &str,
+    integration_id: &str,
     repo_full_name: &str,
     branch: Option<&str>,
     commit_sha: Option<&str>,
@@ -598,8 +610,10 @@ pub async fn trigger_build_from_webhook(
     let project_rows = sqlx::query(
         "SELECT p.id, p.name FROM projects p \
          JOIN integration_repositories r ON r.id = p.repository_id \
-         WHERE r.full_name = ?1",
+         JOIN integration_installations i ON i.id = r.installation_id \
+         WHERE i.integration_id = ?1 AND r.full_name = ?2",
     )
+    .bind(integration_id)
     .bind(repo_full_name)
     .fetch_all(pool)
     .await
@@ -644,16 +658,6 @@ pub async fn trigger_build_from_webhook(
                 let _ = apply_cancel_previous(pool, &pipeline_id, branch, actor).await;
             }
 
-            // Get next build number
-            let max_number: Option<i64> = sqlx::query_scalar(
-                "SELECT MAX(build_number) FROM builds WHERE project_id = ?1",
-            )
-            .bind(&project_id)
-            .fetch_one(pool)
-            .await
-            .unwrap_or(None);
-
-            let build_number = max_number.unwrap_or(0) + 1;
             let build_id = Uuid::new_v4().to_string();
 
             let config_snapshot =
@@ -663,12 +667,13 @@ pub async fn trigger_build_from_webhook(
                 "INSERT INTO builds (id, project_id, pipeline_id, build_number, status, \
                  trigger_type, trigger_actor, trigger_event, trigger_ref, commit_sha, branch, \
                  config_snapshot, webhook_id, queued_at, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, 'queued', 'webhook', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?12)",
+                 VALUES (?1, ?2, ?3, \
+                         (SELECT COALESCE(MAX(build_number), 0) + 1 FROM builds WHERE project_id = ?2), \
+                         'queued', 'webhook', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?11)",
             )
             .bind(&build_id)
             .bind(&project_id)
             .bind(&pipeline_id)
-            .bind(build_number)
             .bind(actor)
             .bind(event_type)
             .bind(branch)
@@ -683,6 +688,8 @@ pub async fn trigger_build_from_webhook(
                 error!(error = %e, "failed to create webhook-triggered build");
                 api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to create build")
             })?;
+
+            let build_number = fetch_build_number(pool, &build_id).await?;
 
             // Insert initial build event
             sqlx::query(

@@ -65,7 +65,7 @@ Browser-navigated endpoints (no auth middleware, no CORS — authentication via 
 
 - `GET /v1/integrations/github/create?state=...` — serves HTML page with auto-submitting form that POSTs the GitHub App manifest to GitHub
 - `GET /v1/integrations/github/callback?code=...&state=...` — GitHub redirects here after app creation; exchanges manifest code for credentials, stores encrypted secrets, redirects to GitHub App install page
-- `GET /v1/integrations/github/installed?installation_id=...&setup_action=...` — GitHub redirects here after app installation via `setup_url`; auto-syncs installations and repos, then redirects to frontend integration detail page
+- `GET /v1/integrations/github/installed?installation_id=...&setup_action=...` — GitHub redirects here after app installation via `setup_url`; resolves integration via installation mapping or signed browser cookie set during callback (no "latest integration" fallback), auto-syncs, then redirects to frontend
 
 Webhook endpoints (no auth middleware, no CORS — provider-called):
 
@@ -75,7 +75,7 @@ Webhook endpoints (no auth middleware, no CORS — provider-called):
 Provider strategy:
 
 - GitHub: GitHub Apps via manifest flow with `setup_url` and `setup_on_update: true` in the manifest. After app creation, the callback redirects the user to install the app on their org/account. After installation, GitHub's `setup_url` redirects to the `github_installed` endpoint which auto-syncs installations and repos before redirecting to the frontend. App private key, webhook secret, client secret encrypted at rest. JWT auth (RS256) for GitHub API calls. Installation access tokens for repo enumeration.
-- GitLab: Personal access token or OAuth application modes. Supports gitlab.com and self-managed instances (custom host URL). Token validated via `GET /api/v4/user`. Projects synced via `GET /api/v4/projects?membership=true`.
+- GitLab: Personal access token or OAuth application modes. Supports gitlab.com and self-managed instances (custom host URL). Requires explicit webhook secret input for both modes and stores it encrypted. Token mode validates token via `GET /api/v4/user` and syncs projects via `GET /api/v4/projects?membership=true`. OAuth mode is created as `inactive` until full OAuth completion is implemented.
 
 Sync behavior:
 
@@ -100,6 +100,7 @@ RBAC: `integrations` resource added — owner/admin: read+write+delete, develope
 - All provider secrets/tokens encrypted at rest using existing AES-256-GCM pattern.
 - GitHub webhook verification: HMAC-SHA256 via `X-Hub-Signature-256` using `ring::hmac`.
 - GitLab webhook verification: constant-time comparison of `X-Gitlab-Token`.
+- Webhook-to-build trigger resolution is scoped by both repository and integration ID to prevent cross-integration collisions when repo names overlap.
 - Idempotency: UNIQUE constraint on `(integration_id, provider_delivery_id)`, duplicate = 200 OK no-op.
 - Replay window: reject GitLab events older than 5 minutes.
 - Body size limit: 1 MB max on webhook routes.
@@ -108,6 +109,7 @@ RBAC: `integrations` resource added — owner/admin: read+write+delete, develope
 - Credentials never returned in API responses.
 - GitHub manifest flow browser routes (`/create`, `/callback`, `/installed`) use encrypted state tokens (AES-256-GCM) with 10-minute expiry instead of session auth. This allows the browser redirect chain to work without requiring the user to re-authenticate on the backend.
 - State tokens are URL-encoded and include user identity, webhook URL, and redirect URL — all validated on use.
+- GitHub install callback correlation uses an encrypted, short-lived HttpOnly cookie instead of selecting the most recent GitHub integration.
 
 ## Migration and Rollout
 
@@ -139,6 +141,9 @@ RBAC: `integrations` resource added — owner/admin: read+write+delete, develope
 - [x] "Manage on GitHub" vs "Install on GitHub" button shown conditionally based on installation count.
 - [x] `app_id` and `app_slug` exposed in Integration API response for GitHub integrations.
 - [x] GET endpoint for listing installations per integration.
+- [x] GitLab setup requires webhook secret and stores it encrypted for webhook verification.
+- [x] GitHub install callback no longer falls back to "most recent integration".
+- [x] Webhook build triggers are integration-scoped (repo + integration), preventing cross-integration trigger bleed.
 
 ## Owner
 

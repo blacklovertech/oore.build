@@ -530,6 +530,7 @@ async fn process_webhook_event(
             match trigger_build_from_webhook(
                 pool,
                 webhook_id,
+                &event.integration_id,
                 repo,
                 event.branch.as_deref(),
                 event.commit_sha.as_deref(),

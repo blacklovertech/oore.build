@@ -38,6 +38,14 @@ pub async fn gitlab_start(
         return Err(api_err(StatusCode::BAD_REQUEST, "invalid_input", "host_url is not a valid URL"));
     }
 
+    if req.webhook_secret.trim().is_empty() {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_input",
+            "webhook_secret is required",
+        ));
+    }
+
     let auth_mode = req.auth_mode.as_str();
     if !matches!(auth_mode, "oauth_app" | "personal_token") {
         return Err(api_err(
@@ -147,6 +155,11 @@ pub async fn gitlab_start(
     let now = now_unix();
     let integration_id = Uuid::new_v4().to_string();
     let full_display_name = format!("{display_name} ({host_url})");
+    let integration_status = if auth_mode == "oauth_app" {
+        "inactive"
+    } else {
+        "active"
+    };
 
     let store = state.store.lock().await;
     let pool = store.pool();
@@ -154,11 +167,12 @@ pub async fn gitlab_start(
     // Insert integration
     sqlx::query(
         "INSERT INTO integrations (id, provider, host_url, auth_mode, status, display_name, created_by, created_at, updated_at) \
-         VALUES (?1, 'gitlab', ?2, ?3, 'active', ?4, ?5, ?6, ?6)",
+         VALUES (?1, 'gitlab', ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
     )
     .bind(&integration_id)
     .bind(&host_url)
     .bind(auth_mode)
+    .bind(integration_status)
     .bind(&full_display_name)
     .bind(&auth.0.user_id)
     .bind(now)
@@ -170,6 +184,26 @@ pub async fn gitlab_start(
     })?;
 
     // Store credentials
+    let encrypted_webhook_secret = crypto::encrypt(req.webhook_secret.trim(), &state.encryption_key).map_err(|e| {
+        error!(error = %e, "failed to encrypt webhook secret");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "encryption_error", "Failed to encrypt credentials")
+    })?;
+
+    sqlx::query(
+        "INSERT INTO integration_credentials (id, integration_id, credential_type, encrypted_value, created_at, updated_at) \
+         VALUES (?1, ?2, 'webhook_secret', ?3, ?4, ?4)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(&integration_id)
+    .bind(&encrypted_webhook_secret)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to store webhook secret");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to store credentials")
+    })?;
+
     match auth_mode {
         "personal_token" => {
             let token = req.access_token.as_ref().unwrap();
@@ -267,14 +301,20 @@ pub async fn gitlab_start(
     )
     .await;
 
-    info!(integration_id = %integration_id, host = %host_url, mode = %auth_mode, "GitLab integration created");
+    info!(
+        integration_id = %integration_id,
+        host = %host_url,
+        mode = %auth_mode,
+        status = %integration_status,
+        "GitLab integration created"
+    );
 
     let integration = Integration {
         id: integration_id,
         provider: "gitlab".to_string(),
         host_url,
         auth_mode: auth_mode.to_string(),
-        status: "active".to_string(),
+        status: integration_status.to_string(),
         display_name: Some(full_display_name),
         app_id: None,
         app_slug: None,

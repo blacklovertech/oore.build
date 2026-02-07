@@ -44,21 +44,29 @@ function GitLabSetupPage() {
   const [accessToken, setAccessToken] = useState('')
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
+  const [webhookSecret, setWebhookSecret] = useState('')
 
   function handleSubmit() {
     startMutation.mutate(
       {
         host_url: hostUrl,
         auth_mode: authMode,
+        webhook_secret: webhookSecret,
         access_token: authMode === 'personal_token' ? accessToken : undefined,
         client_id: authMode === 'oauth_app' ? clientId : undefined,
         client_secret: authMode === 'oauth_app' ? clientSecret : undefined,
       },
       {
         onSuccess: (data) => {
-          toast.success(
-            `Connected: ${data.integration.display_name ?? 'GitLab'}`,
-          )
+          if (data.integration.status === 'inactive') {
+            toast.message(
+              `Saved: ${data.integration.display_name ?? 'GitLab'} (OAuth setup pending)`,
+            )
+          } else {
+            toast.success(
+              `Connected: ${data.integration.display_name ?? 'GitLab'}`,
+            )
+          }
           void navigate({ to: '/settings/integrations' })
         },
         onError: (err) => {
@@ -70,6 +78,7 @@ function GitLabSetupPage() {
 
   const isValid =
     hostUrl.trim() !== '' &&
+    webhookSecret.trim() !== '' &&
     (authMode === 'personal_token'
       ? accessToken.trim() !== ''
       : clientId.trim() !== '' && clientSecret.trim() !== '')
@@ -117,6 +126,19 @@ function GitLabSetupPage() {
                 <SelectItem value="oauth_app">OAuth Application</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Webhook Secret</Label>
+            <Input
+              type="password"
+              value={webhookSecret}
+              onChange={(e) => setWebhookSecret(e.target.value)}
+              placeholder="Shared secret used in GitLab webhook settings"
+            />
+            <p className="text-xs text-muted-foreground">
+              Use the exact same secret when creating the GitLab webhook for this instance.
+            </p>
           </div>
 
           {authMode === 'personal_token' && (

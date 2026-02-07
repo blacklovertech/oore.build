@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{header::SET_COOKIE, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::Json;
 use oore_contract::{
@@ -25,6 +25,8 @@ type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiError>)>;
 
 /// Maximum age (seconds) for a GitHub OAuth state token.
 const STATE_MAX_AGE_SECS: i64 = 600; // 10 minutes
+/// Maximum age (seconds) for GitHub install-callback browser cookie.
+const INSTALL_STATE_MAX_AGE_SECS: i64 = 1800; // 30 minutes
 
 // ── State token ──────────────────────────────────────────────────
 
@@ -35,6 +37,12 @@ struct GitHubOAuthState {
     user_email: String,
     webhook_url: String,
     redirect_url: String,
+    created_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GitHubInstallState {
+    integration_id: String,
     created_at: i64,
 }
 
@@ -59,6 +67,48 @@ fn open_state(token: &str, key: &[u8]) -> Result<GitHubOAuthState, String> {
     }
 
     Ok(state)
+}
+
+fn seal_install_state(state: &GitHubInstallState, key: &[u8]) -> Result<String, anyhow::Error> {
+    let json = serde_json::to_string(state)?;
+    let encrypted = crypto::encrypt(&json, key)?;
+    Ok(urlencoding::encode(&encrypted).into_owned())
+}
+
+fn open_install_state(token: &str, key: &[u8]) -> Result<GitHubInstallState, String> {
+    let decoded = urlencoding::decode(token).map_err(|e| format!("url decode: {e}"))?;
+    let json = crypto::decrypt(&decoded, key).map_err(|e| format!("decrypt: {e}"))?;
+    let state: GitHubInstallState =
+        serde_json::from_str(&json).map_err(|e| format!("parse: {e}"))?;
+
+    let now = now_unix();
+    if now - state.created_at > INSTALL_STATE_MAX_AGE_SECS {
+        return Err("install state token expired".into());
+    }
+
+    Ok(state)
+}
+
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    let raw = headers.get("cookie")?.to_str().ok()?;
+    for pair in raw.split(';') {
+        let mut parts = pair.trim().splitn(2, '=');
+        let key = parts.next()?.trim();
+        if key != name {
+            continue;
+        }
+        let value = parts.next().unwrap_or("").trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn set_cookie_headers(resp: &mut Response, cookie: &str) {
+    if let Ok(value) = HeaderValue::from_str(cookie) {
+        resp.headers_mut().append(SET_COOKIE, value);
+    }
 }
 
 // ── Manifest ─────────────────────────────────────────────────────
@@ -298,10 +348,23 @@ pub async fn github_callback(
                 "GitHub App created via callback"
             );
 
+            let install_state = GitHubInstallState {
+                integration_id: integration.id.clone(),
+                created_at: now_unix(),
+            };
+            let sealed_install_state = seal_install_state(&install_state, &state.encryption_key).ok();
+
             // Redirect to GitHub install page so user can install the app on their org/account
             if let Some(ref slug) = integration.app_slug {
                 let install_url = format!("https://github.com/apps/{}/installations/new", slug);
-                Redirect::to(&install_url).into_response()
+                let mut resp = Redirect::to(&install_url).into_response();
+                if let Some(token) = sealed_install_state {
+                    let cookie = format!(
+                        "oore_gh_install_state={token}; Max-Age={INSTALL_STATE_MAX_AGE_SECS}; Path=/v1/integrations/github/installed; HttpOnly; SameSite=Lax"
+                    );
+                    set_cookie_headers(&mut resp, &cookie);
+                }
+                resp
             } else {
                 // Fallback: redirect to frontend if slug is not available
                 let sep = if oauth_state.redirect_url.contains('?') {
@@ -313,7 +376,14 @@ pub async fn github_callback(
                     "{}{}github=success&integration_id={}",
                     oauth_state.redirect_url, sep, integration.id
                 );
-                Redirect::to(&redirect_url).into_response()
+                let mut resp = Redirect::to(&redirect_url).into_response();
+                if let Some(token) = sealed_install_state {
+                    let cookie = format!(
+                        "oore_gh_install_state={token}; Max-Age={INSTALL_STATE_MAX_AGE_SECS}; Path=/v1/integrations/github/installed; HttpOnly; SameSite=Lax"
+                    );
+                    set_cookie_headers(&mut resp, &cookie);
+                }
+                resp
             }
         }
         Err(msg) => {
@@ -342,6 +412,7 @@ pub struct InstalledQuery {
 /// simple HTML page that auto-redirects to the frontend integration detail page.
 pub async fn github_installed(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Query(params): Query<InstalledQuery>,
 ) -> Response {
     info!(
@@ -352,14 +423,18 @@ pub async fn github_installed(
 
     // Clone the pool and find integration_id, then release the store lock
     // so perform_sync (which makes HTTP calls) doesn't hold it.
+    let install_state_integration_id = cookie_value(&headers, "oore_gh_install_state")
+        .and_then(|token| open_install_state(&token, &state.encryption_key).ok())
+        .map(|s| s.integration_id);
+
     let (pool, integration_id) = {
         let store = state.store.lock().await;
         let pool = store.pool().clone();
 
-        // Try to find the integration by installation external_id, or fall back to the most recent GitHub integration
+        // First try to resolve integration by known installation ID (if we already synced once).
         let integration_id: Option<String> = if let Some(inst_id) = params.installation_id {
             let external_id = inst_id.to_string();
-            let result: Option<String> = sqlx::query_scalar(
+            sqlx::query_scalar(
                 "SELECT i.id FROM integrations i \
                  JOIN integration_installations ii ON ii.integration_id = i.id \
                  WHERE ii.external_id = ?1 AND i.provider = 'github' \
@@ -368,28 +443,15 @@ pub async fn github_installed(
             .bind(&external_id)
             .fetch_optional(&pool)
             .await
-            .unwrap_or(None);
-
-            if result.is_some() {
-                result
-            } else {
-                sqlx::query_scalar(
-                    "SELECT id FROM integrations WHERE provider = 'github' ORDER BY created_at DESC LIMIT 1",
-                )
-                .fetch_optional(&pool)
-                .await
-                .unwrap_or(None)
-            }
-        } else {
-            sqlx::query_scalar(
-                "SELECT id FROM integrations WHERE provider = 'github' ORDER BY created_at DESC LIMIT 1",
-            )
-            .fetch_optional(&pool)
-            .await
             .unwrap_or(None)
+        } else {
+            None
         };
 
-        (pool, integration_id)
+        // If installation lookup misses (common for first install), fall back to
+        // signed browser cookie set during app creation callback.
+        let resolved = integration_id.or(install_state_integration_id);
+        (pool, resolved)
     };
 
     // Auto-sync installations and repos so the detail page shows fresh data
@@ -447,11 +509,17 @@ pub async fn github_installed(
     </p>
   </div>
 </body>
-</html>"#,
+    </html>"#,
         redirect_url = html_escape(&redirect_target),
     );
 
-    Html(html).into_response()
+    let mut resp = Html(html).into_response();
+    // Clear install-state cookie after callback handling.
+    set_cookie_headers(
+        &mut resp,
+        "oore_gh_install_state=; Max-Age=0; Path=/v1/integrations/github/installed; HttpOnly; SameSite=Lax",
+    );
+    resp
 }
 
 /// Exchange the manifest code with GitHub and store credentials.
