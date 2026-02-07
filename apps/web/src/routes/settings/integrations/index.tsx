@@ -28,8 +28,12 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import PageLayout from '@/components/page-layout'
+import PageHeader from '@/components/page-header'
+import { getIntegrationStatusVariant } from '@/lib/status-variants'
 
 export const Route = createFileRoute('/settings/integrations/')({
+  staticData: { breadcrumbLabel: 'Integrations' },
   validateSearch: (search: Record<string, unknown>): { github?: string; integration_id?: string } => ({
     github: (search.github as string) || undefined,
     integration_id: (search.integration_id as string) || undefined,
@@ -67,17 +71,11 @@ function IntegrationsPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Integrations
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Connect your Git providers to enable build triggers.
-          </p>
-        </div>
-      </div>
+    <PageLayout>
+      <PageHeader
+        title="Integrations"
+        description="Connect your Git providers to enable build triggers."
+      />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
@@ -135,38 +133,35 @@ function IntegrationsPage() {
         )}
 
         {data?.integrations.map((integration) => (
-          <Card key={integration.id}>
-            <CardContent className="flex items-center justify-between py-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">
-                    {integration.display_name ?? integration.provider}
-                  </span>
-                  <Badge variant={integration.status === 'active' ? 'default' : 'secondary'}>
-                    {integration.status}
-                  </Badge>
-                  <Badge variant="outline">{integration.provider}</Badge>
+          <Link
+            key={integration.id}
+            to="/settings/integrations/$integrationId"
+            params={{ integrationId: integration.id }}
+            className="group/integration block"
+          >
+            <Card size="sm" className="py-0 transition-colors group-hover/integration:bg-muted/50">
+              <CardContent className="flex items-center justify-between py-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium group-hover/integration:text-foreground">
+                      {integration.display_name ?? integration.provider}
+                    </span>
+                    <Badge variant={getIntegrationStatusVariant(integration.status)}>
+                      {integration.status}
+                    </Badge>
+                    <Badge variant="outline">{integration.provider}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {integration.host_url} &middot; {integration.auth_mode}
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {integration.host_url} &middot; {integration.auth_mode}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  render={
-                    <Link
-                      to="/settings/integrations/$integrationId"
-                      params={{ integrationId: integration.id }}
-                    />
-                  }
-                >
-                  Details
-                </Button>
                 <AlertDialog>
                   <AlertDialogTrigger render={
-                    <Button variant="ghost" size="sm">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e: React.MouseEvent) => e.preventDefault()}
+                    >
                       <HugeiconsIcon icon={Delete02Icon} size={16} />
                     </Button>
                   } />
@@ -193,11 +188,11 @@ function IntegrationsPage() {
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Link>
         ))}
       </div>
-    </div>
+    </PageLayout>
   )
 }

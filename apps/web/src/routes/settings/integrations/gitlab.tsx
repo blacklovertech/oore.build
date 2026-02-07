@@ -21,8 +21,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import PageLayout from '@/components/page-layout'
+import PageHeader from '@/components/page-header'
 
 export const Route = createFileRoute('/settings/integrations/gitlab')({
+  staticData: { breadcrumbLabel: 'GitLab' },
   beforeLoad: () => {
     const instance = getActiveInstanceOrRedirect()
     requireAuthOrRedirect(instance.id)
@@ -72,15 +75,12 @@ function GitLabSetupPage() {
       : clientId.trim() !== '' && clientSecret.trim() !== '')
 
   return (
-    <div className="max-w-xl mx-auto w-full px-6 py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Connect GitLab
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Connect to gitlab.com or a self-managed GitLab instance.
-        </p>
-      </div>
+    <PageLayout width="narrow">
+      <PageHeader
+        title="Connect GitLab"
+        description="Connect to gitlab.com or a self-managed GitLab instance."
+        back={{ to: '/settings/integrations', label: 'Back to Integrations' }}
+      />
 
       <Card>
         <CardHeader>
@@ -165,6 +165,6 @@ function GitLabSetupPage() {
           </Button>
         </CardContent>
       </Card>
-    </div>
+    </PageLayout>
   )
 }

@@ -15,8 +15,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import PageLayout from '@/components/page-layout'
+import PageHeader from '@/components/page-header'
 
 export const Route = createFileRoute('/settings/integrations/github')({
+  staticData: { breadcrumbLabel: 'GitHub' },
   beforeLoad: () => {
     const instance = getActiveInstanceOrRedirect()
     requireAuthOrRedirect(instance.id)
@@ -51,15 +54,12 @@ function GitHubSetupPage() {
   }
 
   return (
-    <div className="max-w-xl mx-auto w-full px-6 py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Connect GitHub
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Create a GitHub App to access repositories and receive webhooks.
-        </p>
-      </div>
+    <PageLayout width="narrow">
+      <PageHeader
+        title="Connect GitHub"
+        description="Create a GitHub App to access repositories and receive webhooks."
+        back={{ to: '/settings/integrations', label: 'Back to Integrations' }}
+      />
 
       <Card>
         <CardHeader>
@@ -79,6 +79,6 @@ function GitHubSetupPage() {
           </Button>
         </CardContent>
       </Card>
-    </div>
+    </PageLayout>
   )
 }

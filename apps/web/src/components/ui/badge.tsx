@@ -23,7 +23,7 @@ const badgeVariants = cva(
         success:
           'bg-success/15 text-success dark:bg-success/20',
         warning:
-          'bg-warning/15 text-warning-foreground dark:bg-warning/20 dark:text-warning',
+          'bg-warning/15 text-warning dark:bg-warning/20',
         info:
           'bg-info/15 text-info dark:bg-info/20',
       },

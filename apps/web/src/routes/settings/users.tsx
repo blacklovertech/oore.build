@@ -44,8 +44,11 @@ import {
   requireAuthOrRedirect,
 } from '@/lib/instance-context'
 import { ApiClientError } from '@/lib/api'
+import PageLayout from '@/components/page-layout'
+import PageHeader from '@/components/page-header'
 
 export const Route = createFileRoute('/settings/users')({
+  staticData: { breadcrumbLabel: 'Users' },
   beforeLoad: () => {
     const instance = getActiveInstanceOrRedirect()
     requireAuthOrRedirect(instance.id)
@@ -279,7 +282,7 @@ function UsersSettingsPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-8">
+      <PageLayout>
         <div className="space-y-2">
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-4 w-80" />
@@ -290,7 +293,7 @@ function UsersSettingsPage() {
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-      </div>
+      </PageLayout>
     )
   }
 
@@ -310,7 +313,11 @@ function UsersSettingsPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-6">
+    <PageLayout>
+      <PageHeader
+        title="Users"
+        description="Manage team members and their roles."
+      />
       {/* Invite form */}
       <Card>
         <CardContent className="space-y-4">
@@ -381,6 +388,6 @@ function UsersSettingsPage() {
         isPending={pendingMutation}
         onConfirm={handleConfirm}
       />
-    </div>
+    </PageLayout>
   )
 }

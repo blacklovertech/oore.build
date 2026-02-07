@@ -4,6 +4,7 @@ import { InformationCircleIcon } from '@hugeicons/core-free-icons'
 
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
 import { useBuilds } from '@/hooks/use-builds'
+import { getStatusVariant } from '@/lib/status-variants'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -11,8 +12,11 @@ import {
 } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import PageLayout from '@/components/page-layout'
+import PageHeader from '@/components/page-header'
 
 export const Route = createFileRoute('/builds/')({
+  staticData: { breadcrumbLabel: 'Builds' },
   beforeLoad: () => {
     const instance = getActiveInstanceOrRedirect()
     requireAuthOrRedirect(instance.id)
@@ -20,29 +24,15 @@ export const Route = createFileRoute('/builds/')({
   component: BuildsListPage,
 })
 
-const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  queued: 'outline',
-  scheduled: 'outline',
-  assigned: 'secondary',
-  running: 'default',
-  succeeded: 'default',
-  failed: 'destructive',
-  canceled: 'secondary',
-  timed_out: 'destructive',
-  expired: 'secondary',
-}
-
 function BuildsListPage() {
   const { data, isLoading, error } = useBuilds({ limit: 50 })
 
   return (
-    <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Builds</h1>
-        <p className="text-sm text-muted-foreground">
-          View and manage build history across all projects.
-        </p>
-      </div>
+    <PageLayout>
+      <PageHeader
+        title="Builds"
+        description="View and manage build history across all projects."
+      />
 
       {isLoading && (
         <div className="space-y-3">
@@ -75,7 +65,7 @@ function BuildsListPage() {
                     <span className="font-mono text-sm">
                       #{build.build_number}
                     </span>
-                    <Badge variant={STATUS_COLORS[build.status] ?? 'outline'}>
+                    <Badge variant={getStatusVariant(build.status)}>
                       {build.status}
                     </Badge>
                     <Badge variant="outline">{build.trigger_type}</Badge>
@@ -100,6 +90,6 @@ function BuildsListPage() {
           </Link>
         ))}
       </div>
-    </div>
+    </PageLayout>
   )
 }

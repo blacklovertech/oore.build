@@ -60,7 +60,8 @@ Tailwind v4 maps CSS variables to utility classes via `@theme inline` in `styles
 
 ## Typography
 
-- **Font:** Inter Variable (`@fontsource-variable/inter`)
+- **Sans font:** Google Sans Flex (self-hosted variable woff2, weight 100–900)
+- **Mono font:** JetBrains Mono Variable (`@fontsource-variable/jetbrains-mono`) — commit SHAs, build numbers, IDs
 - **Body text:** `text-sm` (14px)
 - **Page headings:** `text-2xl font-semibold tracking-tight`
 - **Section headings:** `text-lg font-medium` or `text-sm font-medium` for card titles
@@ -69,8 +70,9 @@ Tailwind v4 maps CSS variables to utility classes via `@theme inline` in `styles
 
 ## Spacing and Layout
 
-- **Page containers:** `max-w-4xl mx-auto px-6 py-8` for standard pages
-- **Focused flows** (login, setup): `max-w-lg` or `max-w-sm` centered
+- **Page containers:** Use `PageLayout` component (`max-w-4xl mx-auto px-6 py-8 space-y-8`). Supports `width="narrow"` (max-w-xl) and `width="wide"` (max-w-6xl).
+- **Page headers:** Use `PageHeader` component with `title`, optional `description`, `actions`, `back`, and `meta` props. Replaces ad-hoc `<h1>` + `<p>` patterns.
+- **Focused flows** (login, setup): `max-w-lg` or `max-w-sm` centered, or `PageLayout width="narrow"`
 - **Vertical rhythm:** `space-y-8` between page sections, `space-y-4` within cards
 - **Gaps:** `gap-3` for inline form rows, `gap-2` for button groups
 
@@ -365,7 +367,10 @@ toast.error('Failed to update role')
 | Raw `<select>` elements | shadcn `Select` |
 | Raw `<input>` without styling | shadcn `Input` |
 | `useState` + `setTimeout` for feedback | Sonner `toast` |
-| Hard-coded color classes (`text-green-600`) | Token classes (`text-primary`) or new tokens |
+| Hard-coded color classes (`text-green-600`) | Token classes (`text-primary`, `text-success`) or new tokens |
+| Manual status-to-color badge mapping | `getStatusVariant()` / `getIntegrationStatusVariant()` from `@/lib/status-variants` |
+| Ad-hoc `<h1>` + `<p>` page headers | `PageHeader` component |
+| Inline `max-w-4xl mx-auto px-6 py-8` wrappers | `PageLayout` component |
 | Custom drawer with `transform transition` | shadcn `Sheet` |
 
 ## Sidebar Layout
@@ -375,7 +380,7 @@ The app uses a `SidebarProvider` + `Sidebar` + `SidebarInset` layout (shadcn sid
 ### Structure
 
 - **SidebarHeader**: `InstanceSwitcher` — switch/add/remove backend instances
-- **SidebarContent**: `NavMain` — navigation items (Dashboard, Users for admin/owner)
+- **SidebarContent**: `NavMain` — flat navigation (Dashboard, Builds, separator, Users + Integrations for admin/owner)
 - **SidebarFooter**: `NavUser` — user avatar dropdown with email, role, sign out
 
 ### When Sidebar Shows

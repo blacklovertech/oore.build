@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
-import { createFileRoute, Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
-  ArrowLeft02Icon,
   Delete02Icon,
   InformationCircleIcon,
   Refresh01Icon,
@@ -18,6 +17,7 @@ import {
   useSyncInstallations,
   useDeleteIntegration,
 } from '@/hooks/use-integrations'
+import { getIntegrationStatusVariant } from '@/lib/status-variants'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,6 +26,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,8 +47,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import PageLayout from '@/components/page-layout'
+import PageHeader from '@/components/page-header'
 
 export const Route = createFileRoute('/settings/integrations/$integrationId')({
+  staticData: { breadcrumbLabel: 'Details' },
   validateSearch: (search: Record<string, unknown>): { installed?: string } => ({
     installed: (search.installed as string) || undefined,
   }),
@@ -95,24 +106,24 @@ function IntegrationDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-4">
+      <PageLayout>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-48 w-full" />
-      </div>
+      </PageLayout>
     )
   }
 
   if (error) {
     return (
-      <div className="max-w-4xl mx-auto w-full px-6 py-8">
+      <PageLayout>
         <Alert variant="destructive">
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
           <AlertDescription>
             Failed to load integration: {error.message}
           </AlertDescription>
         </Alert>
-      </div>
+      </PageLayout>
     )
   }
 
@@ -123,30 +134,19 @@ function IntegrationDetailPage() {
   const repositories = reposData?.repositories ?? []
 
   return (
-    <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-6">
-      <div>
-        <Link
-          to="/settings/integrations"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
-        >
-          <HugeiconsIcon icon={ArrowLeft02Icon} size={14} />
-          Back to Integrations
-        </Link>
-
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {integration.display_name ?? integration.provider}
-            </h1>
-            <div className="flex items-center gap-2">
-              <Badge variant={integration.status === 'active' ? 'default' : 'secondary'}>
-                {integration.status}
-              </Badge>
-              <Badge variant="outline">{integration.provider}</Badge>
-            </div>
-          </div>
-        </div>
-      </div>
+    <PageLayout>
+      <PageHeader
+        title={integration.display_name ?? integration.provider}
+        back={{ to: '/settings/integrations', label: 'Back to Integrations' }}
+        meta={
+          <>
+            <Badge variant={getIntegrationStatusVariant(integration.status)}>
+              {integration.status}
+            </Badge>
+            <Badge variant="outline">{integration.provider}</Badge>
+          </>
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -243,26 +243,24 @@ function IntegrationDetailPage() {
                 : '.'}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="pb-2 font-medium text-muted-foreground">Account</th>
-                    <th className="pb-2 font-medium text-muted-foreground">Type</th>
-                    <th className="pb-2 font-medium text-muted-foreground">External ID</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {installations.map((inst) => (
-                    <tr key={inst.id} className="border-b last:border-0">
-                      <td className="py-2">{inst.account_name}</td>
-                      <td className="py-2">{inst.account_type ?? '—'}</td>
-                      <td className="py-2 font-mono text-muted-foreground">{inst.external_id}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Account</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>External ID</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {installations.map((inst) => (
+                  <TableRow key={inst.id}>
+                    <TableCell>{inst.account_name}</TableCell>
+                    <TableCell>{inst.account_type ?? '—'}</TableCell>
+                    <TableCell className="font-mono text-muted-foreground">{inst.external_id}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
@@ -277,35 +275,33 @@ function IntegrationDetailPage() {
               No repositories synced yet.
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="pb-2 font-medium text-muted-foreground">Repository</th>
-                    <th className="pb-2 font-medium text-muted-foreground">Default Branch</th>
-                    <th className="pb-2 font-medium text-muted-foreground">Visibility</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {repositories.map((repo) => (
-                    <tr key={repo.id} className="border-b last:border-0">
-                      <td className="py-2">{repo.full_name}</td>
-                      <td className="py-2 font-mono text-muted-foreground">
-                        {repo.default_branch ?? '—'}
-                      </td>
-                      <td className="py-2">
-                        <Badge variant={repo.is_private ? 'secondary' : 'outline'}>
-                          {repo.is_private ? 'private' : 'public'}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Repository</TableHead>
+                  <TableHead>Default Branch</TableHead>
+                  <TableHead>Visibility</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {repositories.map((repo) => (
+                  <TableRow key={repo.id}>
+                    <TableCell>{repo.full_name}</TableCell>
+                    <TableCell className="font-mono text-muted-foreground">
+                      {repo.default_branch ?? '—'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={repo.is_private ? 'secondary' : 'outline'}>
+                        {repo.is_private ? 'private' : 'public'}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageLayout>
   )
 }

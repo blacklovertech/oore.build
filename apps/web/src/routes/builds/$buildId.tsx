@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
 import { useBuild, useCancelBuild } from '@/hooks/use-builds'
+import { getStatusVariant } from '@/lib/status-variants'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,8 +16,11 @@ import {
 } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import PageLayout from '@/components/page-layout'
+import PageHeader from '@/components/page-header'
 
 export const Route = createFileRoute('/builds/$buildId')({
+  staticData: { breadcrumbLabel: 'Details' },
   beforeLoad: () => {
     const instance = getActiveInstanceOrRedirect()
     requireAuthOrRedirect(instance.id)
@@ -50,24 +54,24 @@ function BuildDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-4">
+      <PageLayout>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-48 w-full" />
-      </div>
+      </PageLayout>
     )
   }
 
   if (error) {
     return (
-      <div className="max-w-4xl mx-auto w-full px-6 py-8">
+      <PageLayout>
         <Alert variant="destructive">
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
           <AlertDescription>
             Failed to load build: {error.message}
           </AlertDescription>
         </Alert>
-      </div>
+      </PageLayout>
     )
   }
 
@@ -77,27 +81,29 @@ function BuildDetailPage() {
   const canCancel = !TERMINAL_STATUSES.has(build.status)
 
   return (
-    <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Build #{build.build_number}
-          </h1>
-          <div className="flex items-center gap-2">
-            <Badge>{build.status}</Badge>
+    <PageLayout>
+      <PageHeader
+        title={`Build #${build.build_number}`}
+        meta={
+          <>
+            <Badge variant={getStatusVariant(build.status)}>
+              {build.status}
+            </Badge>
             <Badge variant="outline">{build.trigger_type}</Badge>
-          </div>
-        </div>
-        {canCancel && (
-          <Button
-            variant="destructive"
-            onClick={handleCancel}
-            disabled={cancelMutation.isPending}
-          >
-            {cancelMutation.isPending ? 'Canceling...' : 'Cancel Build'}
-          </Button>
-        )}
-      </div>
+          </>
+        }
+        actions={
+          canCancel ? (
+            <Button
+              variant="destructive"
+              onClick={handleCancel}
+              disabled={cancelMutation.isPending}
+            >
+              {cancelMutation.isPending ? 'Canceling...' : 'Cancel Build'}
+            </Button>
+          ) : undefined
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -184,6 +190,6 @@ function BuildDetailPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageLayout>
   )
 }

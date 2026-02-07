@@ -8,8 +8,11 @@ import { useSetupStatus } from '@/hooks/use-setup'
 import { useActiveInstance } from '@/stores/instance-store'
 import { useAuthStore } from '@/stores/auth-store'
 import AddInstanceDialog from '@/components/AddInstanceDialog'
+import PageLayout from '@/components/page-layout'
+import PageHeader from '@/components/page-header'
 
 export const Route = createFileRoute('/')({
+  staticData: { breadcrumbLabel: 'Dashboard' },
   component: IndexPage,
 })
 
@@ -114,7 +117,8 @@ function IndexPage() {
 
   if (status?.is_configured) {
     return (
-      <div className="max-w-4xl mx-auto w-full px-6 py-8 space-y-6">
+      <PageLayout>
+        <PageHeader title="Dashboard" />
         <div className="grid grid-cols-3 gap-4">
           <Card>
             <CardContent className="space-y-1">
@@ -125,7 +129,7 @@ function IndexPage() {
           <Card>
             <CardContent className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Status</p>
-              <p className="text-sm font-medium text-green-600">Ready</p>
+              <p className="text-sm font-medium text-success">Ready</p>
             </CardContent>
           </Card>
           <Card>
@@ -145,7 +149,7 @@ function IndexPage() {
             </p>
           </CardContent>
         </Card>
-      </div>
+      </PageLayout>
     )
   }
 
