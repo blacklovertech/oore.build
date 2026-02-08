@@ -549,6 +549,17 @@ pub struct GitLabCompleteResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct GitLabAuthorizeRequest {
+    pub integration_id: String,
+    pub redirect_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitLabAuthorizeResponse {
+    pub authorize_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ListIntegrationsResponse {
     pub integrations: Vec<Integration>,
     pub total: i64,
@@ -701,6 +712,101 @@ impl Default for ConcurrencyPolicy {
     }
 }
 
+// ── Trigger config ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggerConfig {
+    #[serde(default)]
+    pub events: Vec<String>,
+    #[serde(default)]
+    pub branches: Vec<String>,
+}
+
+impl Default for TriggerConfig {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            branches: Vec::new(),
+        }
+    }
+}
+
+impl TriggerConfig {
+    /// Map provider-specific event names to canonical names.
+    ///
+    /// Canonical names: `"push"`, `"pull_request"`, `"tag_push"`.
+    pub fn normalize_event(event_type: &str) -> String {
+        match event_type {
+            "Push Hook" => "push".to_string(),
+            "Merge Request Hook" => "pull_request".to_string(),
+            "Tag Push Hook" => "tag_push".to_string(),
+            other => other.to_lowercase(),
+        }
+    }
+
+    /// Simple glob match supporting `*` (any chars) and `?` (single char).
+    pub fn glob_match(pattern: &str, value: &str) -> bool {
+        Self::glob_match_inner(pattern.as_bytes(), value.as_bytes())
+    }
+
+    fn glob_match_inner(pattern: &[u8], value: &[u8]) -> bool {
+        let (mut pi, mut vi) = (0, 0);
+        let (mut star_pi, mut star_vi) = (usize::MAX, 0);
+
+        while vi < value.len() {
+            if pi < pattern.len() && (pattern[pi] == b'?' || pattern[pi] == value[vi]) {
+                pi += 1;
+                vi += 1;
+            } else if pi < pattern.len() && pattern[pi] == b'*' {
+                star_pi = pi;
+                star_vi = vi;
+                pi += 1;
+            } else if star_pi != usize::MAX {
+                pi = star_pi + 1;
+                star_vi += 1;
+                vi = star_vi;
+            } else {
+                return false;
+            }
+        }
+
+        while pi < pattern.len() && pattern[pi] == b'*' {
+            pi += 1;
+        }
+
+        pi == pattern.len()
+    }
+
+    /// Determine whether a webhook event should trigger this pipeline.
+    ///
+    /// Empty `events` list means all events match. Empty `branches` list
+    /// means all branches match. `None` branch with a non-empty branch
+    /// filter results in rejection.
+    pub fn should_trigger(&self, event_type: &str, branch: Option<&str>) -> bool {
+        // Check event filter
+        if !self.events.is_empty() {
+            let canonical = Self::normalize_event(event_type);
+            if !self.events.iter().any(|e| Self::normalize_event(e) == canonical) {
+                return false;
+            }
+        }
+
+        // Check branch filter
+        if !self.branches.is_empty() {
+            match branch {
+                None => return false,
+                Some(b) => {
+                    if !self.branches.iter().any(|pat| Self::glob_match(pat, b)) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        true
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Build {
     pub id: String,
@@ -778,4 +884,93 @@ pub struct ListBuildsResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CancelBuildResponse {
     pub build: Build,
+}
+
+// ── Tests ──────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trigger_config_empty_matches_everything() {
+        let tc = TriggerConfig::default();
+        assert!(tc.should_trigger("push", Some("main")));
+        assert!(tc.should_trigger("pull_request", Some("feature/x")));
+        assert!(tc.should_trigger("Push Hook", None));
+    }
+
+    #[test]
+    fn trigger_config_event_filter_github() {
+        let tc = TriggerConfig {
+            events: vec!["push".to_string()],
+            branches: Vec::new(),
+        };
+        assert!(tc.should_trigger("push", Some("main")));
+        assert!(!tc.should_trigger("pull_request", Some("main")));
+    }
+
+    #[test]
+    fn trigger_config_event_filter_gitlab_normalization() {
+        let tc = TriggerConfig {
+            events: vec!["push".to_string(), "pull_request".to_string()],
+            branches: Vec::new(),
+        };
+        assert!(tc.should_trigger("Push Hook", Some("main")));
+        assert!(tc.should_trigger("Merge Request Hook", Some("feature")));
+        assert!(!tc.should_trigger("Tag Push Hook", Some("v1.0")));
+    }
+
+    #[test]
+    fn trigger_config_exact_branch() {
+        let tc = TriggerConfig {
+            events: Vec::new(),
+            branches: vec!["main".to_string()],
+        };
+        assert!(tc.should_trigger("push", Some("main")));
+        assert!(!tc.should_trigger("push", Some("develop")));
+    }
+
+    #[test]
+    fn trigger_config_glob_star() {
+        let tc = TriggerConfig {
+            events: Vec::new(),
+            branches: vec!["release/*".to_string()],
+        };
+        assert!(tc.should_trigger("push", Some("release/1.0")));
+        assert!(tc.should_trigger("push", Some("release/2.0.1")));
+        assert!(!tc.should_trigger("push", Some("main")));
+    }
+
+    #[test]
+    fn trigger_config_glob_question_mark() {
+        let tc = TriggerConfig {
+            events: Vec::new(),
+            branches: vec!["release-?.x".to_string()],
+        };
+        assert!(tc.should_trigger("push", Some("release-1.x")));
+        assert!(tc.should_trigger("push", Some("release-3.x")));
+        assert!(!tc.should_trigger("push", Some("release-10.x")));
+    }
+
+    #[test]
+    fn trigger_config_combined_filters() {
+        let tc = TriggerConfig {
+            events: vec!["push".to_string()],
+            branches: vec!["main".to_string(), "release/*".to_string()],
+        };
+        assert!(tc.should_trigger("push", Some("main")));
+        assert!(tc.should_trigger("push", Some("release/1.0")));
+        assert!(!tc.should_trigger("pull_request", Some("main")));
+        assert!(!tc.should_trigger("push", Some("develop")));
+    }
+
+    #[test]
+    fn trigger_config_none_branch_rejected_by_filter() {
+        let tc = TriggerConfig {
+            events: Vec::new(),
+            branches: vec!["main".to_string()],
+        };
+        assert!(!tc.should_trigger("push", None));
+    }
 }

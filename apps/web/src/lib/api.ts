@@ -9,6 +9,8 @@ import type {
   GitHubAppCompleteResponse,
   GitHubAppStartRequest,
   GitHubAppStartResponse,
+  GitLabAuthorizeRequest,
+  GitLabAuthorizeResponse,
   GitLabCompleteResponse,
   GitLabStartRequest,
   IntegrationDetailResponse,
@@ -373,6 +375,22 @@ export function gitlabStart(
   return request<GitLabCompleteResponse>(
     baseUrl,
     '/v1/integrations/gitlab/start',
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function gitlabAuthorize(
+  baseUrl: string,
+  token: string,
+  data: GitLabAuthorizeRequest,
+): Promise<GitLabAuthorizeResponse> {
+  return request<GitLabAuthorizeResponse>(
+    baseUrl,
+    '/v1/integrations/gitlab/authorize',
     {
       method: 'POST',
       headers: authHeaders(token),

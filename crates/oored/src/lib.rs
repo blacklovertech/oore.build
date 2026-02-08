@@ -859,6 +859,11 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .route("/v1/integrations/github/installed", get(integrations::github::github_installed))
         .with_state(shared_state.clone());
 
+    // GitLab OAuth callback route — browser-navigated, unauthenticated
+    let gitlab_flow_routes = Router::new()
+        .route("/v1/integrations/gitlab/callback", get(integrations::gitlab::gitlab_callback))
+        .with_state(shared_state.clone());
+
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/public/setup-status", get(setup_status))
@@ -890,6 +895,7 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .route("/v1/integrations/github/complete", post(integrations::github::github_complete))
         .route("/v1/integrations/{id}/installations", get(integrations::list_installations).post(integrations::github::sync_installations))
         .route("/v1/integrations/gitlab/start", post(integrations::gitlab::gitlab_start))
+        .route("/v1/integrations/gitlab/authorize", post(integrations::gitlab::gitlab_authorize))
         // Build endpoints
         .route("/v1/projects/{project_id}/builds", post(builds::create_build))
         .route("/v1/builds", get(builds::list_builds))
@@ -901,6 +907,8 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .merge(webhook_routes)
         // Merge GitHub App manifest flow routes (outside CORS — browser-navigated HTML pages)
         .merge(github_flow_routes)
+        // Merge GitLab OAuth flow routes (outside CORS — browser-navigated)
+        .merge(gitlab_flow_routes)
         // Merge the Prometheus /metrics endpoint (uses its own state)
         .merge(observability::metrics_router(metrics_handle))
         // Request metrics middleware wraps all routes (including /metrics)

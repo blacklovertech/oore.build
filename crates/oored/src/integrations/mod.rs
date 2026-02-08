@@ -4,6 +4,49 @@ pub mod webhooks;
 
 use std::sync::Arc;
 
+// ── Shared HTML helpers ──────────────────────────────────────────
+
+/// Escape HTML special characters in a string.
+pub(crate) fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// Render a simple error HTML page.
+pub(crate) fn error_page(title: &str, message: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; margin: 0; background: #0a0a0a; color: #fafafa;
+    }}
+    .container {{ text-align: center; max-width: 400px; padding: 24px; }}
+    h1 {{ font-size: 1.25rem; margin-bottom: 8px; }}
+    p {{ color: #a1a1a1; font-size: 0.875rem; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{title}</h1>
+    <p>{message}</p>
+  </div>
+</body>
+</html>"#,
+        title = html_escape(title),
+        message = html_escape(message),
+    )
+}
+
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;

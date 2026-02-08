@@ -60,14 +60,18 @@ function GitLabSetupPage() {
         onSuccess: (data) => {
           if (data.integration.status === 'inactive') {
             toast.message(
-              `Saved: ${data.integration.display_name ?? 'GitLab'} (OAuth setup pending)`,
+              `Saved: ${data.integration.display_name ?? 'GitLab'} — authorize on GitLab to complete setup.`,
             )
+            void navigate({
+              to: '/settings/integrations/$integrationId',
+              params: { integrationId: data.integration.id },
+            })
           } else {
             toast.success(
               `Connected: ${data.integration.display_name ?? 'GitLab'}`,
             )
+            void navigate({ to: '/settings/integrations' })
           }
-          void navigate({ to: '/settings/integrations' })
         },
         onError: (err) => {
           toast.error(`Failed to connect GitLab: ${err.message}`)

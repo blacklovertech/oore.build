@@ -1,11 +1,11 @@
 import { useEffect } from 'react'
-import { createFileRoute, Link, useSearch } from '@tanstack/react-router'
+import { Link, createFileRoute, useSearch } from '@tanstack/react-router'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Delete02Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
 import { toast } from 'sonner'
 
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
-import { useIntegrations, useDeleteIntegration } from '@/hooks/use-integrations'
+import { useDeleteIntegration, useIntegrations } from '@/hooks/use-integrations'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {

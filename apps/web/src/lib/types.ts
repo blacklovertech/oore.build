@@ -221,6 +221,15 @@ export interface GitLabCompleteResponse {
   integration: Integration
 }
 
+export interface GitLabAuthorizeRequest {
+  integration_id: string
+  redirect_url: string
+}
+
+export interface GitLabAuthorizeResponse {
+  authorize_url: string
+}
+
 export interface ListIntegrationsResponse {
   integrations: Array<Integration>
   total: number

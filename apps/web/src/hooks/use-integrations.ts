@@ -1,10 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { GitHubAppStartRequest, GitLabStartRequest } from '@/lib/types'
+import type {
+  GitHubAppStartRequest,
+  GitLabAuthorizeRequest,
+  GitLabStartRequest,
+} from '@/lib/types'
 import {
   deleteIntegration,
   getIntegration,
   githubAppComplete,
   githubAppStart,
+  gitlabAuthorize,
   gitlabStart,
   listInstallations,
   listIntegrationRepos,
@@ -130,6 +135,22 @@ export function useSyncInstallations() {
       void queryClient.invalidateQueries({
         queryKey: [instance?.id ?? '__none__', 'integration-repos', integrationId],
       })
+    },
+  })
+}
+
+export function useGitLabAuthorize() {
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+
+  return useMutation({
+    mutationFn: (data: GitLabAuthorizeRequest) => {
+      if (!baseUrl || !token)
+        return Promise.reject(new Error('Not authenticated'))
+      return gitlabAuthorize(baseUrl, token, data)
+    },
+    onSuccess: (data) => {
+      window.location.href = data.authorize_url
     },
   })
 }

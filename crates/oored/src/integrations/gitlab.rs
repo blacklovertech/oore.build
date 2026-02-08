@@ -1,12 +1,19 @@
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::Json;
-use oore_contract::{ApiError, GitLabCompleteResponse, GitLabStartRequest, Integration};
-use tracing::{error, info};
+use oore_contract::{
+    ApiError, GitLabAuthorizeRequest, GitLabAuthorizeResponse, GitLabCompleteResponse,
+    GitLabStartRequest, Integration,
+};
+use serde::{Deserialize, Serialize};
+use sqlx::Row;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use super::error_page;
 use crate::crypto;
 use crate::extractors::AuthUser;
 use crate::rbac::check_permission;
@@ -15,6 +22,9 @@ use crate::util::{api_err, now_unix};
 use crate::AppState;
 
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiError>)>;
+
+/// Maximum age (seconds) for a GitLab OAuth state token.
+const STATE_MAX_AGE_SECS: i64 = 600; // 10 minutes
 
 /// `POST /v1/integrations/gitlab/start` — create GitLab integration (OAuth or token mode).
 ///
@@ -278,7 +288,7 @@ pub async fn gitlab_start(
 
         // Fetch accessible projects via GitLab API
         let token = req.access_token.as_ref().unwrap();
-        if let Err(e) = sync_gitlab_projects(&client, pool, &host_url, token, &inst_id, now).await {
+        if let Err(e) = sync_gitlab_projects(&client, pool, &host_url, token, &inst_id, false, now).await {
             error!(error = ?e, "failed to sync GitLab projects (non-fatal)");
         }
     }
@@ -327,20 +337,31 @@ pub async fn gitlab_start(
 }
 
 /// Sync accessible GitLab projects into integration_repositories.
+///
+/// When `use_bearer_auth` is true, uses `Authorization: Bearer` (OAuth).
+/// Otherwise, uses `PRIVATE-TOKEN` header (personal access token).
 async fn sync_gitlab_projects(
     client: &reqwest::Client,
     pool: &sqlx::SqlitePool,
     host_url: &str,
     token: &str,
     installation_id: &str,
+    use_bearer_auth: bool,
     now: i64,
 ) -> Result<(), (StatusCode, Json<ApiError>)> {
     let api_base = format!("{}/api/v4", host_url);
 
-    let resp = client
+    let mut req_builder = client
         .get(format!("{api_base}/projects?membership=true&per_page=100&simple=true"))
-        .header("PRIVATE-TOKEN", token)
-        .header("User-Agent", "oore-ci")
+        .header("User-Agent", "oore-ci");
+
+    if use_bearer_auth {
+        req_builder = req_builder.header("Authorization", format!("Bearer {token}"));
+    } else {
+        req_builder = req_builder.header("PRIVATE-TOKEN", token);
+    }
+
+    let resp = req_builder
         .send()
         .await
         .map_err(|e| {
@@ -398,5 +419,506 @@ async fn sync_gitlab_projects(
     }
 
     info!(project_count = projects.len(), "GitLab projects synced");
+    Ok(())
+}
+
+// ── GitLab OAuth flow ────────────────────────────────────────────
+
+/// Encrypted payload stored in the `state` query parameter for GitLab OAuth.
+#[derive(Debug, Serialize, Deserialize)]
+struct GitLabOAuthState {
+    integration_id: String,
+    redirect_url: String,
+    created_at: i64,
+}
+
+/// Encrypt a GitLab OAuth state payload into a URL-safe token.
+fn seal_gitlab_state(state: &GitLabOAuthState, key: &[u8]) -> Result<String, anyhow::Error> {
+    let json = serde_json::to_string(state)?;
+    let encrypted = crypto::encrypt(&json, key)?;
+    Ok(urlencoding::encode(&encrypted).into_owned())
+}
+
+/// Decrypt and validate a GitLab OAuth state token.
+fn open_gitlab_state(token: &str, key: &[u8]) -> Result<GitLabOAuthState, String> {
+    let decoded = urlencoding::decode(token).map_err(|e| format!("url decode: {e}"))?;
+    let json = crypto::decrypt(&decoded, key).map_err(|e| format!("decrypt: {e}"))?;
+    let state: GitLabOAuthState =
+        serde_json::from_str(&json).map_err(|e| format!("parse: {e}"))?;
+
+    let now = now_unix();
+    if now - state.created_at > STATE_MAX_AGE_SECS {
+        return Err("state token expired".into());
+    }
+
+    Ok(state)
+}
+
+/// Validate that a redirect URL belongs to the configured frontend origin.
+///
+/// The allowed origin comes from `OORE_CORS_ORIGIN` (default `http://localhost:3000`).
+/// Only URLs whose scheme + host + port match the allowed origin are accepted.
+fn validate_redirect_origin(url: &str) -> Result<(), (StatusCode, Json<ApiError>)> {
+    let allowed = std::env::var("OORE_CORS_ORIGIN")
+        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+    let parsed = url::Url::parse(url).map_err(|_| {
+        api_err(StatusCode::BAD_REQUEST, "invalid_redirect_url", "redirect_url is not a valid URL")
+    })?;
+
+    let allowed_parsed = url::Url::parse(&allowed).map_err(|_| {
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "config_error", "OORE_CORS_ORIGIN is not a valid URL")
+    })?;
+
+    if parsed.scheme() != allowed_parsed.scheme()
+        || parsed.host_str() != allowed_parsed.host_str()
+        || parsed.port() != allowed_parsed.port()
+    {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_redirect_url",
+            "redirect_url must match the configured frontend origin",
+        ));
+    }
+
+    Ok(())
+}
+
+/// `POST /v1/integrations/gitlab/authorize` — generate GitLab OAuth authorize URL.
+///
+/// The user calls this after `gitlab_start` with `oauth_app` mode. Builds the
+/// authorization URL with the stored client_id and returns it.
+pub async fn gitlab_authorize(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Json(req): Json<GitLabAuthorizeRequest>,
+) -> ApiResult<GitLabAuthorizeResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "integrations", "write").await?;
+
+    if req.integration_id.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "invalid_input", "integration_id is required"));
+    }
+    if req.redirect_url.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "invalid_input", "redirect_url is required"));
+    }
+
+    // Validate redirect against configured frontend origin
+    validate_redirect_origin(&req.redirect_url)?;
+
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    // Load the integration
+    let row = sqlx::query("SELECT * FROM integrations WHERE id = ?1")
+        .bind(&req.integration_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to fetch integration");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to fetch integration")
+        })?
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "not_found", "Integration not found"))?;
+
+    let auth_mode: String = row.get("auth_mode");
+    let status: String = row.get("status");
+    let host_url: String = row.get("host_url");
+
+    if auth_mode != "oauth_app" {
+        return Err(api_err(StatusCode::BAD_REQUEST, "invalid_auth_mode", "Integration is not OAuth mode"));
+    }
+    if status != "inactive" {
+        return Err(api_err(StatusCode::CONFLICT, "already_active", "Integration is already active"));
+    }
+
+    // Decrypt client_id
+    let encrypted_client_id: String = sqlx::query_scalar(
+        "SELECT encrypted_value FROM integration_credentials \
+         WHERE integration_id = ?1 AND credential_type = 'oauth_client_id'",
+    )
+    .bind(&req.integration_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to fetch client_id");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to fetch credentials")
+    })?
+    .ok_or_else(|| api_err(StatusCode::INTERNAL_SERVER_ERROR, "missing_credentials", "OAuth client_id not found"))?;
+
+    let client_id = crypto::decrypt(&encrypted_client_id, &state.encryption_key).map_err(|e| {
+        error!(error = %e, "failed to decrypt client_id");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "encryption_error", "Failed to decrypt credentials")
+    })?;
+
+    // Build callback URL
+    let public_url = std::env::var("OORE_PUBLIC_URL")
+        .unwrap_or_else(|_| "http://localhost:8787".to_string());
+    let callback_url = format!("{}/v1/integrations/gitlab/callback", public_url);
+
+    // Seal the state token
+    let oauth_state = GitLabOAuthState {
+        integration_id: req.integration_id.clone(),
+        redirect_url: req.redirect_url,
+        created_at: now_unix(),
+    };
+
+    let state_token = seal_gitlab_state(&oauth_state, &state.encryption_key).map_err(|e| {
+        error!(error = %e, "failed to seal GitLab OAuth state");
+        api_err(StatusCode::INTERNAL_SERVER_ERROR, "encryption_error", "Failed to create state token")
+    })?;
+
+    // Build the authorize URL
+    let authorize_url = format!(
+        "{}/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&state={}&scope=api+read_user",
+        host_url,
+        urlencoding::encode(&client_id),
+        urlencoding::encode(&callback_url),
+        state_token,
+    );
+
+    info!(
+        integration_id = %req.integration_id,
+        "GitLab OAuth authorize URL generated"
+    );
+
+    Ok(Json(GitLabAuthorizeResponse { authorize_url }))
+}
+
+// ── GitLab OAuth callback ────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct GitLabCallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+/// `GET /v1/integrations/gitlab/callback?code=...&state=...`
+///
+/// GitLab redirects here after the user authorizes. Exchanges the code for
+/// tokens, stores them, and redirects back to the frontend.
+pub async fn gitlab_callback(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<GitLabCallbackQuery>,
+) -> Response {
+    // Handle GitLab error response
+    if let Some(ref err) = params.error {
+        let desc = params.error_description.as_deref().unwrap_or("Unknown error");
+        warn!(error = %err, description = %desc, "GitLab OAuth error");
+        return Html(error_page(
+            "GitLab Authorization Failed",
+            &format!("GitLab returned an error: {desc}"),
+        ))
+        .into_response();
+    }
+
+    let code = match params.code {
+        Some(c) if !c.is_empty() => c,
+        _ => {
+            return Html(error_page(
+                "Missing code",
+                "GitLab did not provide an authorization code. Please try again.",
+            ))
+            .into_response();
+        }
+    };
+
+    let state_token = match params.state {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            return Html(error_page(
+                "Missing state",
+                "State parameter is missing. Please try again.",
+            ))
+            .into_response();
+        }
+    };
+
+    let oauth_state = match open_gitlab_state(&state_token, &state.encryption_key) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, "invalid GitLab callback state token");
+            return Html(error_page(
+                "Invalid or expired link",
+                "The authorization link has expired. Please go back and start again.",
+            ))
+            .into_response();
+        }
+    };
+
+    // Validate the redirect_url from the sealed state against the configured frontend origin
+    if let Err(_) = validate_redirect_origin(&oauth_state.redirect_url) {
+        warn!(redirect_url = %oauth_state.redirect_url, "callback redirect_url does not match configured origin");
+        return Html(error_page(
+            "Invalid redirect",
+            "The redirect URL does not match the configured frontend origin.",
+        ))
+        .into_response();
+    }
+
+    // Exchange code for tokens
+    match exchange_gitlab_code(&state, &code, &oauth_state.integration_id).await {
+        Ok(()) => {
+            info!(
+                integration_id = %oauth_state.integration_id,
+                "GitLab OAuth flow completed successfully"
+            );
+
+            let sep = if oauth_state.redirect_url.contains('?') {
+                "&"
+            } else {
+                "?"
+            };
+            let redirect_url = format!(
+                "{}{}gitlab=success&integration_id={}",
+                oauth_state.redirect_url, sep, oauth_state.integration_id
+            );
+            Redirect::to(&redirect_url).into_response()
+        }
+        Err(msg) => {
+            error!(error = %msg, "GitLab OAuth token exchange failed");
+            Html(error_page(
+                "Authorization failed",
+                &format!("Failed to complete GitLab authorization: {msg}. Please try again."),
+            ))
+            .into_response()
+        }
+    }
+}
+
+/// Exchange a GitLab authorization code for access + refresh tokens.
+///
+/// Stores both tokens encrypted, activates the integration, creates an
+/// installation entry, and syncs projects.
+///
+/// The store mutex is held only for short DB-read/write windows; all outbound
+/// HTTP calls to GitLab happen with the mutex released.
+async fn exchange_gitlab_code(
+    app_state: &Arc<AppState>,
+    code: &str,
+    integration_id: &str,
+) -> Result<(), String> {
+    // ── Phase 1: Read credentials from DB (short lock) ──────────
+    let (host_url, client_id, client_secret, pool) = {
+        let store = app_state.store.lock().await;
+        let pool = store.pool().clone();
+
+        let row = sqlx::query("SELECT host_url FROM integrations WHERE id = ?1")
+            .bind(integration_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| format!("Failed to fetch integration: {e}"))?
+            .ok_or_else(|| "Integration not found".to_string())?;
+
+        let host_url: String = row.get("host_url");
+
+        let encrypted_client_id: String = sqlx::query_scalar(
+            "SELECT encrypted_value FROM integration_credentials \
+             WHERE integration_id = ?1 AND credential_type = 'oauth_client_id'",
+        )
+        .bind(integration_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| format!("Failed to fetch client_id: {e}"))?
+        .ok_or_else(|| "OAuth client_id not found".to_string())?;
+
+        let client_id = crypto::decrypt(&encrypted_client_id, &app_state.encryption_key)
+            .map_err(|e| format!("Failed to decrypt client_id: {e}"))?;
+
+        let encrypted_client_secret: String = sqlx::query_scalar(
+            "SELECT encrypted_value FROM integration_credentials \
+             WHERE integration_id = ?1 AND credential_type = 'oauth_client_secret'",
+        )
+        .bind(integration_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| format!("Failed to fetch client_secret: {e}"))?
+        .ok_or_else(|| "OAuth client_secret not found".to_string())?;
+
+        let client_secret = crypto::decrypt(&encrypted_client_secret, &app_state.encryption_key)
+            .map_err(|e| format!("Failed to decrypt client_secret: {e}"))?;
+
+        // Mutex guard is dropped here
+        (host_url, client_id, client_secret, pool)
+    };
+
+    // ── Phase 2: Outbound HTTP — token exchange (no lock held) ──
+    let public_url = std::env::var("OORE_PUBLIC_URL")
+        .unwrap_or_else(|_| "http://localhost:8787".to_string());
+    let callback_url = format!("{}/v1/integrations/gitlab/callback", public_url);
+
+    let http_client = reqwest::Client::new();
+
+    #[derive(Deserialize)]
+    struct GitLabTokenResponse {
+        access_token: String,
+        refresh_token: Option<String>,
+        expires_in: Option<i64>,
+        #[allow(dead_code)]
+        token_type: Option<String>,
+    }
+
+    let token_resp = http_client
+        .post(format!("{}/oauth/token", host_url))
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", code),
+            ("redirect_uri", &callback_url),
+            ("grant_type", "authorization_code"),
+        ])
+        .header("User-Agent", "oore-ci")
+        .send()
+        .await
+        .map_err(|e| format!("GitLab token request failed: {e}"))?;
+
+    if !token_resp.status().is_success() {
+        let status = token_resp.status();
+        let body = token_resp.text().await.unwrap_or_default();
+        error!(status = %status, body = %body, "GitLab token exchange failed");
+        return Err(format!("GitLab returned {status}"));
+    }
+
+    let tokens: GitLabTokenResponse = token_resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse GitLab token response: {e}"))?;
+
+    // ── Phase 3: Outbound HTTP — fetch user info (no lock held) ──
+    let api_base = format!("{}/api/v4", host_url);
+    let user_resp = http_client
+        .get(format!("{api_base}/user"))
+        .header("Authorization", format!("Bearer {}", tokens.access_token))
+        .header("User-Agent", "oore-ci")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch GitLab user: {e}"))?;
+
+    let (username, display_name) = if user_resp.status().is_success() {
+        #[derive(Deserialize)]
+        struct GitLabUser {
+            username: String,
+            name: Option<String>,
+        }
+
+        match user_resp.json::<GitLabUser>().await {
+            Ok(user) => {
+                let display = user.name.unwrap_or_else(|| user.username.clone());
+                (user.username, display)
+            }
+            Err(_) => ("oauth-user".to_string(), "OAuth User".to_string()),
+        }
+    } else {
+        ("oauth-user".to_string(), "OAuth User".to_string())
+    };
+
+    // ── Phase 4: Persist tokens + activate (short lock) ─────────
+    // Integration stays `inactive` until ALL writes succeed.
+    let now = now_unix();
+
+    // Store access_token (upsert)
+    let encrypted_access_token = crypto::encrypt(&tokens.access_token, &app_state.encryption_key)
+        .map_err(|e| format!("Failed to encrypt access_token: {e}"))?;
+
+    sqlx::query(
+        "INSERT INTO integration_credentials (id, integration_id, credential_type, encrypted_value, created_at, updated_at) \
+         VALUES (?1, ?2, 'access_token', ?3, ?4, ?4) \
+         ON CONFLICT(integration_id, credential_type) DO UPDATE SET \
+         encrypted_value = excluded.encrypted_value, updated_at = excluded.updated_at",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(integration_id)
+    .bind(&encrypted_access_token)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("Failed to store access_token: {e}"))?;
+
+    // Store refresh_token if present (upsert)
+    if let Some(ref refresh_token) = tokens.refresh_token {
+        let encrypted_refresh = crypto::encrypt(refresh_token, &app_state.encryption_key)
+            .map_err(|e| format!("Failed to encrypt refresh_token: {e}"))?;
+
+        sqlx::query(
+            "INSERT INTO integration_credentials (id, integration_id, credential_type, encrypted_value, created_at, updated_at) \
+             VALUES (?1, ?2, 'refresh_token', ?3, ?4, ?4) \
+             ON CONFLICT(integration_id, credential_type) DO UPDATE SET \
+             encrypted_value = excluded.encrypted_value, updated_at = excluded.updated_at",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(integration_id)
+        .bind(&encrypted_refresh)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to store refresh_token: {e}"))?;
+    }
+
+    // Update access_token expires_at if present
+    if let Some(expires_in) = tokens.expires_in {
+        let expires_at = now + expires_in;
+        sqlx::query(
+            "UPDATE integration_credentials SET expires_at = ?1, updated_at = ?2 \
+             WHERE integration_id = ?3 AND credential_type = 'access_token'",
+        )
+        .bind(expires_at)
+        .bind(now)
+        .bind(integration_id)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to update token expires_at: {e}"))?;
+    }
+
+    // Create installation entry
+    let inst_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO integration_installations (id, integration_id, external_id, account_name, account_type, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, 'user', ?5, ?5) \
+         ON CONFLICT(integration_id, external_id) DO UPDATE SET \
+         account_name = excluded.account_name, updated_at = excluded.updated_at",
+    )
+    .bind(&inst_id)
+    .bind(integration_id)
+    .bind(&username)
+    .bind(&username)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("Failed to create installation: {e}"))?;
+
+    // All critical writes succeeded — now activate the integration.
+    sqlx::query("UPDATE integrations SET status = 'active', updated_at = ?1 WHERE id = ?2")
+        .bind(now)
+        .bind(integration_id)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to activate integration: {e}"))?;
+
+    // ── Phase 5: Non-critical finalization (best-effort) ─────────
+
+    // Sync projects with bearer auth (non-fatal)
+    if let Err(e) = sync_gitlab_projects(
+        &http_client, &pool, &host_url, &tokens.access_token, &inst_id, true, now,
+    )
+    .await
+    {
+        error!(error = ?e, "failed to sync GitLab projects after OAuth (non-fatal)");
+    }
+
+    // Update display name (non-fatal)
+    let full_display_name = format!("{display_name} ({host_url})");
+    let _ = sqlx::query("UPDATE integrations SET display_name = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&full_display_name)
+        .bind(now)
+        .bind(integration_id)
+        .execute(&pool)
+        .await;
+
+    info!(
+        integration_id = %integration_id,
+        username = %username,
+        "GitLab OAuth token exchange completed"
+    );
+
     Ok(())
 }

@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use oore_contract::{
     ApiError, Build, BuildDetailResponse, BuildEvent, BuildStatus, CancelBuildResponse,
-    ConcurrencyPolicy, CreateBuildRequest, CreateBuildResponse, ListBuildsResponse,
+    ConcurrencyPolicy, CreateBuildRequest, CreateBuildResponse, ListBuildsResponse, TriggerConfig,
 };
 use serde::Deserialize;
 use sqlx::Row;
@@ -215,6 +215,110 @@ async fn fetch_build_number(
         })
 }
 
+// ── Build insert with retry ──────────────────────────────────────
+
+/// Maximum number of retry attempts for build inserts.
+///
+/// Concurrent webhook bursts can cause both SQLITE_BUSY and UNIQUE violations
+/// on the atomic `build_number` subquery, so we allow enough retries to absorb
+/// realistic burst sizes (up to ~10 concurrent inserts per project).
+const BUILD_INSERT_MAX_RETRIES: u32 = 10;
+
+/// Insert a build row with retry on SQLITE_BUSY or UNIQUE constraint violations.
+///
+/// Retries up to `BUILD_INSERT_MAX_RETRIES` times with exponential backoff.
+async fn insert_build_with_retry(
+    pool: &sqlx::SqlitePool,
+    binds: &BuildInsertBinds<'_>,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    for attempt in 1..=BUILD_INSERT_MAX_RETRIES {
+        match execute_build_insert(pool, "", binds).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let is_retryable = is_sqlite_busy(&e) || is_sqlite_unique_violation(&e);
+                if is_retryable && attempt < BUILD_INSERT_MAX_RETRIES {
+                    warn!(attempt = attempt, error = %e, "retryable SQLite error on build insert, retrying");
+                    tokio::time::sleep(std::time::Duration::from_millis(10 * attempt as u64)).await;
+                    continue;
+                }
+                error!(error = %e, "failed to create build after {} attempts", attempt);
+                return Err(api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    "Failed to create build",
+                ));
+            }
+        }
+    }
+    unreachable!()
+}
+
+/// Check if an sqlx error is SQLITE_BUSY (error code 5).
+fn is_sqlite_busy(e: &sqlx::Error) -> bool {
+    if let sqlx::Error::Database(db_err) = e {
+        if let Some(code) = db_err.code() {
+            return code.as_ref() == "5";
+        }
+    }
+    false
+}
+
+/// Check if an sqlx error is SQLITE_CONSTRAINT_UNIQUE (error code 2067).
+fn is_sqlite_unique_violation(e: &sqlx::Error) -> bool {
+    if let sqlx::Error::Database(db_err) = e {
+        if let Some(code) = db_err.code() {
+            return code.as_ref() == "2067";
+        }
+    }
+    false
+}
+
+/// Bind values for build INSERT statements.
+struct BuildInsertBinds<'a> {
+    build_id: &'a str,
+    project_id: &'a str,
+    pipeline_id: &'a str,
+    actor: Option<&'a str>,
+    event_type: Option<&'a str>,
+    trigger_ref: Option<&'a str>,
+    commit_sha: Option<&'a str>,
+    branch: Option<&'a str>,
+    config_snapshot: &'a str,
+    webhook_id: Option<&'a str>,
+    now: i64,
+    trigger_type: &'a str,
+}
+
+async fn execute_build_insert(
+    pool: &sqlx::SqlitePool,
+    _query: &str,
+    b: &BuildInsertBinds<'_>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO builds (id, project_id, pipeline_id, build_number, status, \
+         trigger_type, trigger_actor, trigger_event, trigger_ref, commit_sha, branch, \
+         config_snapshot, webhook_id, queued_at, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, \
+                 (SELECT COALESCE(MAX(build_number), 0) + 1 FROM builds WHERE project_id = ?2), \
+                 'queued', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?12)",
+    )
+    .bind(b.build_id)
+    .bind(b.project_id)
+    .bind(b.pipeline_id)
+    .bind(b.trigger_type)
+    .bind(b.actor)
+    .bind(b.event_type)
+    .bind(b.trigger_ref)
+    .bind(b.commit_sha)
+    .bind(b.branch)
+    .bind(b.config_snapshot)
+    .bind(b.webhook_id)
+    .bind(b.now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 // ── Query parameters ────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -350,29 +454,25 @@ pub async fn create_build(
         req.branch.as_deref(),
     );
 
-    sqlx::query(
-        "INSERT INTO builds (id, project_id, pipeline_id, build_number, status, \
-         trigger_type, trigger_actor, trigger_ref, commit_sha, branch, \
-         config_snapshot, queued_at, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, \
-                 (SELECT COALESCE(MAX(build_number), 0) + 1 FROM builds WHERE project_id = ?2), \
-                 'queued', 'manual', ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?9)",
+    let snapshot_str = config_snapshot.to_string();
+    insert_build_with_retry(
+        pool,
+        &BuildInsertBinds {
+            build_id: &build_id,
+            project_id: &project_id,
+            pipeline_id: &req.pipeline_id,
+            actor: Some(&auth.0.email),
+            event_type: None,
+            trigger_ref: req.trigger_ref.as_deref(),
+            commit_sha: req.commit_sha.as_deref(),
+            branch: req.branch.as_deref(),
+            config_snapshot: &snapshot_str,
+            webhook_id: None,
+            now,
+            trigger_type: "manual",
+        },
     )
-    .bind(&build_id)
-    .bind(&project_id)
-    .bind(&req.pipeline_id)
-    .bind(&auth.0.email)
-    .bind(&req.trigger_ref)
-    .bind(&req.commit_sha)
-    .bind(&req.branch)
-    .bind(config_snapshot.to_string())
-    .bind(now)
-    .execute(pool)
-    .await
-    .map_err(|e| {
-        error!(error = %e, "failed to create build");
-        api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to create build")
-    })?;
+    .await?;
 
     let build_number = fetch_build_number(pool, &build_id).await?;
 
@@ -649,9 +749,27 @@ pub async fn trigger_build_from_webhook(
         for pipeline_row in &pipeline_rows {
             let pipeline_id: String = pipeline_row.get("id");
             let config_path: String = pipeline_row.get("config_path");
+            let trigger_config_json: String = pipeline_row.get("trigger_config");
             let concurrency_json: String = pipeline_row.get("concurrency");
             let concurrency: ConcurrencyPolicy =
                 serde_json::from_str(&concurrency_json).unwrap_or_default();
+
+            // Parse and apply trigger config filter
+            let trigger_config: TriggerConfig =
+                serde_json::from_str(&trigger_config_json).unwrap_or_else(|e| {
+                    warn!(error = %e, pipeline_id = %pipeline_id, "invalid trigger_config JSON, using default");
+                    TriggerConfig::default()
+                });
+
+            if !trigger_config.should_trigger(event_type, branch) {
+                info!(
+                    pipeline_id = %pipeline_id,
+                    event_type = %event_type,
+                    branch = ?branch,
+                    "webhook event filtered by trigger_config, skipping pipeline"
+                );
+                continue;
+            }
 
             // Apply cancel_previous concurrency policy
             if concurrency.cancel_previous {
@@ -663,31 +781,25 @@ pub async fn trigger_build_from_webhook(
             let config_snapshot =
                 create_config_snapshot(&config_path, "webhook", commit_sha, branch);
 
-            sqlx::query(
-                "INSERT INTO builds (id, project_id, pipeline_id, build_number, status, \
-                 trigger_type, trigger_actor, trigger_event, trigger_ref, commit_sha, branch, \
-                 config_snapshot, webhook_id, queued_at, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, \
-                         (SELECT COALESCE(MAX(build_number), 0) + 1 FROM builds WHERE project_id = ?2), \
-                         'queued', 'webhook', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?11)",
+            let snapshot_str = config_snapshot.to_string();
+            insert_build_with_retry(
+                pool,
+                &BuildInsertBinds {
+                    build_id: &build_id,
+                    project_id: &project_id,
+                    pipeline_id: &pipeline_id,
+                    actor,
+                    event_type: Some(event_type),
+                    trigger_ref: branch,
+                    commit_sha,
+                    branch,
+                    config_snapshot: &snapshot_str,
+                    webhook_id: Some(webhook_id),
+                    now,
+                    trigger_type: "webhook",
+                },
             )
-            .bind(&build_id)
-            .bind(&project_id)
-            .bind(&pipeline_id)
-            .bind(actor)
-            .bind(event_type)
-            .bind(branch)
-            .bind(commit_sha)
-            .bind(branch)
-            .bind(config_snapshot.to_string())
-            .bind(webhook_id)
-            .bind(now)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                error!(error = %e, "failed to create webhook-triggered build");
-                api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to create build")
-            })?;
+            .await?;
 
             let build_number = fetch_build_number(pool, &build_id).await?;
 

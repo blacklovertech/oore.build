@@ -4,6 +4,7 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import {
   Delete02Icon,
   InformationCircleIcon,
+  LinkSquare02Icon,
   Refresh01Icon,
   Setting07Icon,
 } from '@hugeicons/core-free-icons'
@@ -11,11 +12,12 @@ import { toast } from 'sonner'
 
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
 import {
-  useIntegration,
+  useDeleteIntegration,
+  useGitLabAuthorize,
   useInstallations,
+  useIntegration,
   useIntegrationRepos,
   useSyncInstallations,
-  useDeleteIntegration,
 } from '@/hooks/use-integrations'
 import { getIntegrationStatusVariant } from '@/lib/status-variants'
 import { Badge } from '@/components/ui/badge'
@@ -52,8 +54,11 @@ import PageHeader from '@/components/page-header'
 
 export const Route = createFileRoute('/settings/integrations/$integrationId')({
   staticData: { breadcrumbLabel: 'Details' },
-  validateSearch: (search: Record<string, unknown>): { installed?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { installed?: string; gitlab?: string } => ({
     installed: (search.installed as string) || undefined,
+    gitlab: (search.gitlab as string) || undefined,
   }),
   beforeLoad: () => {
     const instance = getActiveInstanceOrRedirect()
@@ -72,13 +77,18 @@ function IntegrationDetailPage() {
   const { data: reposData } = useIntegrationRepos(integrationId)
   const syncMutation = useSyncInstallations()
   const deleteMutation = useDeleteIntegration()
+  const gitlabAuthorizeMutation = useGitLabAuthorize()
 
   useEffect(() => {
     if (search.installed === 'true') {
       toast.success('GitHub App installed successfully')
       window.history.replaceState({}, '', `/settings/integrations/${integrationId}`)
     }
-  }, [search.installed, integrationId])
+    if (search.gitlab === 'success') {
+      toast.success('GitLab OAuth authorization completed')
+      window.history.replaceState({}, '', `/settings/integrations/${integrationId}`)
+    }
+  }, [search.installed, search.gitlab, integrationId])
 
   function handleSync() {
     syncMutation.mutate(integrationId, {
@@ -177,6 +187,25 @@ function IntegrationDetailPage() {
           <CardTitle>Actions</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
+          {integration.provider === 'gitlab' &&
+            integration.auth_mode === 'oauth_app' &&
+            integration.status === 'inactive' && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  gitlabAuthorizeMutation.mutate({
+                    integration_id: integrationId,
+                    redirect_url: window.location.href,
+                  })
+                }
+                disabled={gitlabAuthorizeMutation.isPending}
+              >
+                <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
+                {gitlabAuthorizeMutation.isPending
+                  ? 'Redirecting...'
+                  : 'Authorize on GitLab'}
+              </Button>
+            )}
           {integration.provider === 'github' && integration.app_slug && (
             <Button
               variant="outline"
