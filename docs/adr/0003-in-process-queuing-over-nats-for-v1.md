@@ -20,12 +20,12 @@ Given these constraints, the role of NATS would be limited to internal daemon-si
 
 ## Decision
 
-Replace NATS JetStream with **in-process queuing using `tokio` channels** for V1.
+Replace NATS JetStream with **in-process mechanisms** for V1.
 
-The two primary channel types:
+The implementation uses:
 
 - **`tokio::sync::broadcast`** — fan-out for build state change events. Multiple SSE connections subscribe to build updates; broadcast channels deliver each event to all active subscribers. This powers the `GET /v1/builds/{build_id}/logs/stream` SSE endpoint.
-- **`tokio::sync::mpsc`** — point-to-point for internal job dispatch. Build requests are enqueued; the runner claim endpoint dequeues and assigns them. For V1's pull-based runner model, this is the internal half of the scheduling loop (the external half is the HTTP poll/claim API).
+- **SQLite-direct job dispatch** — runners claim queued builds directly from SQLite via the `POST /v1/runners/{runner_id}/claim` endpoint. The claim query uses `SELECT ... WHERE status='queued' LIMIT 1` with two-step optimistic locking (queued → scheduled → assigned). SQLite's serialized writes prevent double-claims. No in-memory job queue is needed because the database is the single source of truth for build state, and runners pull work via HTTP polling.
 
 No external process or dependency is required.
 
@@ -37,7 +37,7 @@ NATS JetStream is a separate server process. For a self-hosted, single-node macO
 
 ### The runner protocol doesn't use NATS
 
-The contract explicitly defines runners as HTTP pull-based (section 16). Runners poll `POST /v1/runners/{runner_id}/claim` to claim jobs and push results back via HTTP. There is no runner-side NATS subscription. The queue is entirely internal to the daemon.
+The contract explicitly defines runners as HTTP pull-based (section 16). Runners poll `POST /v1/runners/{runner_id}/claim` to claim jobs and push results back via HTTP. There is no runner-side NATS subscription. Job dispatch goes directly through SQLite — runners claim from the database via optimistic locking, which is sufficient for V1's single-node concurrency.
 
 ### SSE doesn't need NATS
 
@@ -49,14 +49,14 @@ V1 is single-tenant on a single host. The number of concurrent builds is bounded
 
 ### Durability is handled by the database
 
-Job persistence (surviving daemon restarts) is the database's responsibility, not the queue's. Pending builds are stored in SQLite. On startup, the daemon reloads pending jobs from the database and re-populates the in-memory channel. NATS JetStream's durability guarantees are redundant when the database is the source of truth.
+Job persistence (surviving daemon restarts) is the database's responsibility, not the queue's. Pending builds are stored in SQLite. On startup, the daemon transitions stale `scheduled` builds back to `queued` in the database; `queued` builds need no recovery since runners claim directly from SQLite. NATS JetStream's durability guarantees are redundant when the database is the source of truth.
 
 ### Migration path preserved
 
 If future versions require distributed messaging (multi-node deployment, external event consumers), the internal channel abstraction can be replaced with NATS or another broker. The key interfaces are:
 
-- A `JobQueue` trait with `enqueue()` and `claim()` methods.
-- A `BuildEventBus` trait with `publish()` and `subscribe()` methods.
+- A `BuildEventBus` trait with `publish()` and `subscribe()` methods for the broadcast channel.
+- A job dispatch interface (currently SQLite-direct, replaceable with a distributed queue).
 
 These abstractions keep the daemon's core logic decoupled from the transport.
 
@@ -65,14 +65,14 @@ These abstractions keep the daemon's core logic decoupled from the transport.
 - Contract section 10 is updated: `Queue/event bus: in-process (tokio channels)`.
 - No `async-nats` dependency in V1.
 - Operators do not need to install or manage NATS for V1.
-- Build events and job state do not survive daemon crashes mid-flight (in-memory channels are lost). This is acceptable because:
-  - Pending jobs are persisted in SQLite and reloaded on startup.
-  - In-flight build steps can be detected as stale and retried/failed on restart.
+- Build state change events (broadcast channel) do not survive daemon crashes mid-flight. This is acceptable because:
+  - Pending jobs are persisted in SQLite and recovered on startup (stale `scheduled` builds are transitioned back to `queued`).
+  - In-flight build steps can be detected as stale and retried/failed on restart via background monitors.
 - Future multi-node deployment will require re-evaluating this decision (likely via a new ADR).
 
 ## Contract References
 
 - Section 10 (Backend Technology Contract): queue/event bus line updated.
 - Section 13 (API Boundary Contract): SSE for live build output — served by broadcast channels.
-- Section 16 (Runner protocol): pull-based HTTPS JSON — no change, internal queue feeds the claim endpoint.
+- Section 16 (Runner protocol): pull-based HTTPS JSON — no change, runners claim directly from SQLite via the claim endpoint.
 - Section 16 (Tenant model): single organization per backend instance — supports the in-process choice.

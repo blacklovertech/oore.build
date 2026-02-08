@@ -73,7 +73,7 @@ Feature docs: `2026-02-06-rbac-and-user-management.md`, `2026-02-06-session-pers
 
 Feature docs: `2026-02-06-design-system-governance.md`
 
-### Implemented API Endpoints (34)
+### Implemented API Endpoints (40)
 
 Setup:
 - `GET /v1/public/setup-status`
@@ -118,6 +118,14 @@ Builds:
 - `GET /v1/builds/{build_id}`
 - `POST /v1/builds/{build_id}/cancel`
 
+Runners:
+- `POST /v1/runners/register`
+- `POST /v1/runners/{runner_id}/heartbeat`
+- `POST /v1/runners/{runner_id}/claim`
+- `POST /v1/runners/{runner_id}/jobs/{job_id}/status`
+- `GET /v1/runners/{runner_id}/jobs/{job_id}`
+- `GET /v1/runners`
+
 Health:
 - `GET /healthz`
 
@@ -147,24 +155,24 @@ Exit criteria (all met):
 
 Feature docs: `2026-02-07-scm-integrations-github-gitlab-v1.md`, `2026-02-07-build-lifecycle-api.md`, `2026-02-07-triggering-and-concurrency-policy.md`.
 
-## Phase 3: Scheduler + Runner Execution (`P0`)
+## Phase 3: Scheduler + Runner Execution (`P0`) (Complete)
 
 Dependency: Phase 2 complete.
 
-- [ ] **3.1 [P0] In-process scheduler/queue** - Tokio channel-based dispatch aligned to ADR-0003.
-- [ ] **3.2 [P0] Runner registration/auth** - `POST /v1/runners/register` with scoped runner token issuance/rotation.
-- [ ] **3.3 [P0] Heartbeat/capability reporting** - Runner reports host capabilities (macOS version, Xcode, capacity).
-- [ ] **3.4 [P0] Claim/lease protocol** - Atomic claim, lease timeout, and safe requeue of abandoned work.
-- [ ] **3.5 [P0] Workspace isolation** - Ephemeral per-build working directory and deterministic cleanup.
-- [ ] **3.6 [P0] Step executor** - Checkout + script execution with step-level timing and exit code capture.
-- [ ] **3.7 [P0] Timeout and cancellation enforcement** - Server-initiated and operator-initiated cancellation.
+- [x] **3.1 [P0] In-process scheduler/event bus** - SQLite-direct job dispatch with broadcast channel for event fan-out (ADR-0003).
+- [x] **3.2 [P0] Runner registration/auth** - `POST /v1/runners/register` with scoped runner token issuance/rotation.
+- [x] **3.3 [P0] Heartbeat/capability reporting** - Runner reports host capabilities (macOS version, Xcode, capacity). Stale heartbeat detection covers online, busy, and draining runners.
+- [x] **3.4 [P0] Claim/lease protocol** - Atomic claim via two-step optimistic locking, lease timeout with runner_id clearing, and safe requeue of abandoned work.
+- [x] **3.5 [P0] Workspace isolation** - Ephemeral per-build working directory and deterministic cleanup.
+- [x] **3.6 [P0] Step executor** - Commit-pinned checkout (exact SHA when available, branch HEAD fallback) + script execution with step-level timing and exit code capture. Failed builds include accumulated step results.
+- [x] **3.7 [P0] Timeout and cancellation enforcement** - Server-initiated and operator-initiated cancellation with mid-step interruption via `tokio::select!`.
 
-Exit criteria:
+Exit criteria (all met):
 - A registered runner can claim and execute a queued build end-to-end.
 - No double-claim on the same job.
 - Canceled/timed-out jobs transition to terminal state correctly.
 
-Feature docs required: Runner Protocol, Scheduling & Lease Semantics, Build Isolation.
+Feature docs: `2026-02-08-runner-protocol.md`, `2026-02-08-scheduling-and-lease-semantics.md`, `2026-02-08-build-isolation.md`.
 
 ## Phase 4: Logs + Artifacts + Distribution (`P0`)
 
@@ -233,13 +241,13 @@ Feature docs required: E2E Tests, Security Hardening, Deployment/Operations.
 
 | Area | Built | Remaining | Highest Priority |
 |------|-------|-----------|------------------|
-| Build lifecycle model | 9-state machine with transitions, optimistic locking, audit trail | Runner state machine | Phase 3 (`P0`) |
-| Triggering | Manual/API + webhook (GitHub/GitLab) with concurrency policy | Schedule triggers | Phase 3 (`P0`) |
+| Build lifecycle model | 9-state machine with transitions, optimistic locking, audit trail | None for V1 | Complete |
+| Triggering | Manual/API + webhook (GitHub/GitLab) with concurrency policy | Schedule triggers | Phase 5+ |
 | SCM integration | GitHub App + GitLab (token/OAuth) with encrypted secrets | None for V1 | Complete |
-| Scheduling/execution | None | Queue, claim/lease, runner execution | Phase 3 (`P0`) |
+| Scheduling/execution | In-process scheduler, runner registration, claim/lease, workspace isolation, step executor, timeout enforcement | None for V1 | Complete |
 | Logs/artifacts | Schema only | SSE logs, artifact storage, signed links | Phase 4 (`P0`) |
 | Project/pipeline UX | Schema only | CRUD + validation + trigger settings | Phase 5 (`P1`) |
-| CLI operations | Setup + version | login/status/runner/config/doctor | Phase 6 (`P1`) |
+| CLI operations | Setup + runner register/start | login/status/config/doctor | Phase 6 (`P1`) |
 | Reliability/security | Partial baseline | E2E, retry, hardening, release gate | Phase 7 (`P2`) |
 
 ## Notes

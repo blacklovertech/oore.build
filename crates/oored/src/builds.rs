@@ -27,6 +27,9 @@ fn row_to_build(row: &sqlx::sqlite::SqliteRow) -> Build {
     let config_snapshot: serde_json::Value =
         serde_json::from_str(&config_snapshot_str).unwrap_or(serde_json::json!({}));
 
+    let step_results_str: Option<String> = row.get("step_results");
+    let step_results = step_results_str.and_then(|s| serde_json::from_str(&s).ok());
+
     Build {
         id: row.get("id"),
         project_id: row.get("project_id"),
@@ -41,6 +44,8 @@ fn row_to_build(row: &sqlx::sqlite::SqliteRow) -> Build {
         branch: row.get("branch"),
         config_snapshot,
         runner_id: row.get("runner_id"),
+        step_results,
+        exit_code: row.get("exit_code"),
         queued_at: row.get("queued_at"),
         started_at: row.get("started_at"),
         finished_at: row.get("finished_at"),
@@ -186,6 +191,7 @@ fn create_config_snapshot(
     trigger_type: &str,
     commit_sha: Option<&str>,
     branch: Option<&str>,
+    repo_url: Option<&str>,
 ) -> serde_json::Value {
     serde_json::json!({
         "snapshot_version": 1,
@@ -193,6 +199,7 @@ fn create_config_snapshot(
         "trigger_type": trigger_type,
         "commit_sha": commit_sha,
         "branch": branch,
+        "repo_url": repo_url,
         "captured_at": now_unix(),
     })
 }
@@ -447,11 +454,26 @@ pub async fn create_build(
     let now = now_unix();
     let build_id = Uuid::new_v4().to_string();
 
+    // Resolve repo clone URL from project's linked repository
+    let repo_url: Option<String> = sqlx::query_scalar(
+        "SELECT i.host_url || '/' || r.full_name || '.git' \
+         FROM projects p \
+         JOIN integration_repositories r ON r.id = p.repository_id \
+         JOIN integration_installations inst ON inst.id = r.installation_id \
+         JOIN integrations i ON i.id = inst.integration_id \
+         WHERE p.id = ?1",
+    )
+    .bind(&project_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+
     let config_snapshot = create_config_snapshot(
         &config_path,
         "manual",
         req.commit_sha.as_deref(),
         req.branch.as_deref(),
+        repo_url.as_deref(),
     );
 
     let snapshot_str = config_snapshot.to_string();
@@ -531,6 +553,8 @@ pub async fn create_build(
         branch: req.branch,
         config_snapshot,
         runner_id: None,
+        step_results: None,
+        exit_code: None,
         queued_at: now,
         started_at: None,
         finished_at: None,
@@ -730,6 +754,16 @@ pub async fn trigger_build_from_webhook(
     let mut created_builds = Vec::new();
     let now = now_unix();
 
+    // Resolve repo clone URL from integration host_url
+    let repo_url: Option<String> = sqlx::query_scalar(
+        "SELECT host_url FROM integrations WHERE id = ?1",
+    )
+    .bind(integration_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None)
+    .map(|host_url: String| format!("{}/{}.git", host_url, repo_full_name));
+
     for project_row in &project_rows {
         let project_id: String = project_row.get("id");
 
@@ -779,7 +813,7 @@ pub async fn trigger_build_from_webhook(
             let build_id = Uuid::new_v4().to_string();
 
             let config_snapshot =
-                create_config_snapshot(&config_path, "webhook", commit_sha, branch);
+                create_config_snapshot(&config_path, "webhook", commit_sha, branch, repo_url.as_deref());
 
             let snapshot_str = config_snapshot.to_string();
             insert_build_with_retry(
@@ -842,6 +876,8 @@ pub async fn trigger_build_from_webhook(
                 branch: branch.map(String::from),
                 config_snapshot,
                 runner_id: None,
+                step_results: None,
+                exit_code: None,
                 queued_at: now,
                 started_at: None,
                 finished_at: None,

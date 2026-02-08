@@ -8,9 +8,10 @@ use chrono::{Local, TimeZone};
 use clap::{Args, Parser, Subcommand};
 use oore_contract::{
     ApiError, BootstrapTokenRecord, BootstrapTokenVerifyRequest, BootstrapTokenVerifyResponse,
-    OidcConfigureRequest, OidcConfigureResponse, SetupCompleteResponse, SetupOidcStartRequest,
+    BuildStatus, ClaimJobResponse, ClaimedJob, JobStatusResponse, OidcConfigureRequest,
+    OidcConfigureResponse, RegisterRunnerResponse, SetupCompleteResponse, SetupOidcStartRequest,
     SetupOidcStartResponse, SetupOidcVerifyRequest, SetupOidcVerifyResponse, SetupState,
-    SetupStateFile, SetupStatus,
+    SetupStateFile, SetupStatus, StepResult,
 };
 use rand::RngCore;
 use sha2::{Digest, Sha256};
@@ -73,7 +74,41 @@ struct RunnerArgs {
 
 #[derive(Debug, Subcommand)]
 enum RunnerSubcommand {
-    Register,
+    /// Register this host as a build runner
+    Register(RunnerRegisterArgs),
+    /// Start the runner daemon (poll for jobs, execute builds)
+    Start(RunnerStartArgs),
+}
+
+#[derive(Debug, Args)]
+struct RunnerRegisterArgs {
+    /// Daemon URL to register with
+    #[arg(long, env = "OORE_DAEMON_URL", default_value = "http://127.0.0.1:8787")]
+    daemon_url: String,
+    /// Runner name (defaults to hostname)
+    #[arg(long)]
+    name: Option<String>,
+    /// Auth session token for registration
+    #[arg(long, env = "OORE_SESSION_TOKEN")]
+    token: String,
+}
+
+#[derive(Debug, Args)]
+struct RunnerStartArgs {
+    /// Daemon URL (loaded from config if not specified)
+    #[arg(long, env = "OORE_DAEMON_URL")]
+    daemon_url: Option<String>,
+    /// Path to runner config file
+    #[arg(long, default_value = "~/.oore/runner.json")]
+    config: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct RunnerConfig {
+    runner_id: String,
+    runner_token: String,
+    daemon_url: String,
+    name: String,
 }
 
 #[derive(Debug, Args)]
@@ -990,6 +1025,607 @@ async fn handle_setup_interactive(daemon_url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── Runner execution engine ─────────────────────────────────────
+
+fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+async fn detect_capabilities() -> serde_json::Value {
+    let os_version = std::process::Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    let xcode_version = std::process::Command::new("xcodebuild")
+        .arg("-version")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+        .unwrap_or_default();
+
+    let arch = std::env::consts::ARCH.to_string();
+
+    serde_json::json!({
+        "os": "macos",
+        "os_version": os_version,
+        "arch": arch,
+        "xcode_version": xcode_version,
+    })
+}
+
+fn get_hostname() -> String {
+    std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+async fn handle_runner_register(args: RunnerRegisterArgs) -> anyhow::Result<()> {
+    let name = args.name.unwrap_or_else(get_hostname);
+
+    let capabilities = detect_capabilities().await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/runners/register", args.daemon_url))
+        .bearer_auth(&args.token)
+        .json(&serde_json::json!({
+            "name": name,
+            "capabilities": capabilities,
+        }))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let err: ApiError = resp.json().await.context("failed to parse error response")?;
+        anyhow::bail!("Registration failed: {} - {}", err.code, err.error);
+    }
+
+    let result: RegisterRunnerResponse = resp.json().await?;
+
+    // Save config
+    let config = RunnerConfig {
+        runner_id: result.runner.id.clone(),
+        runner_token: result.token,
+        daemon_url: args.daemon_url,
+        name: result.runner.name.clone(),
+    };
+
+    let config_dir = dirs::home_dir().context("no home dir")?.join(".oore");
+    fs::create_dir_all(&config_dir)?;
+    let config_path = config_dir.join("runner.json");
+
+    // Write with restrictive permissions (0600) since the file contains the runner token
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&config_path)?;
+        std::io::Write::write_all(&mut file, serde_json::to_string_pretty(&config)?.as_bytes())?;
+    }
+
+    println!("Runner registered successfully!");
+    println!("  ID: {}", result.runner.id);
+    println!("  Name: {}", result.runner.name);
+    println!("  Config saved to: {}", config_path.display());
+    println!("\nStart the runner with: oore runner start");
+
+    Ok(())
+}
+
+async fn handle_runner_start(args: RunnerStartArgs) -> anyhow::Result<()> {
+    let config_path = args
+        .config
+        .map(|p| {
+            if p.starts_with("~/") {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(&p[2..])
+            } else {
+                PathBuf::from(p)
+            }
+        })
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".oore/runner.json")
+        });
+
+    let config: RunnerConfig = serde_json::from_str(
+        &fs::read_to_string(&config_path)
+            .context("Runner not registered. Run 'oore runner register' first.")?,
+    )?;
+
+    let daemon_url = args.daemon_url.unwrap_or(config.daemon_url.clone());
+    let client = reqwest::Client::new();
+
+    println!("Starting runner '{}' ({})", config.name, config.runner_id);
+    println!("Connecting to: {}", daemon_url);
+
+    // Detect capabilities once at startup for heartbeat reporting
+    let capabilities = detect_capabilities().await;
+
+    // Set up graceful shutdown
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    let shutdown_tx_clone = shutdown_tx.clone();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        println!("\nShutting down runner...");
+        let _ = shutdown_tx_clone.send(true);
+    });
+
+    // Spawn heartbeat task (sends real capabilities detected at startup)
+    let hb_client = client.clone();
+    let hb_url = daemon_url.clone();
+    let hb_token = config.runner_token.clone();
+    let hb_runner_id = config.runner_id.clone();
+    let hb_capabilities = capabilities.clone();
+    let mut hb_shutdown = shutdown_rx.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = hb_shutdown.changed() => break,
+                _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                    let _ = hb_client
+                        .post(format!("{}/v1/runners/{}/heartbeat", hb_url, hb_runner_id))
+                        .bearer_auth(&hb_token)
+                        .json(&serde_json::json!({ "status": "online", "capabilities": hb_capabilities }))
+                        .send()
+                        .await;
+                }
+            }
+        }
+    });
+
+    // Main claim loop
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                println!("Runner shutdown complete.");
+                break;
+            }
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                match claim_and_execute(&client, &daemon_url, &config).await {
+                    Ok(true) => { /* executed a job, immediately try another */ }
+                    Ok(false) => { /* no jobs available, sleep and retry */ }
+                    Err(e) => {
+                        eprintln!("Error during claim/execute: {}", e);
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn claim_and_execute(
+    client: &reqwest::Client,
+    daemon_url: &str,
+    config: &RunnerConfig,
+) -> anyhow::Result<bool> {
+    let resp = client
+        .post(format!(
+            "{}/v1/runners/{}/claim",
+            daemon_url, config.runner_id
+        ))
+        .bearer_auth(&config.runner_token)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("Claim request failed: {}", resp.status());
+    }
+
+    let claim: ClaimJobResponse = resp.json().await?;
+    let job = match claim.job {
+        Some(j) => j,
+        None => return Ok(false),
+    };
+
+    println!(
+        "Claimed build {} (#{}) for project {}",
+        job.build_id, job.build_number, job.project_id
+    );
+
+    // Report status: running
+    report_status(
+        client, daemon_url, config, &job.build_id, "running", None, None, &[],
+    )
+    .await?;
+
+    // Execute build (with cancellation checking between and during steps)
+    let (steps, result) = execute_build(&job, client, daemon_url, config).await;
+
+    // Report final status — steps are always available regardless of success/failure
+    match result {
+        Ok(()) => {
+            report_status(
+                client,
+                daemon_url,
+                config,
+                &job.build_id,
+                "succeeded",
+                Some(0),
+                None,
+                &steps,
+            )
+            .await?;
+            println!("Build {} succeeded", job.build_id);
+        }
+        Err(e) => {
+            // If the build was externally terminated (canceled/timed_out),
+            // the daemon already set the terminal state — do NOT report "failed".
+            if e.downcast_ref::<BuildTerminated>().is_some() {
+                println!("Build {} was externally terminated, skipping status report", job.build_id);
+            } else {
+                report_status(
+                    client,
+                    daemon_url,
+                    config,
+                    &job.build_id,
+                    "failed",
+                    Some(1),
+                    Some(&e.to_string()),
+                    &steps,
+                )
+                .await?;
+                eprintln!("Build {} failed: {}", job.build_id, e);
+            }
+        }
+    }
+
+    Ok(true)
+}
+
+struct WorkspaceCleanup {
+    path: PathBuf,
+}
+
+impl Drop for WorkspaceCleanup {
+    fn drop(&mut self) {
+        if self.path.exists() {
+            if let Err(e) = fs::remove_dir_all(&self.path) {
+                eprintln!(
+                    "Warning: failed to clean up workspace {}: {}",
+                    self.path.display(),
+                    e
+                );
+            }
+        }
+    }
+}
+
+/// Sentinel error: build was externally terminated (canceled or timed out by the daemon).
+/// Distinguished from real build failures so the runner does not attempt to report "failed".
+#[derive(Debug)]
+struct BuildTerminated {
+    status: String,
+}
+
+impl std::fmt::Display for BuildTerminated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "build was externally terminated (status: {})", self.status)
+    }
+}
+
+impl std::error::Error for BuildTerminated {}
+
+/// Poll the daemon to check if a build is still active (not canceled or timed out).
+/// Returns `Err(BuildTerminated)` if the build reached a terminal state externally.
+async fn check_build_active(
+    client: &reqwest::Client,
+    daemon_url: &str,
+    config: &RunnerConfig,
+    build_id: &str,
+) -> anyhow::Result<()> {
+    let resp = client
+        .get(format!(
+            "{}/v1/runners/{}/jobs/{}",
+            daemon_url, config.runner_id, build_id
+        ))
+        .bearer_auth(&config.runner_token)
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let status_resp: JobStatusResponse = r.json().await?;
+            let status: BuildStatus = status_resp
+                .status
+                .parse()
+                .map_err(|e: String| anyhow::anyhow!(e))?;
+
+            if status.is_terminal() {
+                return Err(BuildTerminated {
+                    status: status_resp.status,
+                }
+                .into());
+            }
+            Ok(())
+        }
+        Ok(_) | Err(_) => {
+            // If we can't reach the daemon, don't abort — let the build continue.
+            // The lease timeout mechanism will handle truly orphaned builds.
+            Ok(())
+        }
+    }
+}
+
+/// Continuously poll for cancellation/timeout. Resolves only when the build is terminated.
+/// Used inside `select!` to race against a running child process.
+async fn poll_cancellation(
+    client: &reqwest::Client,
+    daemon_url: &str,
+    config: &RunnerConfig,
+    build_id: &str,
+) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        if check_build_active(client, daemon_url, config, build_id)
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+}
+
+async fn execute_build(
+    job: &ClaimedJob,
+    client: &reqwest::Client,
+    daemon_url: &str,
+    config: &RunnerConfig,
+) -> (Vec<StepResult>, anyhow::Result<()>) {
+    // Create ephemeral workspace
+    let workspace = PathBuf::from(format!("/tmp/oore-builds/{}", job.build_id));
+    if let Err(e) = fs::create_dir_all(&workspace) {
+        return (vec![], Err(e.into()));
+    }
+
+    // Ensure cleanup on exit (success or failure)
+    let _cleanup = WorkspaceCleanup {
+        path: workspace.clone(),
+    };
+
+    let snapshot = &job.config_snapshot;
+    let mut steps = Vec::new();
+
+    // Check for cancellation before starting
+    if let Err(e) = check_build_active(client, daemon_url, config, &job.build_id).await {
+        return (steps, Err(e));
+    }
+
+    // Step: checkout — require repo_url and at least commit_sha or branch
+    let repo_url = snapshot
+        .get("repo_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if repo_url.is_empty() {
+        return (steps, Err(anyhow::anyhow!("Build config snapshot has no repo_url — cannot checkout source")));
+    }
+
+    if job.commit_sha.is_none() && job.branch.is_none() {
+        return (steps, Err(anyhow::anyhow!("Build has neither commit_sha nor branch — cannot checkout source")));
+    }
+
+    let start = now_unix();
+
+    // Checkout strategy:
+    // 1. commit_sha present → git init + fetch exact commit + checkout FETCH_HEAD (reproducible)
+    // 2. branch only → git clone --depth 1 --branch <branch> (branch HEAD)
+    let mut child = if let Some(sha) = &job.commit_sha {
+        // Fetch exact commit for reproducibility (webhook/pinned builds).
+        // Uses env vars to avoid shell injection.
+        match tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("git init && git fetch --depth 1 \"$OORE_REPO\" \"$OORE_SHA\" && git checkout FETCH_HEAD")
+            .env("OORE_REPO", repo_url)
+            .env("OORE_SHA", sha)
+            .current_dir(&workspace)
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => return (steps, Err(e.into())),
+        }
+    } else if let Some(branch) = &job.branch {
+        // Clone branch HEAD (manual triggers without commit pinning)
+        match tokio::process::Command::new("git")
+            .arg("clone")
+            .arg("--depth")
+            .arg("1")
+            .arg("--branch")
+            .arg(branch)
+            .arg(repo_url)
+            .arg(".")
+            .current_dir(&workspace)
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => return (steps, Err(e.into())),
+        }
+    } else {
+        unreachable!() // guarded above
+    };
+
+    let clone_status = tokio::select! {
+        result = child.wait() => {
+            match result {
+                Ok(s) => Some(s),
+                Err(e) => return (steps, Err(e.into())),
+            }
+        },
+        _ = poll_cancellation(client, daemon_url, config, &job.build_id) => {
+            child.kill().await.ok();
+            None
+        }
+    };
+
+    let finished = now_unix();
+    match clone_status {
+        None => {
+            steps.push(StepResult {
+                name: "checkout".to_string(),
+                status: "failed".to_string(),
+                exit_code: None,
+                started_at: start,
+                finished_at: finished,
+                duration_ms: (finished - start) * 1000,
+            });
+            return (steps, Err(BuildTerminated { status: "canceled".to_string() }.into()));
+        }
+        Some(status) => {
+            let exit_code = status.code();
+            let success = exit_code == Some(0);
+            steps.push(StepResult {
+                name: "checkout".to_string(),
+                status: if success { "succeeded" } else { "failed" }.to_string(),
+                exit_code,
+                started_at: start,
+                finished_at: finished,
+                duration_ms: (finished - start) * 1000,
+            });
+            if !success {
+                return (steps, Err(anyhow::anyhow!("Git checkout failed")));
+            }
+        }
+    }
+
+    // Step: read .oore.yml and execute steps
+    let config_path = snapshot
+        .get("config_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".oore.yml");
+
+    let oore_config_path = workspace.join(config_path);
+    if oore_config_path.exists() {
+        let content = match fs::read_to_string(&oore_config_path) {
+            Ok(c) => c,
+            Err(e) => return (steps, Err(e.into())),
+        };
+        for (i, line) in content.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            // Check for cancellation/timeout between steps
+            if let Err(e) = check_build_active(client, daemon_url, config, &job.build_id).await {
+                return (steps, Err(e));
+            }
+
+            let step_name = format!("step-{}", i + 1);
+            let start = now_unix();
+
+            let mut child = match tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(line)
+                .current_dir(&workspace)
+                .kill_on_drop(true)
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => return (steps, Err(e.into())),
+            };
+
+            let step_status = tokio::select! {
+                result = child.wait() => {
+                    match result {
+                        Ok(s) => Some(s),
+                        Err(e) => return (steps, Err(e.into())),
+                    }
+                },
+                _ = poll_cancellation(client, daemon_url, config, &job.build_id) => {
+                    child.kill().await.ok();
+                    None
+                }
+            };
+
+            let finished = now_unix();
+            match step_status {
+                None => {
+                    steps.push(StepResult {
+                        name: step_name,
+                        status: "failed".to_string(),
+                        exit_code: None,
+                        started_at: start,
+                        finished_at: finished,
+                        duration_ms: (finished - start) * 1000,
+                    });
+                    return (steps, Err(BuildTerminated { status: "canceled".to_string() }.into()));
+                }
+                Some(status) => {
+                    let exit_code = status.code().unwrap_or(-1);
+                    steps.push(StepResult {
+                        name: step_name,
+                        status: if exit_code == 0 { "succeeded" } else { "failed" }.to_string(),
+                        exit_code: Some(exit_code),
+                        started_at: start,
+                        finished_at: finished,
+                        duration_ms: (finished - start) * 1000,
+                    });
+                    if exit_code != 0 {
+                        return (steps, Err(anyhow::anyhow!("Step failed with exit code {}", exit_code)));
+                    }
+                }
+            }
+        }
+    }
+
+    (steps, Ok(()))
+}
+
+async fn report_status(
+    client: &reqwest::Client,
+    daemon_url: &str,
+    config: &RunnerConfig,
+    build_id: &str,
+    status: &str,
+    exit_code: Option<i32>,
+    error_message: Option<&str>,
+    steps: &[StepResult],
+) -> anyhow::Result<()> {
+    let body = serde_json::json!({
+        "status": status,
+        "exit_code": exit_code,
+        "error_message": error_message,
+        "steps": steps,
+    });
+
+    let resp = client
+        .post(format!(
+            "{}/v1/runners/{}/jobs/{}/status",
+            daemon_url, config.runner_id, build_id
+        ))
+        .bearer_auth(&config.runner_token)
+        .json(&body)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("Status update failed: {}", resp.status());
+    }
+
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -1013,8 +1649,15 @@ fn main() -> anyhow::Result<()> {
             println!("status command placeholder");
         }
         Commands::Runner(runner) => match runner.command {
-            RunnerSubcommand::Register => {
-                println!("runner registration placeholder");
+            RunnerSubcommand::Register(args) => {
+                let runtime = tokio::runtime::Runtime::new()
+                    .context("failed to create tokio runtime")?;
+                runtime.block_on(handle_runner_register(args))?;
+            }
+            RunnerSubcommand::Start(args) => {
+                let runtime = tokio::runtime::Runtime::new()
+                    .context("failed to create tokio runtime")?;
+                runtime.block_on(handle_runner_start(args))?;
             }
         },
         Commands::Config(config) => match config.command {

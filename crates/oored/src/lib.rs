@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod background;
 pub mod builds;
 pub mod crypto;
 pub mod extractors;
@@ -6,6 +7,8 @@ pub mod integrations;
 pub mod observability;
 pub mod oidc;
 pub mod rbac;
+pub mod runners;
+pub mod scheduler;
 pub mod session;
 pub mod store;
 pub mod token;
@@ -64,6 +67,8 @@ pub struct AppState {
     pub skip_oidc_discovery: bool,
     /// Failed bootstrap token verification attempts (keyed by token hash).
     pub bootstrap_failures: Mutex<HashMap<String, u32>>,
+    /// In-process job scheduler for runner dispatch.
+    pub scheduler: Arc<scheduler::Scheduler>,
 }
 
 // ── Constants ────────────────────────────────────────────────────
@@ -825,6 +830,16 @@ pub async fn build_test_router(store: SetupStore, encryption_key: Vec<u8>) -> Ro
 async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oidc_discovery: bool, metrics_handle: PrometheusHandle) -> Router {
     let session_store = SessionStore::new(store.pool().clone());
     let enforcer = rbac::init_enforcer().await.expect("failed to initialise RBAC enforcer");
+    let sched = scheduler::Scheduler::new(1000);
+
+    // Reload pending builds from DB into scheduler queue
+    {
+        let pool = store.pool();
+        if let Err(e) = sched.reload_pending(pool).await {
+            tracing::error!(error = %e, "failed to reload pending builds into scheduler");
+        }
+    }
+
     let shared_state = Arc::new(AppState {
         store: Mutex::new(store),
         sessions: session_store,
@@ -834,7 +849,15 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         #[cfg(any(test, feature = "test-support"))]
         skip_oidc_discovery: _skip_oidc_discovery,
         bootstrap_failures: Mutex::new(HashMap::new()),
+        scheduler: sched.clone(),
     });
+
+    // Start background tasks (lease timeout, build timeout, heartbeat monitor)
+    {
+        let store_guard = shared_state.store.lock().await;
+        let pool = store_guard.pool().clone();
+        background::start_background_tasks(pool, sched);
+    }
 
     // H1: CORS origin from env var, default to http://localhost:3000
     let cors_origin = std::env::var("OORE_CORS_ORIGIN")
@@ -901,6 +924,13 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .route("/v1/builds", get(builds::list_builds))
         .route("/v1/builds/{build_id}", get(builds::get_build))
         .route("/v1/builds/{build_id}/cancel", post(builds::cancel_build))
+        // Runner endpoints
+        .route("/v1/runners/register", post(runners::register_runner))
+        .route("/v1/runners/{runner_id}/heartbeat", post(runners::runner_heartbeat))
+        .route("/v1/runners/{runner_id}/claim", post(runners::claim_job))
+        .route("/v1/runners/{runner_id}/jobs/{job_id}/status", post(runners::update_job_status))
+        .route("/v1/runners/{runner_id}/jobs/{job_id}", get(runners::get_job_status))
+        .route("/v1/runners", get(runners::list_runners))
         .layer(cors)
         .with_state(shared_state)
         // Merge webhook routes (outside CORS)

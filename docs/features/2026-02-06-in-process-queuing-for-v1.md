@@ -18,7 +18,7 @@ None. The queuing mechanism is an internal backend detail with no frontend visib
 
 ## API Changes
 
-None. The runner HTTP API (`/v1/runners/{runner_id}/claim`, `/v1/builds/{build_id}/logs/stream`, etc.) is unchanged. Only the internal backing mechanism changes from NATS to tokio channels.
+None. The runner HTTP API (`/v1/runners/{runner_id}/claim`, `/v1/builds/{build_id}/logs/stream`, etc.) is unchanged. Internally, job dispatch uses SQLite directly (runners claim via optimistic locking on the `builds` table) and the `tokio::sync::broadcast` channel provides build state event fan-out for SSE subscribers.
 
 ## Security Considerations
 
@@ -36,8 +36,9 @@ None. The runner HTTP API (`/v1/runners/{runner_id}/claim`, `/v1/builds/{build_i
 
 - [x] Contract section 10 updated from NATS JetStream to in-process (tokio channels) with ADR reference.
 - [x] ADR-0003 created in `docs/adr/`.
-- [ ] `JobQueue` and `BuildEventBus` trait abstractions defined when build pipeline work begins.
-- [ ] Pending jobs persisted in SQLite and reloaded on daemon startup.
+- [x] `broadcast` channel provides `BuildEventBus` fan-out for SSE subscribers.
+- [x] Job dispatch uses SQLite directly — runners claim via optimistic locking; no in-memory job queue needed.
+- [x] Pending jobs persisted in SQLite; stale `scheduled` builds recovered to `queued` on daemon startup.
 
 ## Owner
 

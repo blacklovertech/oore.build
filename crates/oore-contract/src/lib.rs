@@ -614,7 +614,7 @@ impl BuildStatus {
         match self {
             Self::Queued => &[Self::Scheduled, Self::Canceled, Self::Expired],
             Self::Scheduled => &[Self::Assigned, Self::Canceled, Self::Expired],
-            Self::Assigned => &[Self::Running, Self::Canceled, Self::TimedOut],
+            Self::Assigned => &[Self::Running, Self::Queued, Self::Canceled, Self::TimedOut],
             Self::Running => &[Self::Succeeded, Self::Failed, Self::Canceled, Self::TimedOut],
             // Terminal states have no valid transitions
             Self::Succeeded | Self::Failed | Self::Canceled | Self::TimedOut | Self::Expired => &[],
@@ -828,6 +828,10 @@ pub struct Build {
     pub config_snapshot: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_results: Option<Vec<StepResult>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
     pub queued_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<i64>,
@@ -884,6 +888,130 @@ pub struct ListBuildsResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CancelBuildResponse {
     pub build: Build,
+}
+
+// ── Runner domain types ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunnerStatus {
+    Online,
+    Offline,
+    Busy,
+    Draining,
+}
+
+impl fmt::Display for RunnerStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Online => "online",
+            Self::Offline => "offline",
+            Self::Busy => "busy",
+            Self::Draining => "draining",
+        };
+        f.write_str(s)
+    }
+}
+
+impl FromStr for RunnerStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "online" => Ok(Self::Online),
+            "offline" => Ok(Self::Offline),
+            "busy" => Ok(Self::Busy),
+            "draining" => Ok(Self::Draining),
+            other => Err(format!("unknown runner status: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Runner {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub capabilities: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_heartbeat_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registered_by: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+// ── Runner API types ────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterRunnerRequest {
+    pub name: String,
+    #[serde(default)]
+    pub capabilities: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterRunnerResponse {
+    pub runner: Runner,
+    pub token: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RunnerHeartbeatRequest {
+    pub status: String,
+    #[serde(default)]
+    pub capabilities: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClaimJobResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job: Option<ClaimedJob>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimedJob {
+    pub build_id: String,
+    pub project_id: String,
+    pub pipeline_id: String,
+    pub build_number: i64,
+    pub config_snapshot: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub lease_expires_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateJobStatusRequest {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub steps: Vec<StepResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepResult {
+    pub name: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub started_at: i64,
+    pub finished_at: i64,
+    pub duration_ms: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListRunnersResponse {
+    pub runners: Vec<Runner>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JobStatusResponse {
+    pub status: String,
 }
 
 // ── Tests ──────────────────────────────────────────────────────
