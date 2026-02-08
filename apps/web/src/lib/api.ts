@@ -1,7 +1,9 @@
 import type {
   ApiError,
+  ArtifactDownloadLinkResponse,
   BootstrapTokenVerifyResponse,
   BuildDetailResponse,
+  BuildLogsResponse,
   CancelBuildResponse,
   CreateBuildRequest,
   CreateBuildResponse,
@@ -16,6 +18,7 @@ import type {
   IntegrationDetailResponse,
   InviteUserRequest,
   InviteUserResponse,
+  ListArtifactsResponse,
   ListBuildsResponse,
   ListInstallationsResponse,
   ListIntegrationsResponse,
@@ -467,5 +470,64 @@ export function cancelBuild(
       method: 'POST',
       headers: authHeaders(token),
     },
+  )
+}
+
+// ── Stream Token API ────────────────────────────────────────
+
+export function createStreamToken(
+  baseUrl: string,
+  token: string,
+  buildId: string,
+): Promise<{ token: string; expires_at: number }> {
+  return request<{ token: string; expires_at: number }>(
+    baseUrl,
+    `/v1/builds/${buildId}/stream-token`,
+    { method: 'POST', headers: authHeaders(token) },
+  )
+}
+
+// ── Build Logs API ──────────────────────────────────────────
+
+export function getBuildLogs(
+  baseUrl: string,
+  token: string,
+  buildId: string,
+  params?: { after_sequence?: number; limit?: number },
+): Promise<BuildLogsResponse> {
+  const query = new URLSearchParams()
+  if (params?.after_sequence != null) query.set('after_sequence', String(params.after_sequence))
+  if (params?.limit) query.set('limit', String(params.limit))
+  const qs = query.toString()
+  return request<BuildLogsResponse>(
+    baseUrl,
+    `/v1/builds/${buildId}/logs${qs ? `?${qs}` : ''}`,
+    { headers: authHeaders(token) },
+  )
+}
+
+// ── Artifact API ────────────────────────────────────────────
+
+export function listArtifacts(
+  baseUrl: string,
+  token: string,
+  buildId: string,
+): Promise<ListArtifactsResponse> {
+  return request<ListArtifactsResponse>(
+    baseUrl,
+    `/v1/builds/${buildId}/artifacts`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function getArtifactDownloadLink(
+  baseUrl: string,
+  token: string,
+  artifactId: string,
+): Promise<ArtifactDownloadLinkResponse> {
+  return request<ArtifactDownloadLinkResponse>(
+    baseUrl,
+    `/v1/artifacts/${artifactId}/download-link`,
+    { method: 'POST', headers: authHeaders(token) },
   )
 }

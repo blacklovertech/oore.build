@@ -1,15 +1,18 @@
+pub mod artifacts;
 pub mod auth;
 pub mod background;
 pub mod builds;
 pub mod crypto;
 pub mod extractors;
 pub mod integrations;
+pub mod logs;
 pub mod observability;
 pub mod oidc;
 pub mod rbac;
 pub mod runners;
 pub mod scheduler;
 pub mod session;
+pub mod storage;
 pub mod store;
 pub mod token;
 pub mod users;
@@ -69,6 +72,10 @@ pub struct AppState {
     pub bootstrap_failures: Mutex<HashMap<String, u32>>,
     /// In-process job scheduler for runner dispatch.
     pub scheduler: Arc<scheduler::Scheduler>,
+    /// Optional S3-compatible storage client for artifacts.
+    pub storage: Option<storage::StorageClient>,
+    /// In-memory store for short-lived SSE streaming tokens.
+    pub stream_tokens: logs::StreamTokenStore,
 }
 
 // ── Constants ────────────────────────────────────────────────────
@@ -840,6 +847,11 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         }
     }
 
+    // Initialize S3-compatible storage client if configured
+    let storage_client = storage::StorageConfig::from_env()
+        .ok()
+        .map(|cfg| storage::StorageClient::new(cfg));
+
     let shared_state = Arc::new(AppState {
         store: Mutex::new(store),
         sessions: session_store,
@@ -850,6 +862,8 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         skip_oidc_discovery: _skip_oidc_discovery,
         bootstrap_failures: Mutex::new(HashMap::new()),
         scheduler: sched.clone(),
+        storage: storage_client,
+        stream_tokens: logs::StreamTokenStore::new(),
     });
 
     // Start background tasks (lease timeout, build timeout, heartbeat monitor)
@@ -931,6 +945,15 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .route("/v1/runners/{runner_id}/jobs/{job_id}/status", post(runners::update_job_status))
         .route("/v1/runners/{runner_id}/jobs/{job_id}", get(runners::get_job_status))
         .route("/v1/runners", get(runners::list_runners))
+        // Build log endpoints
+        .route("/v1/runners/{runner_id}/jobs/{job_id}/logs", post(logs::append_build_logs))
+        .route("/v1/builds/{build_id}/logs", get(logs::get_build_logs))
+        .route("/v1/builds/{build_id}/logs/stream", get(logs::stream_build_logs))
+        .route("/v1/builds/{build_id}/stream-token", post(logs::create_stream_token))
+        // Artifact endpoints
+        .route("/v1/runners/{runner_id}/jobs/{job_id}/artifacts", post(artifacts::create_artifact))
+        .route("/v1/builds/{build_id}/artifacts", get(artifacts::list_artifacts))
+        .route("/v1/artifacts/{artifact_id}/download-link", post(artifacts::generate_download_link))
         .layer(cors)
         .with_state(shared_state)
         // Merge webhook routes (outside CORS)

@@ -17,7 +17,7 @@ use rand::RngCore;
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 const FAVICON_DATA_URI: &str = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPGRlZnM+CiAgICA8Y2lyY2xlIGlkPSJjdXQiIGN4PSIxNiIgY3k9IjE2IiByPSI3IiAvPgogICAgPG1hc2sgaWQ9ImhvbGUiPgogICAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIGZpbGw9IndoaXRlIiAvPgogICAgICA8dXNlIGhyZWY9IiNjdXQiIGZpbGw9ImJsYWNrIiAvPgogICAgPC9tYXNrPgogICAgPGNsaXBQYXRoIGlkPSJsZWZ0Ij4KICAgICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjE1IiBoZWlnaHQ9IjMyIiAvPgogICAgPC9jbGlwUGF0aD4KICAgIDxjbGlwUGF0aCBpZD0icmlnaHQiPgogICAgICA8cmVjdCB4PSIxNyIgeT0iMCIgd2lkdGg9IjE1IiBoZWlnaHQ9IjMyIiAvPgogICAgPC9jbGlwUGF0aD4KICA8L2RlZnM+CiAgPHJlY3QKICAgIHg9IjIiCiAgICB5PSIyIgogICAgd2lkdGg9IjI4IgogICAgaGVpZ2h0PSIyOCIKICAgIHJ4PSI2IgogICAgZmlsbD0iI2Y0OWYxZSIKICAgIGNsaXAtcGF0aD0idXJsKCNsZWZ0KSIKICAgIG1hc2s9InVybCgjaG9sZSkiCiAgLz4KICA8cmVjdAogICAgeD0iMiIKICAgIHk9IjIiCiAgICB3aWR0aD0iMjgiCiAgICBoZWlnaHQ9IjI4IgogICAgcng9IjYiCiAgICBmaWxsPSIjZjQ5ZjFlIgogICAgY2xpcC1wYXRoPSJ1cmwoI3JpZ2h0KSIKICAgIG1hc2s9InVybCgjaG9sZSkiCiAgLz4KPC9zdmc+Cg==";
@@ -1404,6 +1404,7 @@ async fn execute_build(
 
     let snapshot = &job.config_snapshot;
     let mut steps = Vec::new();
+    let mut log_seq: i64 = 0;
 
     // Check for cancellation before starting
     if let Err(e) = check_build_active(client, daemon_url, config, &job.build_id).await {
@@ -1429,7 +1430,7 @@ async fn execute_build(
     // Checkout strategy:
     // 1. commit_sha present → git init + fetch exact commit + checkout FETCH_HEAD (reproducible)
     // 2. branch only → git clone --depth 1 --branch <branch> (branch HEAD)
-    let mut child = if let Some(sha) = &job.commit_sha {
+    let child = if let Some(sha) = &job.commit_sha {
         // Fetch exact commit for reproducibility (webhook/pinned builds).
         // Uses env vars to avoid shell injection.
         match tokio::process::Command::new("sh")
@@ -1438,6 +1439,8 @@ async fn execute_build(
             .env("OORE_REPO", repo_url)
             .env("OORE_SHA", sha)
             .current_dir(&workspace)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()
         {
@@ -1455,6 +1458,8 @@ async fn execute_build(
             .arg(repo_url)
             .arg(".")
             .current_dir(&workspace)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()
         {
@@ -1465,18 +1470,16 @@ async fn execute_build(
         unreachable!() // guarded above
     };
 
-    let clone_status = tokio::select! {
-        result = child.wait() => {
-            match result {
-                Ok(s) => Some(s),
-                Err(e) => return (steps, Err(e.into())),
-            }
-        },
-        _ = poll_cancellation(client, daemon_url, config, &job.build_id) => {
-            child.kill().await.ok();
-            None
-        }
-    };
+    let clone_status = run_and_stream(
+        child,
+        client,
+        daemon_url,
+        config,
+        &job.build_id,
+        &mut log_seq,
+        poll_cancellation(client, daemon_url, config, &job.build_id),
+    )
+    .await;
 
     let finished = now_unix();
     match clone_status {
@@ -1534,10 +1537,12 @@ async fn execute_build(
             let step_name = format!("step-{}", i + 1);
             let start = now_unix();
 
-            let mut child = match tokio::process::Command::new("sh")
+            let child = match tokio::process::Command::new("sh")
                 .arg("-c")
                 .arg(line)
                 .current_dir(&workspace)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()
             {
@@ -1545,18 +1550,16 @@ async fn execute_build(
                 Err(e) => return (steps, Err(e.into())),
             };
 
-            let step_status = tokio::select! {
-                result = child.wait() => {
-                    match result {
-                        Ok(s) => Some(s),
-                        Err(e) => return (steps, Err(e.into())),
-                    }
-                },
-                _ = poll_cancellation(client, daemon_url, config, &job.build_id) => {
-                    child.kill().await.ok();
-                    None
-                }
-            };
+            let step_status = run_and_stream(
+                child,
+                client,
+                daemon_url,
+                config,
+                &job.build_id,
+                &mut log_seq,
+                poll_cancellation(client, daemon_url, config, &job.build_id),
+            )
+            .await;
 
             let finished = now_unix();
             match step_status {
@@ -1589,7 +1592,208 @@ async fn execute_build(
         }
     }
 
+    // Scan workspace for artifacts and register them with the daemon.
+    // Errors here are logged but don't fail the build — artifact upload is best-effort.
+    scan_and_upload_artifacts(&workspace, client, daemon_url, config, &job.build_id, snapshot).await;
+
     (steps, Ok(()))
+}
+
+// ── Artifact scanning and upload ────────────────────────────────
+
+/// Known artifact file extensions and their type identifiers.
+fn artifact_type_for_extension(ext: &str) -> Option<&'static str> {
+    match ext.to_lowercase().as_str() {
+        "apk" => Some("apk"),
+        "ipa" => Some("ipa"),
+        _ => None,
+    }
+}
+
+/// Walk a directory recursively, collecting all file paths.
+fn walk_dir_files(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    fn walk(dir: &std::path::Path, result: &mut Vec<PathBuf>) {
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // Skip .git and hidden directories
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                }
+                walk(&path, result);
+            } else if path.is_file() {
+                result.push(path);
+            }
+        }
+    }
+    walk(dir, &mut result);
+    result
+}
+
+/// Compute SHA-256 checksum of a file using buffered I/O.
+fn compute_file_sha256(path: &std::path::Path) -> anyhow::Result<String> {
+    use std::io::Read;
+    let file = fs::File::open(path)?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Scan the workspace for artifact files and upload them to the daemon.
+///
+/// Looks for files matching known extensions (`.apk`, `.ipa`) and any additional
+/// `*.ext` patterns specified in `config_snapshot.artifact_patterns`.
+async fn scan_and_upload_artifacts(
+    workspace: &std::path::Path,
+    client: &reqwest::Client,
+    daemon_url: &str,
+    config: &RunnerConfig,
+    build_id: &str,
+    snapshot: &serde_json::Value,
+) {
+    let all_files = walk_dir_files(workspace);
+
+    // Collect custom extension patterns from config snapshot (e.g., ["*.zip", "*.dSYM.zip"])
+    let custom_extensions: Vec<String> = snapshot
+        .get("artifact_patterns")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .filter_map(|pat| pat.strip_prefix("*."))
+                .map(|ext| ext.to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut artifacts: Vec<(PathBuf, String)> = Vec::new(); // (path, artifact_type)
+
+    for path in &all_files {
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            // Check known extensions first
+            if let Some(art_type) = artifact_type_for_extension(ext) {
+                artifacts.push((path.clone(), art_type.to_string()));
+            } else if custom_extensions.contains(&ext.to_lowercase()) {
+                artifacts.push((path.clone(), "generic".to_string()));
+            }
+        }
+    }
+
+    if artifacts.is_empty() {
+        return;
+    }
+
+    println!("Found {} artifact(s) to upload", artifacts.len());
+
+    for (path, artifact_type) in &artifacts {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        let file_size = fs::metadata(path).map(|m| m.len() as i64).ok();
+
+        let checksum = match compute_file_sha256(path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("Warning: failed to compute checksum for {}: {}", name, e);
+                None
+            }
+        };
+
+        // Register artifact with the daemon
+        let body = serde_json::json!({
+            "name": name,
+            "artifact_type": artifact_type,
+            "file_size": file_size,
+            "checksum": checksum,
+            "metadata": {},
+        });
+
+        let resp = match client
+            .post(format!(
+                "{}/v1/runners/{}/jobs/{}/artifacts",
+                daemon_url, config.runner_id, build_id
+            ))
+            .bearer_auth(&config.runner_token)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Warning: failed to register artifact {}: {}", name, e);
+                continue;
+            }
+        };
+
+        if !resp.status().is_success() {
+            eprintln!(
+                "Warning: artifact registration failed for {} (HTTP {})",
+                name,
+                resp.status()
+            );
+            continue;
+        }
+
+        // Parse response to get upload URL
+        let create_resp: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Warning: failed to parse artifact response for {}: {}", name, e);
+                continue;
+            }
+        };
+
+        let upload_url = create_resp
+            .get("upload_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if upload_url.is_empty() {
+            println!("  Registered artifact {} (no S3 upload URL — storage not configured)", name);
+            continue;
+        }
+
+        // Upload file to S3 via presigned PUT URL
+        match tokio::fs::read(path).await {
+            Ok(bytes) => {
+                match client.put(upload_url).body(bytes).send().await {
+                    Ok(r) if r.status().is_success() => {
+                        println!("  Uploaded artifact {}", name);
+                    }
+                    Ok(r) => {
+                        eprintln!(
+                            "Warning: S3 upload failed for {} (HTTP {})",
+                            name,
+                            r.status()
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: S3 upload failed for {}: {}", name, e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to read artifact file {}: {}", name, e);
+            }
+        }
+    }
 }
 
 async fn report_status(
@@ -1624,6 +1828,159 @@ async fn report_status(
     }
 
     Ok(())
+}
+
+/// Run a child process, capture its stdout/stderr, and upload log chunks in real-time.
+/// Returns the exit status (or None if canceled).
+async fn run_and_stream(
+    mut child: tokio::process::Child,
+    client: &reqwest::Client,
+    daemon_url: &str,
+    config: &RunnerConfig,
+    build_id: &str,
+    seq: &mut i64,
+    cancel_fut: impl std::future::Future<Output = ()>,
+) -> Option<std::process::ExitStatus> {
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    // Spawn tasks to read stdout/stderr and upload chunks
+    let client_out = client.clone();
+    let daemon_out = daemon_url.to_string();
+    let config_out_id = config.runner_id.clone();
+    let config_out_token = config.runner_token.clone();
+    let build_out = build_id.to_string();
+
+    // We use a shared sequence counter via a channel.
+    // stdout and stderr tasks send lines back, and the main task uploads them.
+    let (line_tx, mut line_rx) = tokio::sync::mpsc::channel::<(String, String)>(256);
+
+    if let Some(stdout) = stdout {
+        let tx = line_tx.clone();
+        tokio::spawn(async move {
+            let reader = tokio::io::BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if tx.send((line, "stdout".to_string())).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    if let Some(stderr) = stderr {
+        let tx = line_tx.clone();
+        tokio::spawn(async move {
+            let reader = tokio::io::BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if tx.send((line, "stderr".to_string())).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    // Drop our copy so channel closes when both readers finish
+    drop(line_tx);
+
+    // Spawn a task that batches and uploads log lines
+    let upload_client = client_out;
+    let upload_daemon = daemon_out;
+    let upload_config_id = config_out_id;
+    let upload_config_token = config_out_token;
+    let upload_build = build_out;
+    let seq_start = *seq;
+    let upload_handle = tokio::spawn(async move {
+        let mut local_seq = seq_start;
+        let mut batch = Vec::new();
+        let mut interval = tokio::time::interval(Duration::from_millis(500));
+
+        loop {
+            tokio::select! {
+                line = line_rx.recv() => {
+                    match line {
+                        Some((content, stream)) => {
+                            batch.push(serde_json::json!({
+                                "sequence": local_seq,
+                                "content": content,
+                                "stream": stream,
+                            }));
+                            local_seq += 1;
+
+                            // Flush if batch is large enough
+                            if batch.len() >= 50 {
+                                let body = serde_json::json!({ "chunks": batch });
+                                let _ = upload_client
+                                    .post(format!(
+                                        "{}/v1/runners/{}/jobs/{}/logs",
+                                        upload_daemon, upload_config_id, upload_build
+                                    ))
+                                    .bearer_auth(&upload_config_token)
+                                    .json(&body)
+                                    .send()
+                                    .await;
+                                batch = Vec::new();
+                            }
+                        }
+                        None => {
+                            // Channel closed — flush remaining
+                            if !batch.is_empty() {
+                                let body = serde_json::json!({ "chunks": batch });
+                                let _ = upload_client
+                                    .post(format!(
+                                        "{}/v1/runners/{}/jobs/{}/logs",
+                                        upload_daemon, upload_config_id, upload_build
+                                    ))
+                                    .bearer_auth(&upload_config_token)
+                                    .json(&body)
+                                    .send()
+                                    .await;
+                            }
+                            return local_seq;
+                        }
+                    }
+                }
+                _ = interval.tick() => {
+                    // Periodic flush for responsiveness
+                    if !batch.is_empty() {
+                        let body = serde_json::json!({ "chunks": batch });
+                        let _ = upload_client
+                            .post(format!(
+                                "{}/v1/runners/{}/jobs/{}/logs",
+                                upload_daemon, upload_config_id, upload_build
+                            ))
+                            .bearer_auth(&upload_config_token)
+                            .json(&body)
+                            .send()
+                            .await;
+                        batch = Vec::new();
+                    }
+                }
+            }
+        }
+    });
+
+    // Wait for child to complete or cancellation
+    let status = tokio::select! {
+        result = child.wait() => {
+            match result {
+                Ok(s) => Some(s),
+                Err(_) => None,
+            }
+        },
+        _ = cancel_fut => {
+            child.kill().await.ok();
+            None
+        }
+    };
+
+    // Wait for upload task to finish and update sequence counter
+    if let Ok(final_seq) = upload_handle.await {
+        *seq = final_seq;
+    }
+
+    status
 }
 
 fn main() -> anyhow::Result<()> {

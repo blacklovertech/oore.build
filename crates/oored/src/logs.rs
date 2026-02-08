@@ -1,0 +1,523 @@
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::Json;
+use oore_contract::{
+    ApiError, AppendBuildLogsRequest, AppendBuildLogsResponse, BuildLogChunk, BuildLogsResponse,
+};
+use serde::Deserialize;
+use sqlx::Row;
+use tokio::sync::Mutex;
+use tokio_stream::Stream;
+use tracing::{error, info, warn};
+use uuid::Uuid;
+
+use crate::extractors::AuthUser;
+use crate::rbac::check_permission;
+use crate::runners::RunnerAuth;
+use crate::session::SessionInfo;
+use crate::token::{generate_token, hash_token};
+use crate::util::{api_err, now_unix};
+use crate::AppState;
+
+type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiError>)>;
+
+/// Maximum number of log lines stored per build.
+const MAX_LOG_LINES_PER_BUILD: i64 = 10_000;
+
+/// Maximum content length per log line in bytes.
+const MAX_LINE_BYTES: usize = 4096;
+
+/// Polling interval for SSE log streaming.
+const SSE_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Streaming token TTL: 5 minutes.
+const STREAM_TOKEN_TTL_SECS: i64 = 300;
+
+// ── Stream token store ─────────────────────────────────────────
+
+/// Entry for a short-lived streaming token.
+struct StreamTokenEntry {
+    /// The user's role at the time the token was issued (for RBAC checks).
+    role: String,
+    /// Unix timestamp when this token expires.
+    expires_at: i64,
+}
+
+/// In-memory store for short-lived SSE streaming tokens.
+///
+/// These tokens are exchanged from full session tokens before opening an
+/// EventSource connection, so the long-lived session token never appears
+/// in URL query strings.
+pub struct StreamTokenStore {
+    tokens: Mutex<HashMap<String, StreamTokenEntry>>,
+}
+
+impl StreamTokenStore {
+    pub fn new() -> Self {
+        Self {
+            tokens: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Create a short-lived streaming token derived from a validated session.
+    /// Returns the plaintext token (the store keeps the hash).
+    pub async fn create(&self, session: &SessionInfo) -> String {
+        let token = generate_token();
+        let hashed = hash_token(&token);
+        let now = now_unix();
+
+        let entry = StreamTokenEntry {
+            role: session.role.clone(),
+            expires_at: now + STREAM_TOKEN_TTL_SECS,
+        };
+
+        let mut map = self.tokens.lock().await;
+
+        // Lazy cleanup: remove expired tokens while we hold the lock
+        let now_ts = now;
+        map.retain(|_, v| v.expires_at > now_ts);
+
+        map.insert(hashed, entry);
+        token
+    }
+
+    /// Validate a streaming token. Returns the associated role if valid.
+    pub async fn validate(&self, token: &str) -> Option<String> {
+        let hashed = hash_token(token);
+        let now = now_unix();
+
+        let map = self.tokens.lock().await;
+        map.get(&hashed)
+            .filter(|e| e.expires_at > now)
+            .map(|e| e.role.clone())
+    }
+}
+
+// ── Query parameters ────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct GetBuildLogsQuery {
+    pub after_sequence: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SseTokenQuery {
+    pub token: Option<String>,
+}
+
+// ── Handlers ────────────────────────────────────────────────────
+
+/// `POST /v1/runners/{runner_id}/jobs/{job_id}/logs` — runner appends log chunks.
+pub async fn append_build_logs(
+    State(state): State<Arc<AppState>>,
+    Path((runner_id, job_id)): Path<(String, String)>,
+    runner_auth: RunnerAuth,
+    Json(req): Json<AppendBuildLogsRequest>,
+) -> ApiResult<AppendBuildLogsResponse> {
+    // Verify runner identity matches the path
+    if runner_auth.runner_id != runner_id {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "runner_mismatch",
+            "Runner token does not match the requested runner ID",
+        ));
+    }
+
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    // Verify build exists and belongs to this runner
+    let build_row = sqlx::query("SELECT runner_id FROM builds WHERE id = ?1")
+        .bind(&job_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to fetch build");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to fetch build",
+            )
+        })?
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "not_found", "Build not found"))?;
+
+    let build_runner_id: Option<String> = build_row.get("runner_id");
+    if build_runner_id.as_deref() != Some(&runner_id) {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "runner_mismatch",
+            "This build is not assigned to your runner",
+        ));
+    }
+
+    if req.chunks.is_empty() {
+        return Ok(Json(AppendBuildLogsResponse { appended: 0 }));
+    }
+
+    // Check current log count to enforce cap
+    let current_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM build_logs WHERE build_id = ?1")
+            .bind(&job_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to count build logs");
+                api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    "Failed to count build logs",
+                )
+            })?;
+
+    let remaining_capacity = (MAX_LOG_LINES_PER_BUILD - current_count).max(0) as usize;
+    if remaining_capacity == 0 {
+        warn!(
+            build_id = %job_id,
+            "build log capacity reached, dropping new chunks"
+        );
+        return Ok(Json(AppendBuildLogsResponse { appended: 0 }));
+    }
+
+    // Limit chunks to remaining capacity
+    let chunks_to_insert = if req.chunks.len() > remaining_capacity {
+        &req.chunks[..remaining_capacity]
+    } else {
+        &req.chunks
+    };
+
+    let now = now_unix();
+    let mut appended: i64 = 0;
+
+    for chunk in chunks_to_insert {
+        // Truncate content if longer than MAX_LINE_BYTES (UTF-8 safe)
+        let content = if chunk.content.len() > MAX_LINE_BYTES {
+            &chunk.content[..chunk.content.floor_char_boundary(MAX_LINE_BYTES)]
+        } else {
+            &chunk.content
+        };
+
+        let id = Uuid::new_v4().to_string();
+
+        // INSERT OR IGNORE to silently skip duplicate sequence numbers
+        let result =
+            sqlx::query("INSERT OR IGNORE INTO build_logs (id, build_id, sequence, content, stream, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+                .bind(&id)
+                .bind(&job_id)
+                .bind(chunk.sequence)
+                .bind(content)
+                .bind(&chunk.stream)
+                .bind(now)
+                .execute(pool)
+                .await
+                .map_err(|e| {
+                    error!(error = %e, build_id = %job_id, "failed to insert build log chunk");
+                    api_err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "store_error",
+                        "Failed to insert log chunk",
+                    )
+                })?;
+
+        if result.rows_affected() > 0 {
+            appended += 1;
+        }
+    }
+
+    info!(
+        build_id = %job_id,
+        runner_id = %runner_id,
+        appended = appended,
+        "log chunks appended"
+    );
+
+    Ok(Json(AppendBuildLogsResponse { appended }))
+}
+
+/// `GET /v1/builds/{build_id}/logs` — fetch build logs with pagination.
+pub async fn get_build_logs(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(build_id): Path<String>,
+    Query(params): Query<GetBuildLogsQuery>,
+) -> ApiResult<BuildLogsResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "builds", "read").await?;
+
+    let store = state.store.lock().await;
+    let pool = store.pool();
+
+    // Verify build exists
+    let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM builds WHERE id = ?1")
+        .bind(&build_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+
+    if !exists {
+        return Err(api_err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Build not found",
+        ));
+    }
+
+    let after_seq = params.after_sequence.unwrap_or(-1);
+    let limit = params.limit.unwrap_or(1000).min(5000);
+
+    let rows = sqlx::query(
+        "SELECT sequence, content, stream FROM build_logs \
+         WHERE build_id = ?1 AND sequence > ?2 \
+         ORDER BY sequence ASC LIMIT ?3",
+    )
+    .bind(&build_id)
+    .bind(after_seq)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to fetch build logs");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to fetch build logs",
+        )
+    })?;
+
+    let logs: Vec<BuildLogChunk> = rows
+        .iter()
+        .map(|r| BuildLogChunk {
+            sequence: r.get("sequence"),
+            content: r.get("content"),
+            stream: r.get("stream"),
+        })
+        .collect();
+
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM build_logs WHERE build_id = ?1")
+        .bind(&build_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
+    Ok(Json(BuildLogsResponse { logs, total }))
+}
+
+/// `POST /v1/builds/{build_id}/stream-token` — exchange session for a short-lived SSE streaming token.
+pub async fn create_stream_token(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(build_id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    check_permission(&state.enforcer, &auth.0.role, "builds", "read").await?;
+
+    // Verify build exists
+    let store = state.store.lock().await;
+    let pool = store.pool();
+    let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM builds WHERE id = ?1")
+        .bind(&build_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+
+    if !exists {
+        return Err(api_err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Build not found",
+        ));
+    }
+    drop(store);
+
+    let token = state.stream_tokens.create(&auth.0).await;
+    let expires_at = now_unix() + STREAM_TOKEN_TTL_SECS;
+
+    info!(
+        build_id = %build_id,
+        user = %auth.0.email,
+        "stream token issued"
+    );
+
+    Ok(Json(serde_json::json!({
+        "token": token,
+        "expires_at": expires_at,
+    })))
+}
+
+/// `GET /v1/builds/{build_id}/logs/stream` — SSE stream for live build logs.
+pub async fn stream_build_logs(
+    State(state): State<Arc<AppState>>,
+    Path(build_id): Path<String>,
+    Query(sse_query): Query<SseTokenQuery>,
+    headers: axum::http::HeaderMap,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<ApiError>)> {
+    // Authenticate: ?token= accepts ONLY short-lived stream tokens (never session tokens).
+    // Authorization header accepts full session tokens for non-browser clients (curl, etc.).
+    // This prevents long-lived session tokens from appearing in URL query strings.
+    let query_token = sse_query.token.as_deref();
+    let header_token = crate::util::extract_bearer(&headers);
+
+    let role = if let Some(qt) = query_token {
+        // Query param: must be a valid stream token — reject if not
+        state.stream_tokens.validate(qt).await.ok_or_else(|| {
+            api_err(
+                StatusCode::UNAUTHORIZED,
+                "invalid_stream_token",
+                "Invalid or expired stream token (obtain one via POST /v1/builds/{build_id}/stream-token)",
+            )
+        })?
+    } else if let Some(ht) = header_token {
+        // Authorization header: accept full session token (non-browser clients)
+        let session = state
+            .sessions
+            .validate_session(ht)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "session validation failed");
+                api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "session_error",
+                    "Session validation failed",
+                )
+            })?
+            .ok_or_else(|| {
+                api_err(
+                    StatusCode::UNAUTHORIZED,
+                    "invalid_session",
+                    "Invalid or expired session token",
+                )
+            })?;
+        session.role
+    } else {
+        return Err(api_err(
+            StatusCode::UNAUTHORIZED,
+            "missing_auth",
+            "Authentication required (pass token query param or Authorization header)",
+        ));
+    };
+
+    // RBAC check
+    check_permission(&state.enforcer, &role, "builds", "read").await?;
+
+    // Verify build exists
+    {
+        let store = state.store.lock().await;
+        let pool = store.pool();
+        let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM builds WHERE id = ?1")
+            .bind(&build_id)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(false);
+
+        if !exists {
+            return Err(api_err(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "Build not found",
+            ));
+        }
+    }
+
+    // Check for Last-Event-ID header for reconnection support
+    let last_event_id: i64 = headers
+        .get("Last-Event-ID")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(-1);
+
+    let stream = build_log_sse_stream(state, build_id, last_event_id);
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+}
+
+/// Produce an SSE stream that polls the DB for new log entries.
+fn build_log_sse_stream(
+    state: Arc<AppState>,
+    build_id: String,
+    initial_last_seq: i64,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    async_stream::stream! {
+        let mut last_seq = initial_last_seq;
+        let mut interval = tokio::time::interval(SSE_POLL_INTERVAL);
+
+        loop {
+            interval.tick().await;
+
+            let store = state.store.lock().await;
+            let pool = store.pool();
+
+            // Fetch new log entries
+            let rows = sqlx::query(
+                "SELECT sequence, content, stream FROM build_logs \
+                 WHERE build_id = ?1 AND sequence > ?2 \
+                 ORDER BY sequence ASC LIMIT 500",
+            )
+            .bind(&build_id)
+            .bind(last_seq)
+            .fetch_all(pool)
+            .await;
+
+            match rows {
+                Ok(rows) => {
+                    for row in &rows {
+                        let seq: i64 = row.get("sequence");
+                        let chunk = BuildLogChunk {
+                            sequence: seq,
+                            content: row.get("content"),
+                            stream: row.get("stream"),
+                        };
+
+                        let data = serde_json::to_string(&chunk).unwrap_or_default();
+                        let event = Event::default()
+                            .event("log")
+                            .id(seq.to_string())
+                            .data(data);
+
+                        last_seq = seq;
+                        yield Ok(event);
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, build_id = %build_id, "failed to poll build logs for SSE");
+                }
+            }
+
+            // Check if build is in terminal state
+            let status_result: Result<Option<String>, _> =
+                sqlx::query_scalar("SELECT status FROM builds WHERE id = ?1")
+                    .bind(&build_id)
+                    .fetch_optional(pool)
+                    .await;
+
+            // Drop the store lock before potentially yielding the done event
+            drop(store);
+
+            match status_result {
+                Ok(Some(status)) => {
+                    let is_terminal = matches!(
+                        status.as_str(),
+                        "succeeded" | "failed" | "canceled" | "timed_out" | "expired"
+                    );
+                    if is_terminal {
+                        let done_event = Event::default().event("done").data("build_finished");
+                        yield Ok(done_event);
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    // Build was deleted
+                    let done_event = Event::default().event("done").data("build_not_found");
+                    yield Ok(done_event);
+                    break;
+                }
+                Err(e) => {
+                    warn!(error = %e, build_id = %build_id, "failed to check build status for SSE");
+                }
+            }
+        }
+    }
+}

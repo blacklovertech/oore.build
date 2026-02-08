@@ -320,3 +320,45 @@ export interface ListBuildsResponse {
 export interface CancelBuildResponse {
   build: Build
 }
+
+// ── Build Log types ─────────────────────────────────────────
+export interface BuildLogChunk {
+  sequence: number
+  content: string
+  stream: 'stdout' | 'stderr'
+}
+
+export interface AppendBuildLogsRequest {
+  chunks: Array<BuildLogChunk>
+}
+
+export interface AppendBuildLogsResponse {
+  appended: number
+}
+
+export interface BuildLogsResponse {
+  logs: Array<BuildLogChunk>
+  total: number
+}
+
+// ── Artifact types ──────────────────────────────────────────
+export interface Artifact {
+  id: string
+  build_id: string
+  name: string
+  artifact_type: 'apk' | 'ipa' | 'app' | 'generic'
+  file_path: string
+  file_size?: number
+  checksum?: string
+  metadata: Record<string, unknown>
+  created_at: number
+}
+
+export interface ListArtifactsResponse {
+  artifacts: Array<Artifact>
+}
+
+export interface ArtifactDownloadLinkResponse {
+  download_url: string
+  expires_at: number
+}

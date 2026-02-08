@@ -1014,6 +1014,75 @@ pub struct JobStatusResponse {
     pub status: String,
 }
 
+// ── Artifact domain types ────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Artifact {
+    pub id: String,
+    pub build_id: String,
+    pub name: String,
+    pub artifact_type: String,
+    pub file_path: String,
+    pub file_size: Option<i64>,
+    pub checksum: Option<String>,
+    pub metadata: serde_json::Value,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateArtifactRequest {
+    pub name: String,
+    pub artifact_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateArtifactResponse {
+    pub artifact: Artifact,
+    pub upload_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListArtifactsResponse {
+    pub artifacts: Vec<Artifact>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArtifactDownloadLinkResponse {
+    pub download_url: String,
+    pub expires_at: i64,
+}
+
+// ── Build log types ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildLogChunk {
+    pub sequence: i64,
+    pub content: String,
+    pub stream: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppendBuildLogsRequest {
+    pub chunks: Vec<BuildLogChunk>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppendBuildLogsResponse {
+    pub appended: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BuildLogsResponse {
+    pub logs: Vec<BuildLogChunk>,
+    pub total: i64,
+}
+
 // ── Tests ──────────────────────────────────────────────────────
 
 #[cfg(test)]

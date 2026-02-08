@@ -1,7 +1,7 @@
 # V1 Implementation Roadmap
 
 Status: Active - execution-first sequencing for V1 CI completion.
-Last assessed: 2026-02-07
+Last assessed: 2026-02-08
 
 ## Why This Revision
 
@@ -73,7 +73,7 @@ Feature docs: `2026-02-06-rbac-and-user-management.md`, `2026-02-06-session-pers
 
 Feature docs: `2026-02-06-design-system-governance.md`
 
-### Implemented API Endpoints (40)
+### Implemented API Endpoints (47)
 
 Setup:
 - `GET /v1/public/setup-status`
@@ -126,6 +126,17 @@ Runners:
 - `GET /v1/runners/{runner_id}/jobs/{job_id}`
 - `GET /v1/runners`
 
+Build Logs:
+- `POST /v1/runners/{runner_id}/jobs/{job_id}/logs`
+- `GET /v1/builds/{build_id}/logs`
+- `GET /v1/builds/{build_id}/logs/stream`
+- `POST /v1/builds/{build_id}/stream-token`
+
+Artifacts:
+- `POST /v1/runners/{runner_id}/jobs/{job_id}/artifacts`
+- `GET /v1/builds/{build_id}/artifacts`
+- `POST /v1/artifacts/{artifact_id}/download-link`
+
 Health:
 - `GET /healthz`
 
@@ -174,22 +185,24 @@ Exit criteria (all met):
 
 Feature docs: `2026-02-08-runner-protocol.md`, `2026-02-08-scheduling-and-lease-semantics.md`, `2026-02-08-build-isolation.md`.
 
-## Phase 4: Logs + Artifacts + Distribution (`P0`)
+## Phase 4: Logs + Artifacts + Distribution (`P0`) (Complete)
 
 Dependency: Phase 3 complete.
 
-- [ ] **4.1 [P0] Structured log ingestion** - Runner log upload endpoint with ordered chunking and truncation safeguards.
-- [ ] **4.2 [P0] Live log streaming (SSE)** - `GET /v1/builds/{build_id}/logs/stream`.
-- [ ] **4.3 [P0] Artifact capture contract** - Runner finalizes artifact manifest (name, path, checksum, size, type).
-- [ ] **4.4 [P0] S3-compatible storage integration** - `aws-sdk-s3` upload/download with signed URLs + TTL.
-- [ ] **4.5 [P0] Artifact link APIs** - Authenticated and short-lived public distribution links.
-- [ ] **4.6 [P0] Build detail UI** - Status timeline + live logs + artifact list/download actions.
+- [x] **4.1 [P0] Structured log ingestion** - Runner log upload endpoint (`POST /v1/runners/{runner_id}/jobs/{job_id}/logs`) with ordered chunking, 10k line cap, 4KB per-line truncation, and INSERT OR IGNORE dedup.
+- [x] **4.2 [P0] Live log streaming (SSE)** - `GET /v1/builds/{build_id}/logs/stream` with polling-based SSE, reconnection via Last-Event-ID, keepalive, and auto-close on terminal status. Full log retrieval via `GET /v1/builds/{build_id}/logs`.
+- [x] **4.3 [P0] Artifact capture contract** - `POST /v1/runners/{runner_id}/jobs/{job_id}/artifacts` registers artifact manifest (name, type, checksum, size) with validation.
+- [x] **4.4 [P0] S3-compatible storage integration** - `aws-sdk-s3` with presigned PUT/GET URLs, configurable endpoint/bucket/region via env vars, graceful fallback when unconfigured.
+- [x] **4.5 [P0] Artifact link APIs** - `POST /v1/artifacts/{artifact_id}/download-link` generates 15-min TTL presigned URLs with RBAC check and audit logging. `GET /v1/builds/{build_id}/artifacts` lists artifacts.
+- [x] **4.6 [P0] Build detail UI** - Rebuilt build detail page with live SSE log viewer (auto-scroll, stderr highlighting, scroll-lock toggle, polling fallback), artifact table with download actions, duration display, relative timestamps, and auto-refresh for active builds.
 
-Exit criteria:
+Exit criteria (all met):
 - Operator can trigger build, watch live logs, and download produced artifacts.
 - Artifact links expire predictably and are auditable.
+- SSE stream supports reconnection and auto-closes on terminal builds.
+- S3 storage is optional — artifact metadata is always persisted, upload/download URLs require S3.
 
-Feature docs required: Live Build Logs, Artifact Storage & Download Policy.
+Feature docs: `2026-02-08-live-build-logs.md`, `2026-02-08-artifact-storage-download-policy.md`.
 
 ## Phase 5: Project + Pipeline Product Surface (`P1`)
 
@@ -245,7 +258,7 @@ Feature docs required: E2E Tests, Security Hardening, Deployment/Operations.
 | Triggering | Manual/API + webhook (GitHub/GitLab) with concurrency policy | Schedule triggers | Phase 5+ |
 | SCM integration | GitHub App + GitLab (token/OAuth) with encrypted secrets | None for V1 | Complete |
 | Scheduling/execution | In-process scheduler, runner registration, claim/lease, workspace isolation, step executor, timeout enforcement | None for V1 | Complete |
-| Logs/artifacts | Schema only | SSE logs, artifact storage, signed links | Phase 4 (`P0`) |
+| Logs/artifacts | SSE streaming, log ingestion, S3 artifacts, signed URLs, live UI | None for V1 | Complete |
 | Project/pipeline UX | Schema only | CRUD + validation + trigger settings | Phase 5 (`P1`) |
 | CLI operations | Setup + runner register/start | login/status/config/doctor | Phase 6 (`P1`) |
 | Reliability/security | Partial baseline | E2E, retry, hardening, release gate | Phase 7 (`P2`) |
