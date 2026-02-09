@@ -1058,6 +1058,138 @@ pub struct ArtifactDownloadLinkResponse {
     pub expires_at: i64,
 }
 
+// ── Project API types ───────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<String>,
+    pub settings: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
+    pub created_by: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateProjectRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateProjectRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateProjectResponse {
+    pub project: Project,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProjectDetailResponse {
+    pub project: Project,
+    pub pipeline_count: i64,
+    pub build_count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListProjectsResponse {
+    pub projects: Vec<Project>,
+    pub total: i64,
+}
+
+// ── Pipeline API types ──────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pipeline {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub config_path: String,
+    pub trigger_config: TriggerConfig,
+    pub concurrency: ConcurrencyPolicy,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreatePipelineRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_config: Option<TriggerConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<ConcurrencyPolicy>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdatePipelineRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_config: Option<TriggerConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<ConcurrencyPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreatePipelineResponse {
+    pub pipeline: Pipeline,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PipelineDetailResponse {
+    pub pipeline: Pipeline,
+    pub build_count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListPipelinesResponse {
+    pub pipelines: Vec<Pipeline>,
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidatePipelineRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_config: Option<TriggerConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<ConcurrencyPolicy>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidatePipelineResponse {
+    pub valid: bool,
+    pub errors: Vec<String>,
+}
+
 // ── Build log types ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -8,6 +8,8 @@ pub mod integrations;
 pub mod logs;
 pub mod observability;
 pub mod oidc;
+pub mod pipelines;
+pub mod projects;
 pub mod rbac;
 pub mod runners;
 pub mod scheduler;
@@ -933,6 +935,13 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .route("/v1/integrations/{id}/installations", get(integrations::list_installations).post(integrations::github::sync_installations))
         .route("/v1/integrations/gitlab/start", post(integrations::gitlab::gitlab_start))
         .route("/v1/integrations/gitlab/authorize", post(integrations::gitlab::gitlab_authorize))
+        // Project endpoints
+        .route("/v1/projects", get(projects::list_projects).post(projects::create_project))
+        .route("/v1/projects/{project_id}", get(projects::get_project).patch(projects::update_project).delete(projects::delete_project))
+        // Pipeline endpoints
+        .route("/v1/projects/{project_id}/pipelines", get(pipelines::list_pipelines).post(pipelines::create_pipeline))
+        .route("/v1/pipelines/{pipeline_id}", get(pipelines::get_pipeline).patch(pipelines::update_pipeline).delete(pipelines::delete_pipeline))
+        .route("/v1/pipelines/validate", post(pipelines::validate_pipeline))
         // Build endpoints
         .route("/v1/projects/{project_id}/builds", post(builds::create_build))
         .route("/v1/builds", get(builds::list_builds))

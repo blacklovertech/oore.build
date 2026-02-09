@@ -1,6 +1,6 @@
 import { Link, useLocation, useMatches } from '@tanstack/react-router'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { DashboardSquare01Icon, GitBranchIcon, Link04Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
+import { DashboardSquare01Icon, Folder02Icon, GitBranchIcon, Link04Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -20,6 +20,7 @@ interface NavItem {
 
 const PRIMARY_ITEMS: Array<NavItem> = [
   { title: 'Dashboard', to: '/', icon: DashboardSquare01Icon },
+  { title: 'Projects', to: '/projects', icon: Folder02Icon },
   { title: 'Builds', to: '/builds', icon: GitBranchIcon },
 ]
 

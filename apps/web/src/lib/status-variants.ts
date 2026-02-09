@@ -31,3 +31,7 @@ export const INTEGRATION_STATUS_VARIANT: Record<string, BadgeVariant> = {
 export function getIntegrationStatusVariant(status: string): BadgeVariant {
   return INTEGRATION_STATUS_VARIANT[status] ?? 'outline'
 }
+
+export function getPipelineStatusVariant(enabled: boolean): BadgeVariant {
+  return enabled ? 'success' : 'secondary'
+}

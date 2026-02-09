@@ -362,3 +362,111 @@ export interface ArtifactDownloadLinkResponse {
   download_url: string
   expires_at: number
 }
+
+// ── Project domain types ────────────────────────────────────────
+
+export interface Project {
+  id: string
+  name: string
+  description?: string
+  repository_id?: string
+  settings: Record<string, unknown>
+  default_branch?: string
+  created_by: string
+  created_at: number
+  updated_at: number
+}
+
+export interface CreateProjectRequest {
+  name: string
+  description?: string
+  repository_id?: string
+  default_branch?: string
+}
+
+export interface UpdateProjectRequest {
+  name?: string
+  description?: string
+  repository_id?: string
+  default_branch?: string
+}
+
+export interface CreateProjectResponse {
+  project: Project
+}
+
+export interface ProjectDetailResponse {
+  project: Project
+  pipeline_count: number
+  build_count: number
+}
+
+export interface ListProjectsResponse {
+  projects: Array<Project>
+  total: number
+}
+
+// ── Pipeline domain types ───────────────────────────────────────
+
+export interface TriggerConfig {
+  events: string[]
+  branches: string[]
+}
+
+export interface ConcurrencyPolicy {
+  cancel_previous: boolean
+  max_concurrent?: number
+}
+
+export interface Pipeline {
+  id: string
+  project_id: string
+  name: string
+  config_path: string
+  trigger_config: TriggerConfig
+  concurrency: ConcurrencyPolicy
+  enabled: boolean
+  created_at: number
+  updated_at: number
+}
+
+export interface CreatePipelineRequest {
+  name: string
+  config_path: string
+  trigger_config: TriggerConfig
+  concurrency: ConcurrencyPolicy
+}
+
+export interface UpdatePipelineRequest {
+  name?: string
+  config_path?: string
+  trigger_config?: TriggerConfig
+  concurrency?: ConcurrencyPolicy
+  enabled?: boolean
+}
+
+export interface CreatePipelineResponse {
+  pipeline: Pipeline
+}
+
+export interface PipelineDetailResponse {
+  pipeline: Pipeline
+  build_count: number
+}
+
+export interface ListPipelinesResponse {
+  pipelines: Array<Pipeline>
+  total: number
+}
+
+export interface ValidatePipelineRequest {
+  name: string
+  config_path: string
+  trigger_config: TriggerConfig
+  concurrency: ConcurrencyPolicy
+}
+
+export interface ValidatePipelineResponse {
+  valid: boolean
+  errors?: string[]
+}

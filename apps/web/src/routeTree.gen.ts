@@ -13,6 +13,7 @@ import { Route as SetupRouteImport } from './routes/setup'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
+import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 import { Route as BuildsIndexRouteImport } from './routes/builds/index'
 import { Route as SetupOwnerRouteImport } from './routes/setup/owner'
 import { Route as SetupOidcRouteImport } from './routes/setup/oidc'
@@ -21,9 +22,11 @@ import { Route as SettingsUsersRouteImport } from './routes/settings/users'
 import { Route as BuildsBuildIdRouteImport } from './routes/builds/$buildId'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as SettingsIntegrationsIndexRouteImport } from './routes/settings/integrations/index'
+import { Route as ProjectsProjectIdIndexRouteImport } from './routes/projects/$projectId/index'
 import { Route as SettingsIntegrationsGitlabRouteImport } from './routes/settings/integrations/gitlab'
 import { Route as SettingsIntegrationsGithubRouteImport } from './routes/settings/integrations/github'
 import { Route as SettingsIntegrationsIntegrationIdRouteImport } from './routes/settings/integrations/$integrationId'
+import { Route as ProjectsProjectIdPipelinesPipelineIdRouteImport } from './routes/projects/$projectId/pipelines/$pipelineId'
 
 const SetupRoute = SetupRouteImport.update({
   id: '/setup',
@@ -44,6 +47,11 @@ const SetupIndexRoute = SetupIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => SetupRoute,
+} as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const BuildsIndexRoute = BuildsIndexRouteImport.update({
   id: '/builds/',
@@ -86,6 +94,11 @@ const SettingsIntegrationsIndexRoute =
     path: '/settings/integrations/',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ProjectsProjectIdIndexRoute = ProjectsProjectIdIndexRouteImport.update({
+  id: '/projects/$projectId/',
+  path: '/projects/$projectId/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsIntegrationsGitlabRoute =
   SettingsIntegrationsGitlabRouteImport.update({
     id: '/settings/integrations/gitlab',
@@ -104,6 +117,12 @@ const SettingsIntegrationsIntegrationIdRoute =
     path: '/settings/integrations/$integrationId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ProjectsProjectIdPipelinesPipelineIdRoute =
+  ProjectsProjectIdPipelinesPipelineIdRouteImport.update({
+    id: '/projects/$projectId/pipelines/$pipelineId',
+    path: '/projects/$projectId/pipelines/$pipelineId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -116,11 +135,14 @@ export interface FileRoutesByFullPath {
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
   '/builds/': typeof BuildsIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/settings/integrations/$integrationId': typeof SettingsIntegrationsIntegrationIdRoute
   '/settings/integrations/github': typeof SettingsIntegrationsGithubRoute
   '/settings/integrations/gitlab': typeof SettingsIntegrationsGitlabRoute
+  '/projects/$projectId/': typeof ProjectsProjectIdIndexRoute
   '/settings/integrations/': typeof SettingsIntegrationsIndexRoute
+  '/projects/$projectId/pipelines/$pipelineId': typeof ProjectsProjectIdPipelinesPipelineIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -132,11 +154,14 @@ export interface FileRoutesByTo {
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
   '/builds': typeof BuildsIndexRoute
+  '/projects': typeof ProjectsIndexRoute
   '/setup': typeof SetupIndexRoute
   '/settings/integrations/$integrationId': typeof SettingsIntegrationsIntegrationIdRoute
   '/settings/integrations/github': typeof SettingsIntegrationsGithubRoute
   '/settings/integrations/gitlab': typeof SettingsIntegrationsGitlabRoute
+  '/projects/$projectId': typeof ProjectsProjectIdIndexRoute
   '/settings/integrations': typeof SettingsIntegrationsIndexRoute
+  '/projects/$projectId/pipelines/$pipelineId': typeof ProjectsProjectIdPipelinesPipelineIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -150,11 +175,14 @@ export interface FileRoutesById {
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
   '/builds/': typeof BuildsIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/settings/integrations/$integrationId': typeof SettingsIntegrationsIntegrationIdRoute
   '/settings/integrations/github': typeof SettingsIntegrationsGithubRoute
   '/settings/integrations/gitlab': typeof SettingsIntegrationsGitlabRoute
+  '/projects/$projectId/': typeof ProjectsProjectIdIndexRoute
   '/settings/integrations/': typeof SettingsIntegrationsIndexRoute
+  '/projects/$projectId/pipelines/$pipelineId': typeof ProjectsProjectIdPipelinesPipelineIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -169,11 +197,14 @@ export interface FileRouteTypes {
     | '/setup/oidc'
     | '/setup/owner'
     | '/builds/'
+    | '/projects/'
     | '/setup/'
     | '/settings/integrations/$integrationId'
     | '/settings/integrations/github'
     | '/settings/integrations/gitlab'
+    | '/projects/$projectId/'
     | '/settings/integrations/'
+    | '/projects/$projectId/pipelines/$pipelineId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -185,11 +216,14 @@ export interface FileRouteTypes {
     | '/setup/oidc'
     | '/setup/owner'
     | '/builds'
+    | '/projects'
     | '/setup'
     | '/settings/integrations/$integrationId'
     | '/settings/integrations/github'
     | '/settings/integrations/gitlab'
+    | '/projects/$projectId'
     | '/settings/integrations'
+    | '/projects/$projectId/pipelines/$pipelineId'
   id:
     | '__root__'
     | '/'
@@ -202,11 +236,14 @@ export interface FileRouteTypes {
     | '/setup/oidc'
     | '/setup/owner'
     | '/builds/'
+    | '/projects/'
     | '/setup/'
     | '/settings/integrations/$integrationId'
     | '/settings/integrations/github'
     | '/settings/integrations/gitlab'
+    | '/projects/$projectId/'
     | '/settings/integrations/'
+    | '/projects/$projectId/pipelines/$pipelineId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -217,10 +254,13 @@ export interface RootRouteChildren {
   BuildsBuildIdRoute: typeof BuildsBuildIdRoute
   SettingsUsersRoute: typeof SettingsUsersRoute
   BuildsIndexRoute: typeof BuildsIndexRoute
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
   SettingsIntegrationsIntegrationIdRoute: typeof SettingsIntegrationsIntegrationIdRoute
   SettingsIntegrationsGithubRoute: typeof SettingsIntegrationsGithubRoute
   SettingsIntegrationsGitlabRoute: typeof SettingsIntegrationsGitlabRoute
+  ProjectsProjectIdIndexRoute: typeof ProjectsProjectIdIndexRoute
   SettingsIntegrationsIndexRoute: typeof SettingsIntegrationsIndexRoute
+  ProjectsProjectIdPipelinesPipelineIdRoute: typeof ProjectsProjectIdPipelinesPipelineIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -252,6 +292,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/setup/'
       preLoaderRoute: typeof SetupIndexRouteImport
       parentRoute: typeof SetupRoute
+    }
+    '/projects/': {
+      id: '/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/builds/': {
       id: '/builds/'
@@ -309,6 +356,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsIntegrationsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/$projectId/': {
+      id: '/projects/$projectId/'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId/'
+      preLoaderRoute: typeof ProjectsProjectIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/integrations/gitlab': {
       id: '/settings/integrations/gitlab'
       path: '/settings/integrations/gitlab'
@@ -328,6 +382,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/integrations/$integrationId'
       fullPath: '/settings/integrations/$integrationId'
       preLoaderRoute: typeof SettingsIntegrationsIntegrationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/$projectId/pipelines/$pipelineId': {
+      id: '/projects/$projectId/pipelines/$pipelineId'
+      path: '/projects/$projectId/pipelines/$pipelineId'
+      fullPath: '/projects/$projectId/pipelines/$pipelineId'
+      preLoaderRoute: typeof ProjectsProjectIdPipelinesPipelineIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -357,11 +418,15 @@ const rootRouteChildren: RootRouteChildren = {
   BuildsBuildIdRoute: BuildsBuildIdRoute,
   SettingsUsersRoute: SettingsUsersRoute,
   BuildsIndexRoute: BuildsIndexRoute,
+  ProjectsIndexRoute: ProjectsIndexRoute,
   SettingsIntegrationsIntegrationIdRoute:
     SettingsIntegrationsIntegrationIdRoute,
   SettingsIntegrationsGithubRoute: SettingsIntegrationsGithubRoute,
   SettingsIntegrationsGitlabRoute: SettingsIntegrationsGitlabRoute,
+  ProjectsProjectIdIndexRoute: ProjectsProjectIdIndexRoute,
   SettingsIntegrationsIndexRoute: SettingsIntegrationsIndexRoute,
+  ProjectsProjectIdPipelinesPipelineIdRoute:
+    ProjectsProjectIdPipelinesPipelineIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -204,21 +204,21 @@ Exit criteria (all met):
 
 Feature docs: `2026-02-08-live-build-logs.md`, `2026-02-08-artifact-storage-download-policy.md`.
 
-## Phase 5: Project + Pipeline Product Surface (`P1`)
+## Phase 5: Project + Pipeline Product Surface (`P1`) (Complete)
 
 Dependency: Phases 2-4 complete and stable.
 
-- [ ] **5.1 [P1] Project CRUD APIs** - `GET|POST /v1/projects`, `GET|PATCH|DELETE /v1/projects/{project_id}` with RBAC/audit.
-- [ ] **5.2 [P1] Pipeline CRUD APIs** - `GET|POST /v1/projects/{project_id}/pipelines`, plus `GET|PATCH|DELETE` per pipeline.
-- [ ] **5.3 [P1] Pipeline schema validation** - Validate triggers, branch/tag patterns, required inputs/defaults.
-- [ ] **5.4 [P1] Project/Pipeline UI** - List/detail/create/edit with safe defaults and validation feedback.
-- [ ] **5.5 [P1] Trigger settings UI** - Toggle stale-build cancellation and trigger source controls.
+- [x] **5.1 [P1] Project CRUD APIs** - `GET|POST /v1/projects`, `GET|PATCH|DELETE /v1/projects/{project_id}` with RBAC/audit.
+- [x] **5.2 [P1] Pipeline CRUD APIs** - `GET|POST /v1/projects/{project_id}/pipelines`, plus `GET|PATCH|DELETE` per pipeline.
+- [x] **5.3 [P1] Pipeline schema validation** - Validate triggers, branch/tag patterns, required inputs/defaults. Dry-run validation endpoint at `POST /v1/pipelines/validate`.
+- [x] **5.4 [P1] Project/Pipeline UI** - List/detail/create/edit with safe defaults and validation feedback.
+- [x] **5.5 [P1] Trigger settings UI** - Toggle stale-build cancellation and trigger source controls.
 
-Exit criteria:
+Exit criteria (all met):
 - Developers can self-serve project/pipeline setup without direct DB/API intervention.
 - Invalid pipeline configs are blocked before execution.
 
-Feature docs required: Projects API, Pipelines API, Project/Pipeline UI.
+Feature docs: `2026-02-08-projects-api.md`, `2026-02-08-pipelines-api.md`, `2026-02-08-project-pipeline-ui.md`.
 
 ## Phase 6: Operator CLI Completeness (`P1`)
 
@@ -259,7 +259,7 @@ Feature docs required: E2E Tests, Security Hardening, Deployment/Operations.
 | SCM integration | GitHub App + GitLab (token/OAuth) with encrypted secrets | None for V1 | Complete |
 | Scheduling/execution | In-process scheduler, runner registration, claim/lease, workspace isolation, step executor, timeout enforcement | None for V1 | Complete |
 | Logs/artifacts | SSE streaming, log ingestion, S3 artifacts, signed URLs, live UI | None for V1 | Complete |
-| Project/pipeline UX | Schema only | CRUD + validation + trigger settings | Phase 5 (`P1`) |
+| Project/pipeline UX | CRUD APIs, validation, trigger settings, management UI | Complete | Complete |
 | CLI operations | Setup + runner register/start | login/status/config/doctor | Phase 6 (`P1`) |
 | Reliability/security | Partial baseline | E2E, retry, hardening, release gate | Phase 7 (`P2`) |
 

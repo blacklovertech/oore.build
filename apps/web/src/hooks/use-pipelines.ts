@@ -1,0 +1,153 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type {
+  CreatePipelineRequest,
+  UpdatePipelineRequest,
+  ValidatePipelineRequest,
+} from '@/lib/types'
+import {
+  createPipeline,
+  deletePipeline,
+  getPipeline,
+  listPipelines,
+  updatePipeline,
+  validatePipeline,
+} from '@/lib/api'
+import { useActiveInstance } from '@/stores/instance-store'
+import { useAuthStore } from '@/stores/auth-store'
+
+function useAuthToken(): string | null {
+  const token = useAuthStore((s) => s.token)
+  const expiresAt = useAuthStore((s) => s.expiresAt)
+  if (!token || expiresAt == null) return null
+  if (expiresAt <= Math.floor(Date.now() / 1000)) return null
+  return token
+}
+
+function useBaseUrl(): string | null {
+  const instance = useActiveInstance()
+  return instance?.url ?? null
+}
+
+export function usePipelines(
+  projectId: string,
+  params?: { limit?: number; offset?: number },
+) {
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useQuery({
+    queryKey: [
+      instance?.id ?? '__none__',
+      'pipelines',
+      projectId,
+      params ?? {},
+    ],
+    queryFn: () => listPipelines(baseUrl!, token!, projectId, params),
+    enabled: !!baseUrl && !!token && !!projectId,
+  })
+}
+
+export function usePipeline(pipelineId: string) {
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useQuery({
+    queryKey: [instance?.id ?? '__none__', 'pipeline', pipelineId],
+    queryFn: () => getPipeline(baseUrl!, token!, pipelineId),
+    enabled: !!baseUrl && !!token && !!pipelineId,
+  })
+}
+
+export function useCreatePipeline() {
+  const queryClient = useQueryClient()
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      data,
+    }: {
+      projectId: string
+      data: CreatePipelineRequest
+    }) => {
+      if (!baseUrl || !token)
+        return Promise.reject(new Error('Not authenticated'))
+      return createPipeline(baseUrl, token, projectId, data)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'pipelines'],
+      })
+    },
+  })
+}
+
+export function useUpdatePipeline() {
+  const queryClient = useQueryClient()
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useMutation({
+    mutationFn: ({
+      pipelineId,
+      data,
+    }: {
+      pipelineId: string
+      data: UpdatePipelineRequest
+    }) => {
+      if (!baseUrl || !token)
+        return Promise.reject(new Error('Not authenticated'))
+      return updatePipeline(baseUrl, token, pipelineId, data)
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'pipelines'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [
+          instance?.id ?? '__none__',
+          'pipeline',
+          variables.pipelineId,
+        ],
+      })
+    },
+  })
+}
+
+export function useDeletePipeline() {
+  const queryClient = useQueryClient()
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useMutation({
+    mutationFn: (pipelineId: string) => {
+      if (!baseUrl || !token)
+        return Promise.reject(new Error('Not authenticated'))
+      return deletePipeline(baseUrl, token, pipelineId)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'pipelines'],
+      })
+    },
+  })
+}
+
+export function useValidatePipeline() {
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+
+  return useMutation({
+    mutationFn: (data: ValidatePipelineRequest) => {
+      if (!baseUrl || !token)
+        return Promise.reject(new Error('Not authenticated'))
+      return validatePipeline(baseUrl, token, data)
+    },
+  })
+}

@@ -1,0 +1,49 @@
+import { useAuthStore } from '@/stores/auth-store'
+
+/**
+ * Client-side RBAC matrix mirroring crates/oored/rbac_policy.csv.
+ * Used for UI gating only — the backend enforces the real policy.
+ */
+const RBAC_MATRIX: Record<string, Set<string>> = {
+  owner: new Set([
+    'instance_settings:read', 'instance_settings:write',
+    'users:read', 'users:write', 'users:invite', 'users:delete', 'users:enable',
+    'projects:read', 'projects:write', 'projects:delete',
+    'pipelines:read', 'pipelines:write', 'pipelines:delete',
+    'builds:read', 'builds:write', 'builds:cancel',
+    'artifacts:read', 'artifacts:write', 'artifacts:delete',
+    'runners:read', 'runners:write', 'runners:delete',
+    'integrations:read', 'integrations:write', 'integrations:delete',
+  ]),
+  admin: new Set([
+    'instance_settings:read',
+    'users:read', 'users:write', 'users:invite', 'users:delete', 'users:enable',
+    'projects:read', 'projects:write', 'projects:delete',
+    'pipelines:read', 'pipelines:write', 'pipelines:delete',
+    'builds:read', 'builds:write', 'builds:cancel',
+    'artifacts:read', 'artifacts:write', 'artifacts:delete',
+    'runners:read', 'runners:write', 'runners:delete',
+    'integrations:read', 'integrations:write', 'integrations:delete',
+  ]),
+  developer: new Set([
+    'projects:read', 'projects:write',
+    'pipelines:read', 'pipelines:write',
+    'builds:read', 'builds:write', 'builds:cancel',
+    'artifacts:read', 'artifacts:write',
+    'runners:read',
+    'integrations:read',
+  ]),
+  qa_viewer: new Set([
+    'projects:read',
+    'pipelines:read',
+    'builds:read',
+    'artifacts:read',
+    'integrations:read',
+  ]),
+}
+
+export function useHasPermission(resource: string, action: string): boolean {
+  const role = useAuthStore((s) => s.user?.role)
+  if (!role) return false
+  return RBAC_MATRIX[role]?.has(`${resource}:${action}`) ?? false
+}

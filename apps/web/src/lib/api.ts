@@ -7,6 +7,10 @@ import type {
   CancelBuildResponse,
   CreateBuildRequest,
   CreateBuildResponse,
+  CreatePipelineRequest,
+  CreatePipelineResponse,
+  CreateProjectRequest,
+  CreateProjectResponse,
   GitHubAppCompleteRequest,
   GitHubAppCompleteResponse,
   GitHubAppStartRequest,
@@ -22,20 +26,28 @@ import type {
   ListBuildsResponse,
   ListInstallationsResponse,
   ListIntegrationsResponse,
+  ListPipelinesResponse,
+  ListProjectsResponse,
   ListRepositoriesResponse,
   ListUsersResponse,
   LogoutResponse,
   OidcConfigureRequest,
   OidcConfigureResponse,
+  PipelineDetailResponse,
+  ProjectDetailResponse,
   ReEnableUserResponse,
   SetupCompleteResponse,
   SetupOidcStartResponse,
   SetupOidcVerifyResponse,
   SetupStatus,
   SyncInstallationsResponse,
+  UpdatePipelineRequest,
+  UpdateProjectRequest,
   UpdateUserRoleRequest,
   UpdateUserRoleResponse,
   UserProfileResponse,
+  ValidatePipelineRequest,
+  ValidatePipelineResponse,
 } from '@/lib/types'
 
 // ── Error class ─────────────────────────────────────────────────
@@ -529,5 +541,198 @@ export function getArtifactDownloadLink(
     baseUrl,
     `/v1/artifacts/${artifactId}/download-link`,
     { method: 'POST', headers: authHeaders(token) },
+  )
+}
+
+// ── Project API ─────────────────────────────────────────────────
+
+export function listProjects(
+  baseUrl: string,
+  token: string,
+  params?: { search?: string; limit?: number; offset?: number },
+): Promise<ListProjectsResponse> {
+  const query = new URLSearchParams()
+  if (params?.search) query.set('search', params.search)
+  if (params?.limit) query.set('limit', String(params.limit))
+  if (params?.offset) query.set('offset', String(params.offset))
+  const qs = query.toString()
+  return request<ListProjectsResponse>(
+    baseUrl,
+    `/v1/projects${qs ? `?${qs}` : ''}`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function getProject(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+): Promise<ProjectDetailResponse> {
+  return request<ProjectDetailResponse>(
+    baseUrl,
+    `/v1/projects/${projectId}`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function createProject(
+  baseUrl: string,
+  token: string,
+  data: CreateProjectRequest,
+): Promise<CreateProjectResponse> {
+  return request<CreateProjectResponse>(baseUrl, '/v1/projects', {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateProject(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  data: UpdateProjectRequest,
+): Promise<CreateProjectResponse> {
+  return request<CreateProjectResponse>(
+    baseUrl,
+    `/v1/projects/${projectId}`,
+    {
+      method: 'PATCH',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export async function deleteProject(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+): Promise<void> {
+  const res = await fetch(`${baseUrl}/v1/projects/${projectId}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(token),
+    },
+  })
+  if (!res.ok) {
+    let body: import('@/lib/types').ApiError
+    try {
+      body = (await res.json()) as import('@/lib/types').ApiError
+    } catch {
+      body = {
+        error: `Request failed with status ${res.status}`,
+        code: 'unknown_error',
+      }
+    }
+    throw new ApiClientError(res.status, body)
+  }
+}
+
+// ── Pipeline API ────────────────────────────────────────────────
+
+export function listPipelines(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  params?: { limit?: number; offset?: number },
+): Promise<ListPipelinesResponse> {
+  const query = new URLSearchParams()
+  if (params?.limit) query.set('limit', String(params.limit))
+  if (params?.offset) query.set('offset', String(params.offset))
+  const qs = query.toString()
+  return request<ListPipelinesResponse>(
+    baseUrl,
+    `/v1/projects/${projectId}/pipelines${qs ? `?${qs}` : ''}`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function getPipeline(
+  baseUrl: string,
+  token: string,
+  pipelineId: string,
+): Promise<PipelineDetailResponse> {
+  return request<PipelineDetailResponse>(
+    baseUrl,
+    `/v1/pipelines/${pipelineId}`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function createPipeline(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  data: CreatePipelineRequest,
+): Promise<CreatePipelineResponse> {
+  return request<CreatePipelineResponse>(
+    baseUrl,
+    `/v1/projects/${projectId}/pipelines`,
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function updatePipeline(
+  baseUrl: string,
+  token: string,
+  pipelineId: string,
+  data: UpdatePipelineRequest,
+): Promise<CreatePipelineResponse> {
+  return request<CreatePipelineResponse>(
+    baseUrl,
+    `/v1/pipelines/${pipelineId}`,
+    {
+      method: 'PATCH',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export async function deletePipeline(
+  baseUrl: string,
+  token: string,
+  pipelineId: string,
+): Promise<void> {
+  const res = await fetch(`${baseUrl}/v1/pipelines/${pipelineId}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(token),
+    },
+  })
+  if (!res.ok) {
+    let body: import('@/lib/types').ApiError
+    try {
+      body = (await res.json()) as import('@/lib/types').ApiError
+    } catch {
+      body = {
+        error: `Request failed with status ${res.status}`,
+        code: 'unknown_error',
+      }
+    }
+    throw new ApiClientError(res.status, body)
+  }
+}
+
+export function validatePipeline(
+  baseUrl: string,
+  token: string,
+  data: ValidatePipelineRequest,
+): Promise<ValidatePipelineResponse> {
+  return request<ValidatePipelineResponse>(
+    baseUrl,
+    '/v1/pipelines/validate',
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
   )
 }
