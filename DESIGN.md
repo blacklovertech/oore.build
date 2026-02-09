@@ -70,10 +70,11 @@ Tailwind v4 maps CSS variables to utility classes via `@theme inline` in `styles
 
 ## Spacing and Layout
 
-- **Page containers:** Use `PageLayout` component (`max-w-4xl mx-auto px-6 py-8 space-y-8`). Supports `width="narrow"` (max-w-xl) and `width="wide"` (max-w-6xl).
+- **Page containers:** Use `PageLayout` component (`mx-auto w-full px-4 py-6 sm:px-6 lg:px-8 lg:py-8 space-y-6`). Supports `width="narrow"` (max-w-xl), `width="default"` (max-w-4xl), and `width="wide"` (max-w-6xl).
+- **Data-dense pages:** Prefer `width="wide"` for project/build/integrations/runners inventory and detail pages.
 - **Page headers:** Use `PageHeader` component with `title`, optional `description`, `actions`, `back`, and `meta` props. Replaces ad-hoc `<h1>` + `<p>` patterns.
 - **Focused flows** (login, setup): `max-w-lg` or `max-w-sm` centered, or `PageLayout width="narrow"`
-- **Vertical rhythm:** `space-y-8` between page sections, `space-y-4` within cards
+- **Vertical rhythm:** `space-y-6` between page sections, `space-y-4` within cards
 - **Gaps:** `gap-3` for inline form rows, `gap-2` for button groups
 
 ## Icons

@@ -18,7 +18,7 @@ import type {
 import type { UserRole } from '@/lib/types'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable } from '@/components/ui/data-table'
 import { Input } from '@/components/ui/input'
 import {
@@ -283,7 +283,7 @@ function UsersSettingsPage() {
 
   if (isLoading) {
     return (
-      <PageLayout>
+      <PageLayout width="wide">
         <div className="space-y-2">
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-4 w-80" />
@@ -314,15 +314,50 @@ function UsersSettingsPage() {
   }
 
   return (
-    <PageLayout>
+    <PageLayout width="wide">
       <PageHeader
         title="Users"
         description="Manage team members and their roles."
       />
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Total users</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">{users.length}</p>
+            <p className="text-xs text-muted-foreground">Active + invited + disabled</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Active users</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">
+              {users.filter((user) => user.status === 'active').length}
+            </p>
+            <p className="text-xs text-muted-foreground">Can access this instance</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Invited users</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">
+              {users.filter((user) => user.status === 'invited').length}
+            </p>
+            <p className="text-xs text-muted-foreground">Pending account completion</p>
+          </CardContent>
+        </Card>
+      </section>
       {/* Invite form */}
       <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Invite user</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-4">
-          <h2 className="text-sm font-medium">Invite User</h2>
           <div className="flex gap-3">
             <Input
               type="email"
@@ -367,10 +402,15 @@ function UsersSettingsPage() {
       </Card>
 
       {/* Users data table */}
-      <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Team access inventory</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
         <UsersToolbar table={table} onBulkDisable={handleBulkDisable} />
         <DataTable table={table} />
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Confirmation dialog */}
       <ConfirmDialog

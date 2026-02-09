@@ -54,8 +54,6 @@ export const Route = createFileRoute('/builds/$buildId')({
   component: BuildDetailPage,
 })
 
-// ── Helpers ─────────────────────────────────────────────────
-
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s`
   const mins = Math.floor(seconds / 60)
@@ -98,8 +96,6 @@ function artifactTypeBadgeVariant(type: Artifact['artifact_type']) {
   }
 }
 
-// ── Main component ──────────────────────────────────────────
-
 function BuildDetailPage() {
   const { buildId } = Route.useParams()
   const [knownTerminal, setKnownTerminal] = useState(false)
@@ -135,18 +131,17 @@ function BuildDetailPage() {
 
   if (isLoading) {
     return (
-      <PageLayout>
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
+      <PageLayout width="wide">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
-        <Skeleton className="h-48 w-full" />
       </PageLayout>
     )
   }
 
   if (error) {
     return (
-      <PageLayout>
+      <PageLayout width="wide">
         <Alert variant="destructive">
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
           <AlertDescription>
@@ -161,29 +156,32 @@ function BuildDetailPage() {
 
   const { build, events } = data
   const canCancel = !isTerminal
-
   const duration =
     build.started_at
       ? ((build.finished_at ?? Math.floor(Date.now() / 1000)) - build.started_at)
       : null
 
   return (
-    <PageLayout>
+    <PageLayout width="wide">
       <PageHeader
         title={`Build #${build.build_number}`}
         back={{ to: '/builds', label: 'Builds' }}
+        description="Execution status, logs, artifacts, and event timeline."
         meta={
           <>
-            <Badge variant={getStatusVariant(build.status)}>
-              {build.status}
-            </Badge>
+            <Badge variant={getStatusVariant(build.status)}>{build.status}</Badge>
             <Badge variant="outline">{build.trigger_type}</Badge>
-            {duration != null && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            {build.branch ? (
+              <Badge variant="outline" className="font-mono text-[11px]">
+                {build.branch}
+              </Badge>
+            ) : null}
+            {duration != null ? (
+              <span className="inline-flex items-center gap-1">
                 <HugeiconsIcon icon={TimeQuarterPassIcon} size={12} />
                 {formatDuration(duration)}
               </span>
-            )}
+            ) : null}
           </>
         }
         actions={
@@ -199,113 +197,118 @@ function BuildDetailPage() {
         }
       />
 
-      {/* Build Details */}
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Queued</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm font-medium">{relativeTime(build.queued_at)}</p>
+            <p className="text-xs text-muted-foreground">{new Date(build.queued_at * 1000).toLocaleString()}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Runner</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="font-mono text-xs">{build.runner_id ?? 'unassigned'}</p>
+            <p className="text-xs text-muted-foreground">Claimed runner for this build</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Commit</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="font-mono text-xs">{build.commit_sha ?? 'not provided'}</p>
+            <p className="text-xs text-muted-foreground">Trigger actor: {build.trigger_actor ?? 'n/a'}</p>
+          </CardContent>
+        </Card>
+      </section>
+
       <Card>
         <CardHeader>
-          <CardTitle>Details</CardTitle>
+          <CardTitle className="text-base">Build metadata</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            {build.branch && (
-              <>
-                <dt className="text-muted-foreground">Branch</dt>
-                <dd>{build.branch}</dd>
-              </>
-            )}
-            {build.commit_sha && (
-              <>
-                <dt className="text-muted-foreground">Commit</dt>
-                <dd className="font-mono">{build.commit_sha}</dd>
-              </>
-            )}
-            {build.trigger_actor && (
-              <>
-                <dt className="text-muted-foreground">Actor</dt>
-                <dd>{build.trigger_actor}</dd>
-              </>
-            )}
-            <dt className="text-muted-foreground">Queued</dt>
-            <dd>{new Date(build.queued_at * 1000).toLocaleString()}</dd>
-            {build.started_at && (
-              <>
-                <dt className="text-muted-foreground">Started</dt>
-                <dd>{new Date(build.started_at * 1000).toLocaleString()}</dd>
-              </>
-            )}
-            {build.finished_at && (
-              <>
-                <dt className="text-muted-foreground">Finished</dt>
-                <dd>{new Date(build.finished_at * 1000).toLocaleString()}</dd>
-              </>
-            )}
-            {build.runner_id && (
-              <>
-                <dt className="text-muted-foreground">Runner</dt>
-                <dd className="font-mono text-xs">{build.runner_id}</dd>
-              </>
-            )}
-          </dl>
+          <Table>
+            <TableBody>
+              <TableRow>
+                <TableCell className="w-56 text-muted-foreground">Build ID</TableCell>
+                <TableCell className="font-mono text-xs">{build.id}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Branch</TableCell>
+                <TableCell className="font-mono text-xs">{build.branch ?? 'n/a'}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Commit SHA</TableCell>
+                <TableCell className="font-mono text-xs">{build.commit_sha ?? 'n/a'}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Started</TableCell>
+                <TableCell>{build.started_at ? new Date(build.started_at * 1000).toLocaleString() : 'not started'}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Finished</TableCell>
+                <TableCell>{build.finished_at ? new Date(build.finished_at * 1000).toLocaleString() : 'not finished'}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
-      {/* Build Logs */}
       <BuildLogsCard buildId={buildId} isTerminal={isTerminal} />
 
-      {/* Artifacts */}
       <ArtifactsCard buildId={buildId} />
 
-      {/* Events Timeline */}
       <Card>
         <CardHeader>
-          <CardTitle>Events</CardTitle>
+          <CardTitle className="text-base">Event timeline</CardTitle>
         </CardHeader>
         <CardContent>
           {events.length === 0 ? (
             <p className="text-sm text-muted-foreground">No events yet.</p>
           ) : (
-            <div className="space-y-3">
-              {events.map((event) => (
-                <div
-                  key={event.id}
-                  className="flex items-start gap-3 text-sm"
-                >
-                  <span
-                    className="text-xs text-muted-foreground whitespace-nowrap"
-                    title={new Date(event.created_at * 1000).toLocaleString()}
-                  >
-                    {relativeTime(event.created_at)}
-                  </span>
-                  <div>
-                    <span>
-                      {event.from_status && (
-                        <span className="text-muted-foreground">
-                          {event.from_status} &rarr;{' '}
-                        </span>
-                      )}
-                      <span className="font-medium">{event.to_status}</span>
-                    </span>
-                    {event.reason && (
-                      <p className="text-xs text-muted-foreground">
-                        {event.reason}
-                      </p>
-                    )}
-                    {event.actor && (
-                      <p className="text-xs text-muted-foreground">
-                        by {event.actor}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Transition</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Actor</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {events.map((event) => (
+                  <TableRow key={event.id}>
+                    <TableCell
+                      className="text-xs text-muted-foreground"
+                      title={new Date(event.created_at * 1000).toLocaleString()}
+                    >
+                      {relativeTime(event.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm">
+                        {event.from_status ? (
+                          <span className="text-muted-foreground">{event.from_status} → </span>
+                        ) : null}
+                        <span className="font-medium">{event.to_status}</span>
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{event.reason ?? '—'}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{event.actor ?? '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
     </PageLayout>
   )
 }
-
-// ── Build Logs Card ─────────────────────────────────────────
 
 function BuildLogsCard({
   buildId,
@@ -321,7 +324,6 @@ function BuildLogsCard({
   const [autoScroll, setAutoScroll] = useState(true)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  // Use stream logs when live, full logs when terminal
   const logs: Array<BuildLogChunk> = useMemo(() => {
     if (streamEnabled && streamLogs.length > 0) return streamLogs
     if (isTerminal && fullLogsData?.logs) return fullLogsData.logs
@@ -329,14 +331,12 @@ function BuildLogsCard({
     return fullLogsData?.logs ?? []
   }, [streamEnabled, streamLogs, isTerminal, fullLogsData?.logs])
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (autoScroll && scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
     }
   }, [logs, autoScroll])
 
-  // Detect manual scroll to disable auto-scroll
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current
     if (!el) return
@@ -347,17 +347,17 @@ function BuildLogsCard({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            Build Logs
-            {isStreaming && (
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            Build logs
+            {isStreaming ? (
               <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
                 <HugeiconsIcon icon={Loading03Icon} size={12} className="animate-spin" />
-                Streaming...
+                Streaming
               </span>
-            )}
+            ) : null}
           </CardTitle>
-          {!autoScroll && logs.length > 0 && (
+          {!autoScroll && logs.length > 0 ? (
             <Button
               variant="ghost"
               size="sm"
@@ -371,7 +371,7 @@ function BuildLogsCard({
               <HugeiconsIcon icon={ArrowDown01Icon} size={14} />
               Scroll to bottom
             </Button>
-          )}
+          ) : null}
         </div>
       </CardHeader>
       <CardContent>
@@ -387,7 +387,7 @@ function BuildLogsCard({
           <div
             ref={scrollContainerRef}
             onScroll={handleScroll}
-            className="max-h-[600px] overflow-y-auto bg-muted/30 p-4"
+            className="max-h-[600px] overflow-y-auto border bg-muted/30 p-4"
           >
             <pre className="font-mono text-xs leading-relaxed">
               {logs.map((chunk) => (
@@ -405,15 +405,13 @@ function LogLine({ chunk }: { chunk: BuildLogChunk }) {
   const isStderr = chunk.stream === 'stderr'
   return (
     <div className={`flex gap-3 ${isStderr ? 'text-destructive' : 'text-foreground'}`}>
-      <span className="select-none text-muted-foreground w-8 shrink-0 text-right">
+      <span className="w-8 shrink-0 select-none text-right text-muted-foreground">
         {chunk.sequence}
       </span>
       <span className="whitespace-pre-wrap break-all">{chunk.content}</span>
     </div>
   )
 }
-
-// ── Artifacts Card ──────────────────────────────────────────
 
 function ArtifactsCard({ buildId }: { buildId: string }) {
   const { data, isLoading } = useArtifacts(buildId)
@@ -433,7 +431,7 @@ function ArtifactsCard({ buildId }: { buildId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle className="flex items-center gap-2 text-base">
           <HugeiconsIcon icon={File01Icon} size={16} />
           Artifacts
         </CardTitle>
@@ -454,7 +452,7 @@ function ArtifactsCard({ buildId }: { buildId: string }) {
                 <TableHead>Type</TableHead>
                 <TableHead>Size</TableHead>
                 <TableHead>Checksum</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

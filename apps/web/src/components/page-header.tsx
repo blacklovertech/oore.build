@@ -18,7 +18,7 @@ export default function PageHeader({
   meta,
 }: PageHeaderProps) {
   return (
-    <div className="space-y-3">
+    <header className="space-y-4 border-b pb-4">
       {back && (
         <Link
           to={back.to}
@@ -28,16 +28,24 @@ export default function PageHeader({
           {back.label}
         </Link>
       )}
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0 space-y-1.5">
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          {description && (
+          {description ? (
             <p className="text-sm text-muted-foreground">{description}</p>
-          )}
-          {meta && <div className="flex items-center gap-2">{meta}</div>}
+          ) : null}
         </div>
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
+        {actions ? (
+          <div className="flex flex-wrap items-center gap-2">{actions}</div>
+        ) : null}
       </div>
-    </div>
+
+      {meta ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {meta}
+        </div>
+      ) : null}
+    </header>
   )
 }

@@ -4,41 +4,22 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { Edit02Icon, Delete02Icon, Add01Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
+import {
+  Add01Icon,
+  Delete02Icon,
+  Edit02Icon,
+  InformationCircleIcon,
+} from '@hugeicons/core-free-icons'
 import { toast } from 'sonner'
 
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
-import { useProject, useUpdateProject, useDeleteProject } from '@/hooks/use-projects'
-import { usePipelines } from '@/hooks/use-pipelines'
 import { useBuilds } from '@/hooks/use-builds'
 import { useHasPermission } from '@/hooks/use-permissions'
-import { getStatusVariant } from '@/lib/status-variants'
-import { getPipelineStatusVariant } from '@/lib/status-variants'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { usePipelines } from '@/hooks/use-pipelines'
+import { useDeleteProject, useProject, useUpdateProject } from '@/hooks/use-projects'
+import { getPipelineStatusVariant, getStatusVariant } from '@/lib/status-variants'
+import { webPageTitle } from '@/lib/seo'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,12 +30,38 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import PageHeader from '@/components/page-header'
+import PageLayout from '@/components/page-layout'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import PageLayout from '@/components/page-layout'
-import PageHeader from '@/components/page-header'
-import { webPageTitle } from '@/lib/seo'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import CreatePipelineDialog from './-create-pipeline-dialog'
 
 export const Route = createFileRoute('/projects/$projectId/')({
@@ -77,8 +84,6 @@ function relativeTime(epochSecs: number): string {
   const days = Math.floor(hrs / 24)
   return `${days}d ago`
 }
-
-// ── Edit project dialog ─────────────────────────────────────
 
 const editProjectSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -221,14 +226,12 @@ function EditProjectDialog({
   )
 }
 
-// ── Main component ──────────────────────────────────────────
-
 function ProjectDetailPage() {
   const { projectId } = Route.useParams()
   const navigate = useNavigate()
   const { data, isLoading, error } = useProject(projectId)
   const { data: pipelinesData } = usePipelines(projectId)
-  const { data: buildsData } = useBuilds({ project_id: projectId, limit: 5 })
+  const { data: buildsData } = useBuilds({ project_id: projectId, limit: 10 })
   const deleteMutation = useDeleteProject()
   const canWriteProjects = useHasPermission('projects', 'write')
   const canDeleteProjects = useHasPermission('projects', 'delete')
@@ -245,17 +248,17 @@ function ProjectDetailPage() {
 
   if (isLoading) {
     return (
-      <PageLayout>
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-48 w-full" />
+      <PageLayout width="wide">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-56 w-full" />
       </PageLayout>
     )
   }
 
   if (error) {
     return (
-      <PageLayout>
+      <PageLayout width="wide">
         <Alert variant="destructive">
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
           <AlertDescription>
@@ -269,6 +272,8 @@ function ProjectDetailPage() {
   if (!data) return null
 
   const { project } = data
+  const pipelines = pipelinesData?.pipelines ?? []
+  const builds = buildsData?.builds ?? []
 
   function handleDelete() {
     deleteMutation.mutate(projectId, {
@@ -283,167 +288,231 @@ function ProjectDetailPage() {
   }
 
   return (
-    <PageLayout>
+    <PageLayout width="wide">
       <PageHeader
         title={project.name}
         back={{ to: '/projects', label: 'Projects' }}
         description={project.description}
+        meta={
+          <>
+            {project.default_branch ? (
+              <Badge variant="outline" className="font-mono text-[11px]">
+                {project.default_branch}
+              </Badge>
+            ) : null}
+            <span>Updated {relativeTime(project.updated_at)}</span>
+            <span className="font-mono">{project.id.slice(0, 8)}</span>
+          </>
+        }
         actions={
-          (canWriteProjects || canDeleteProjects) ? (
-            <div className="flex items-center gap-2">
-              {canWriteProjects && (
+          canWriteProjects || canDeleteProjects ? (
+            <>
+              {canWriteProjects ? (
                 <Button variant="outline" onClick={() => setEditOpen(true)}>
                   <HugeiconsIcon icon={Edit02Icon} size={16} />
                   Edit
                 </Button>
-              )}
-              {canDeleteProjects && (
+              ) : null}
+              {canDeleteProjects ? (
                 <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
                   <HugeiconsIcon icon={Delete02Icon} size={16} />
                   Delete
                 </Button>
-              )}
-            </div>
+              ) : null}
+            </>
           ) : undefined
         }
       />
 
-      {/* Project Info */}
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Pipelines</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">{pipelines.length}</p>
+            <p className="text-xs text-muted-foreground">Configured under this project</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Recent builds</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">{builds.length}</p>
+            <p className="text-xs text-muted-foreground">Latest 10 runs</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Created by</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="truncate text-sm font-medium">{project.created_by}</p>
+            <p className="text-xs text-muted-foreground">
+              {new Date(project.created_at * 1000).toLocaleString()}
+            </p>
+          </CardContent>
+        </Card>
+      </section>
+
       <Card>
         <CardHeader>
-          <CardTitle>Project Info</CardTitle>
+          <CardTitle className="text-base">Project details</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <dt className="text-muted-foreground">Name</dt>
-            <dd>{project.name}</dd>
-            {project.description && (
-              <>
-                <dt className="text-muted-foreground">Description</dt>
-                <dd>{project.description}</dd>
-              </>
-            )}
-            {project.default_branch && (
-              <>
-                <dt className="text-muted-foreground">Default Branch</dt>
-                <dd>{project.default_branch}</dd>
-              </>
-            )}
-            <dt className="text-muted-foreground">Created By</dt>
-            <dd>{project.created_by}</dd>
-            <dt className="text-muted-foreground">Created</dt>
-            <dd>{new Date(project.created_at * 1000).toLocaleString()}</dd>
-            <dt className="text-muted-foreground">Updated</dt>
-            <dd>{new Date(project.updated_at * 1000).toLocaleString()}</dd>
-          </dl>
+          <Table>
+            <TableBody>
+              <TableRow>
+                <TableCell className="w-56 text-muted-foreground">Name</TableCell>
+                <TableCell>{project.name}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Description</TableCell>
+                <TableCell>{project.description ?? 'No description'}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Default branch</TableCell>
+                <TableCell className="font-mono text-xs">{project.default_branch ?? 'not set'}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Updated</TableCell>
+                <TableCell>{new Date(project.updated_at * 1000).toLocaleString()}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
-      {/* Pipelines */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Pipelines</CardTitle>
-            {canWritePipelines && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPipelineCreateOpen(true)}
-              >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-base">Pipelines</CardTitle>
+            {canWritePipelines ? (
+              <Button size="sm" onClick={() => setPipelineCreateOpen(true)}>
                 <HugeiconsIcon icon={Add01Icon} size={14} />
                 Add Pipeline
               </Button>
-            )}
+            ) : null}
           </div>
         </CardHeader>
         <CardContent>
-          {!pipelinesData?.pipelines.length ? (
-            <p className="text-sm text-muted-foreground">
-              No pipelines yet. Add one to start building.
-            </p>
+          {pipelines.length === 0 ? (
+            <p className="py-3 text-sm text-muted-foreground">No pipelines yet. Add one to start building.</p>
           ) : (
-            <div className="space-y-2">
-              {pipelinesData.pipelines.map((pipeline) => (
-                <Link
-                  key={pipeline.id}
-                  to="/projects/$projectId/pipelines/$pipelineId"
-                  params={{ projectId, pipelineId: pipeline.id }}
-                  className="flex items-center justify-between p-3 hover:bg-muted/50 transition-colors border rounded-md"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">
-                        {pipeline.name}
-                      </span>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Config path</TableHead>
+                  <TableHead>Triggers</TableHead>
+                  <TableHead>Updated</TableHead>
+                  <TableHead className="text-right">Open</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pipelines.map((pipeline) => (
+                  <TableRow key={pipeline.id}>
+                    <TableCell className="font-medium">{pipeline.name}</TableCell>
+                    <TableCell>
                       <Badge variant={getPipelineStatusVariant(pipeline.enabled)}>
                         {pipeline.enabled ? 'enabled' : 'disabled'}
                       </Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground font-mono">
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
                       {pipeline.config_path}
-                    </p>
-                    {pipeline.trigger_config.events.length > 0 && (
-                      <div className="flex items-center gap-1">
-                        {pipeline.trigger_config.events.map((event) => (
-                          <Badge key={event} variant="outline" className="text-xs">
-                            {event}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {relativeTime(pipeline.updated_at)}
-                  </span>
-                </Link>
-              ))}
-            </div>
+                    </TableCell>
+                    <TableCell>
+                      {pipeline.trigger_config.events.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {pipeline.trigger_config.events.map((event) => (
+                            <Badge key={event} variant="outline" className="text-[11px]">
+                              {event}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">all events</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {relativeTime(pipeline.updated_at)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        render={
+                          <Link
+                            to="/projects/$projectId/pipelines/$pipelineId"
+                            params={{ projectId, pipelineId: pipeline.id }}
+                          />
+                        }
+                      >
+                        Open
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
 
-      {/* Recent Builds */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Builds</CardTitle>
+          <CardTitle className="text-base">Recent builds</CardTitle>
         </CardHeader>
         <CardContent>
-          {!buildsData?.builds.length ? (
-            <p className="text-sm text-muted-foreground">No builds yet.</p>
+          {builds.length === 0 ? (
+            <p className="py-3 text-sm text-muted-foreground">No builds yet.</p>
           ) : (
-            <div className="space-y-2">
-              {buildsData.builds.map((build) => (
-                <Link
-                  key={build.id}
-                  to="/builds/$buildId"
-                  params={{ buildId: build.id }}
-                  className="flex items-center justify-between p-3 hover:bg-muted/50 transition-colors border rounded-md"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm">
-                      #{build.build_number}
-                    </span>
-                    <Badge variant={getStatusVariant(build.status)}>
-                      {build.status}
-                    </Badge>
-                    <Badge variant="outline">{build.trigger_type}</Badge>
-                    {build.branch && (
-                      <span className="text-xs text-muted-foreground">
-                        {build.branch}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {relativeTime(build.created_at)}
-                  </span>
-                </Link>
-              ))}
-            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Build</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Trigger</TableHead>
+                  <TableHead>Branch</TableHead>
+                  <TableHead>Queued</TableHead>
+                  <TableHead className="text-right">Open</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {builds.map((build) => (
+                  <TableRow key={build.id}>
+                    <TableCell className="font-mono text-sm">#{build.build_number}</TableCell>
+                    <TableCell>
+                      <Badge variant={getStatusVariant(build.status)}>{build.status}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{build.trigger_type}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {build.branch ?? 'n/a'}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {relativeTime(build.queued_at)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        render={<Link to="/builds/$buildId" params={{ buildId: build.id }} />}
+                      >
+                        Open
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
 
-      {/* Edit Dialog */}
       <EditProjectDialog
         open={editOpen}
         onOpenChange={setEditOpen}
@@ -455,21 +524,19 @@ function ProjectDetailPage() {
         }}
       />
 
-      {/* Create Pipeline Dialog */}
       <CreatePipelineDialog
         open={pipelineCreateOpen}
         onOpenChange={setPipelineCreateOpen}
         projectId={projectId}
       />
 
-      {/* Delete Confirmation */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete project?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete "{project.name}" and all its
-              pipelines. This action cannot be undone.
+              This will permanently delete "{project.name}" and all associated pipelines and builds.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

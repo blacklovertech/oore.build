@@ -99,7 +99,7 @@ function RootLayout() {
           <SidebarProvider>
             <AppSidebar />
             <SidebarInset>
-              <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+              <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="mr-2 h-4! self-auto!" />
                 <Link to="/" className="flex items-center gap-2 pr-1">
@@ -111,7 +111,7 @@ function RootLayout() {
                 <Separator orientation="vertical" className="mr-2 h-4! self-auto!" />
                 <PageBreadcrumb />
               </header>
-              <div className="flex-1 flex flex-col">
+              <div className="flex flex-1 flex-col bg-muted/10">
                 <Outlet />
               </div>
             </SidebarInset>

@@ -1,22 +1,20 @@
 import { useState, useEffect } from 'react'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { Edit02Icon, Delete02Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
+import {
+  Delete02Icon,
+  Edit02Icon,
+  InformationCircleIcon,
+} from '@hugeicons/core-free-icons'
 import { toast } from 'sonner'
 
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
-import { usePipeline, useUpdatePipeline, useDeletePipeline } from '@/hooks/use-pipelines'
 import { useBuilds } from '@/hooks/use-builds'
 import { useHasPermission } from '@/hooks/use-permissions'
-import { getStatusVariant, getPipelineStatusVariant } from '@/lib/status-variants'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { useDeletePipeline, usePipeline, useUpdatePipeline } from '@/hooks/use-pipelines'
+import { getPipelineStatusVariant, getStatusVariant } from '@/lib/status-variants'
+import { webPageTitle } from '@/lib/seo'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,11 +25,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import PageLayout from '@/components/page-layout'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import PageHeader from '@/components/page-header'
-import { webPageTitle } from '@/lib/seo'
+import PageLayout from '@/components/page-layout'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import EditPipelineDialog from '../-edit-pipeline-dialog'
 
 export const Route = createFileRoute(
@@ -63,7 +70,7 @@ function PipelineDetailPage() {
   const { data, isLoading, error } = usePipeline(pipelineId)
   const { data: buildsData } = useBuilds({
     pipeline_id: pipelineId,
-    limit: 10,
+    limit: 20,
   })
   const updateMutation = useUpdatePipeline()
   const deleteMutation = useDeletePipeline()
@@ -80,17 +87,17 @@ function PipelineDetailPage() {
 
   if (isLoading) {
     return (
-      <PageLayout>
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-32 w-full" />
+      <PageLayout width="wide">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-56 w-full" />
       </PageLayout>
     )
   }
 
   if (error) {
     return (
-      <PageLayout>
+      <PageLayout width="wide">
         <Alert variant="destructive">
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
           <AlertDescription>
@@ -104,6 +111,7 @@ function PipelineDetailPage() {
   if (!data) return null
 
   const { pipeline } = data
+  const builds = buildsData?.builds ?? []
 
   function handleToggleEnabled() {
     updateMutation.mutate(
@@ -140,22 +148,27 @@ function PipelineDetailPage() {
   }
 
   return (
-    <PageLayout>
+    <PageLayout width="wide">
       <PageHeader
         title={pipeline.name}
         back={{
           to: `/projects/${projectId}`,
           label: 'Project',
         }}
+        description="Pipeline execution and trigger policy overview."
         meta={
-          <Badge variant={getPipelineStatusVariant(pipeline.enabled)}>
-            {pipeline.enabled ? 'enabled' : 'disabled'}
-          </Badge>
+          <>
+            <Badge variant={getPipelineStatusVariant(pipeline.enabled)}>
+              {pipeline.enabled ? 'enabled' : 'disabled'}
+            </Badge>
+            <span className="font-mono">{pipeline.config_path}</span>
+            <span>Updated {relativeTime(pipeline.updated_at)}</span>
+          </>
         }
         actions={
-          (canWrite || canDelete) ? (
-            <div className="flex items-center gap-2">
-              {canWrite && (
+          canWrite || canDelete ? (
+            <>
+              {canWrite ? (
                 <Button
                   variant="outline"
                   onClick={handleToggleEnabled}
@@ -163,14 +176,14 @@ function PipelineDetailPage() {
                 >
                   {pipeline.enabled ? 'Disable' : 'Enable'}
                 </Button>
-              )}
-              {canWrite && (
+              ) : null}
+              {canWrite ? (
                 <Button variant="outline" onClick={() => setEditOpen(true)}>
                   <HugeiconsIcon icon={Edit02Icon} size={16} />
                   Edit
                 </Button>
-              )}
-              {canDelete && (
+              ) : null}
+              {canDelete ? (
                 <Button
                   variant="destructive"
                   onClick={() => setDeleteOpen(true)}
@@ -178,153 +191,178 @@ function PipelineDetailPage() {
                   <HugeiconsIcon icon={Delete02Icon} size={16} />
                   Delete
                 </Button>
-              )}
-            </div>
+              ) : null}
+            </>
           ) : undefined
         }
       />
 
-      {/* Pipeline Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Pipeline Info</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <dt className="text-muted-foreground">Name</dt>
-            <dd>{pipeline.name}</dd>
-            <dt className="text-muted-foreground">Config Path</dt>
-            <dd className="font-mono">{pipeline.config_path}</dd>
-            <dt className="text-muted-foreground">Status</dt>
-            <dd>
-              <Badge variant={getPipelineStatusVariant(pipeline.enabled)}>
-                {pipeline.enabled ? 'enabled' : 'disabled'}
-              </Badge>
-            </dd>
-            <dt className="text-muted-foreground">Created</dt>
-            <dd>{new Date(pipeline.created_at * 1000).toLocaleString()}</dd>
-            <dt className="text-muted-foreground">Updated</dt>
-            <dd>{new Date(pipeline.updated_at * 1000).toLocaleString()}</dd>
-          </dl>
-        </CardContent>
-      </Card>
-
-      {/* Trigger Configuration */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Trigger Configuration</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div>
-            <p className="text-sm text-muted-foreground mb-1">Events</p>
-            {pipeline.trigger_config.events.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {pipeline.trigger_config.events.map((event) => (
-                  <Badge key={event} variant="outline">
-                    {event}
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm">All events</p>
-            )}
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground mb-1">
-              Branch Patterns
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Recent builds</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">{builds.length}</p>
+            <p className="text-xs text-muted-foreground">Latest 20 runs</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Cancel previous</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm font-medium">
+              {pipeline.concurrency.cancel_previous ? 'enabled' : 'disabled'}
             </p>
-            {pipeline.trigger_config.branches.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {pipeline.trigger_config.branches.map((branch) => (
-                  <code
-                    key={branch}
-                    className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono"
-                  >
-                    {branch}
-                  </code>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm">All branches</p>
-            )}
-          </div>
+            <p className="text-xs text-muted-foreground">Concurrency policy behavior</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Max concurrent</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm font-medium">{pipeline.concurrency.max_concurrent ?? 'unlimited'}</p>
+            <p className="text-xs text-muted-foreground">Per-pipeline limit</p>
+          </CardContent>
+        </Card>
+      </section>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Configuration</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableBody>
+              <TableRow>
+                <TableCell className="w-56 text-muted-foreground">Name</TableCell>
+                <TableCell>{pipeline.name}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Config path</TableCell>
+                <TableCell className="font-mono text-xs">{pipeline.config_path}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Created</TableCell>
+                <TableCell>{new Date(pipeline.created_at * 1000).toLocaleString()}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Updated</TableCell>
+                <TableCell>{new Date(pipeline.updated_at * 1000).toLocaleString()}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
-      {/* Concurrency Policy */}
       <Card>
         <CardHeader>
-          <CardTitle>Concurrency Policy</CardTitle>
+          <CardTitle className="text-base">Trigger configuration</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <dt className="text-muted-foreground">Cancel Previous</dt>
-            <dd>{pipeline.concurrency.cancel_previous ? 'Yes' : 'No'}</dd>
-            <dt className="text-muted-foreground">Max Concurrent</dt>
-            <dd>
-              {pipeline.concurrency.max_concurrent ?? 'Unlimited'}
-            </dd>
-          </dl>
+          <Table>
+            <TableBody>
+              <TableRow>
+                <TableCell className="w-56 text-muted-foreground">Events</TableCell>
+                <TableCell>
+                  {pipeline.trigger_config.events.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {pipeline.trigger_config.events.map((event) => (
+                        <Badge key={event} variant="outline" className="text-[11px]">
+                          {event}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">all events</span>
+                  )}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Branch patterns</TableCell>
+                <TableCell>
+                  {pipeline.trigger_config.branches.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {pipeline.trigger_config.branches.map((branch) => (
+                        <Badge key={branch} variant="outline" className="font-mono text-[11px]">
+                          {branch}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">all branches</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
-      {/* Recent Builds */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Builds</CardTitle>
+          <CardTitle className="text-base">Recent builds</CardTitle>
         </CardHeader>
         <CardContent>
-          {!buildsData?.builds.length ? (
-            <p className="text-sm text-muted-foreground">No builds yet.</p>
+          {builds.length === 0 ? (
+            <p className="py-3 text-sm text-muted-foreground">No builds yet.</p>
           ) : (
-            <div className="space-y-2">
-              {buildsData.builds.map((build) => (
-                <Link
-                  key={build.id}
-                  to="/builds/$buildId"
-                  params={{ buildId: build.id }}
-                  className="flex items-center justify-between p-3 hover:bg-muted/50 transition-colors border rounded-md"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm">
-                      #{build.build_number}
-                    </span>
-                    <Badge variant={getStatusVariant(build.status)}>
-                      {build.status}
-                    </Badge>
-                    {build.branch && (
-                      <span className="text-xs text-muted-foreground">
-                        {build.branch}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {relativeTime(build.created_at)}
-                  </span>
-                </Link>
-              ))}
-            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Build</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Branch</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="text-right">Open</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {builds.map((build) => (
+                  <TableRow key={build.id}>
+                    <TableCell className="font-mono text-sm">#{build.build_number}</TableCell>
+                    <TableCell>
+                      <Badge variant={getStatusVariant(build.status)}>{build.status}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {build.branch ?? 'n/a'}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(build.created_at * 1000).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        render={<Link to="/builds/$buildId" params={{ buildId: build.id }} />}
+                      >
+                        Open
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
 
-      {/* Edit Dialog */}
-      {editOpen && (
+      {editOpen ? (
         <EditPipelineDialog
           open={editOpen}
           onOpenChange={setEditOpen}
           pipeline={pipeline}
         />
-      )}
+      ) : null}
 
-      {/* Delete Confirmation */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete pipeline?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete "{pipeline.name}". This action
-              cannot be undone.
+              This will permanently delete "{pipeline.name}". This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

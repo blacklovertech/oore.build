@@ -1,20 +1,26 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { InformationCircleIcon } from '@hugeicons/core-free-icons'
 
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
 import { useBuilds } from '@/hooks/use-builds'
 import { getStatusVariant } from '@/lib/status-variants'
-import { Badge } from '@/components/ui/badge'
-import {
-  Card,
-  CardContent,
-} from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import PageLayout from '@/components/page-layout'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import PageHeader from '@/components/page-header'
+import PageLayout from '@/components/page-layout'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { webPageTitle } from '@/lib/seo'
 
 export const Route = createFileRoute('/builds/')({
@@ -27,75 +33,105 @@ export const Route = createFileRoute('/builds/')({
 })
 
 function BuildsListPage() {
-  const { data, isLoading, error } = useBuilds({ limit: 50 })
+  const { data, isLoading, error } = useBuilds({ limit: 100 })
 
   useEffect(() => {
     document.title = webPageTitle('Builds')
   }, [])
 
+  const builds = useMemo(() => data?.builds ?? [], [data?.builds])
+
   return (
-    <PageLayout>
+    <PageLayout width="wide">
       <PageHeader
         title="Builds"
-        description="View and manage build history across all projects."
+        description="Queue, execution, and historical run inventory across projects."
       />
 
-      {isLoading && (
-        <div className="space-y-3">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-        </div>
-      )}
+      {isLoading ? (
+        <Card>
+          <CardContent className="space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </CardContent>
+        </Card>
+      ) : null}
 
-      {error && (
+      {error ? (
         <Alert variant="destructive">
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
-          <AlertDescription>
-            Failed to load builds: {error.message}
-          </AlertDescription>
+          <AlertDescription>Failed to load builds: {error.message}</AlertDescription>
         </Alert>
-      )}
+      ) : null}
 
-      {data && data.builds.length === 0 && (
-        <p className="text-sm text-muted-foreground">No builds yet.</p>
-      )}
-
-      <div className="space-y-3">
-        {data?.builds.map((build) => (
-          <Link key={build.id} to="/builds/$buildId" params={{ buildId: build.id }}>
-            <Card className="hover:bg-muted/50 transition-colors">
-              <CardContent className="flex items-center justify-between py-3">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm">
-                      #{build.build_number}
-                    </span>
-                    <Badge variant={getStatusVariant(build.status)}>
-                      {build.status}
-                    </Badge>
-                    <Badge variant="outline">{build.trigger_type}</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {build.branch && <span>{build.branch}</span>}
-                    {build.commit_sha && (
-                      <span className="ml-2 font-mono">
-                        {build.commit_sha.slice(0, 8)}
-                      </span>
-                    )}
-                    {build.trigger_actor && (
-                      <span className="ml-2">by {build.trigger_actor}</span>
-                    )}
-                  </p>
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  {new Date(build.created_at * 1000).toLocaleString()}
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
+      {!isLoading && !error ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Build queue and history</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {builds.length === 0 ? (
+              <p className="py-6 text-sm text-muted-foreground">No builds yet.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Build</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Trigger</TableHead>
+                    <TableHead>Branch</TableHead>
+                    <TableHead>Commit</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Open</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {builds.map((build) => (
+                    <TableRow key={build.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-mono text-sm">#{build.build_number}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{build.id.slice(0, 8)}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getStatusVariant(build.status)}>{build.status}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{build.trigger_type}</Badge>
+                          {build.trigger_actor ? (
+                            <span className="text-xs text-muted-foreground">by {build.trigger_actor}</span>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {build.branch ?? 'n/a'}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {build.commit_sha ? build.commit_sha.slice(0, 10) : 'n/a'}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {new Date(build.created_at * 1000).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          render={<Link to="/builds/$buildId" params={{ buildId: build.id }} />}
+                        >
+                          Open
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
     </PageLayout>
   )
 }

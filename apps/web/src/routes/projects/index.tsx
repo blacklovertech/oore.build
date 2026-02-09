@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
@@ -6,12 +6,20 @@ import { Add01Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
 import { useProjects } from '@/hooks/use-projects'
 import { useHasPermission } from '@/hooks/use-permissions'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import PageLayout from '@/components/page-layout'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import PageHeader from '@/components/page-header'
+import PageLayout from '@/components/page-layout'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { webPageTitle } from '@/lib/seo'
 import CreateProjectDialog from './-create-project-dialog'
 
@@ -37,7 +45,7 @@ function relativeTime(epochSecs: number): string {
 }
 
 function ProjectsListPage() {
-  const { data, isLoading, error } = useProjects({ limit: 50 })
+  const { data, isLoading, error } = useProjects({ limit: 100 })
   const canWrite = useHasPermission('projects', 'write')
   const [createOpen, setCreateOpen] = useState(false)
 
@@ -45,11 +53,13 @@ function ProjectsListPage() {
     document.title = webPageTitle('Projects')
   }, [])
 
+  const projects = useMemo(() => data?.projects ?? [], [data?.projects])
+
   return (
-    <PageLayout>
+    <PageLayout width="wide">
       <PageHeader
         title="Projects"
-        description="Manage your CI projects."
+        description="Repository and pipeline entry points for your build system."
         actions={
           canWrite ? (
             <Button onClick={() => setCreateOpen(true)}>
@@ -60,65 +70,85 @@ function ProjectsListPage() {
         }
       />
 
-      {isLoading && (
-        <div className="space-y-3">
-          <Skeleton className="h-20 w-full" />
-          <Skeleton className="h-20 w-full" />
-          <Skeleton className="h-20 w-full" />
-        </div>
-      )}
+      {isLoading ? (
+        <Card>
+          <CardContent className="space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </CardContent>
+        </Card>
+      ) : null}
 
-      {error && (
+      {error ? (
         <Alert variant="destructive">
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
-          <AlertDescription>
-            Failed to load projects: {error.message}
-          </AlertDescription>
+          <AlertDescription>Failed to load projects: {error.message}</AlertDescription>
         </Alert>
-      )}
+      ) : null}
 
-      {data && data.projects.length === 0 && (
-        <div className="text-center py-12 space-y-4">
-          <p className="text-sm text-muted-foreground">No projects yet.</p>
-          {canWrite && (
-            <Button onClick={() => setCreateOpen(true)}>
-              <HugeiconsIcon icon={Add01Icon} size={16} />
-              Create your first project
-            </Button>
-          )}
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {data?.projects.map((project) => (
-          <Link
-            key={project.id}
-            to="/projects/$projectId"
-            params={{ projectId: project.id }}
-          >
-            <Card className="hover:bg-muted/50 transition-colors">
-              <CardContent className="flex items-center justify-between py-4">
-                <div className="space-y-1 min-w-0">
-                  <p className="font-medium text-sm">{project.name}</p>
-                  {project.description && (
-                    <p className="text-xs text-muted-foreground truncate max-w-md">
-                      {project.description}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    {project.default_branch && (
-                      <span>{project.default_branch}</span>
-                    )}
-                  </div>
-                </div>
-                <span className="text-xs text-muted-foreground whitespace-nowrap ml-4">
-                  {relativeTime(project.updated_at)}
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
+      {!isLoading && !error ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Project inventory</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {projects.length === 0 ? (
+              <div className="space-y-3 py-6 text-center">
+                <p className="text-sm text-muted-foreground">No projects yet.</p>
+                {canWrite ? (
+                  <Button onClick={() => setCreateOpen(true)}>
+                    <HugeiconsIcon icon={Add01Icon} size={16} />
+                    Create your first project
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Project</TableHead>
+                    <TableHead>Default branch</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Updated</TableHead>
+                    <TableHead className="text-right">Open</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {projects.map((project) => (
+                    <TableRow key={project.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{project.name}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{project.id.slice(0, 8)}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {project.default_branch ?? 'not set'}
+                      </TableCell>
+                      <TableCell className="max-w-[30ch] truncate text-sm text-muted-foreground">
+                        {project.description ?? 'No description'}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {relativeTime(project.updated_at)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          render={<Link to="/projects/$projectId" params={{ projectId: project.id }} />}
+                        >
+                          Open
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
     </PageLayout>

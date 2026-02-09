@@ -1,16 +1,26 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { HugeiconsIcon } from '@hugeicons/react'
+import {
+  Add01Icon,
+  ArrowRight01Icon,
+  CheckmarkCircle02Icon,
+  InformationCircleIcon,
+  Setting07Icon,
+} from '@hugeicons/core-free-icons'
+
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import PageHeader from '@/components/page-header'
+import PageLayout from '@/components/page-layout'
 import { Spinner } from '@/components/ui/spinner'
 import { useSetupStatus } from '@/hooks/use-setup'
-import { useActiveInstance } from '@/stores/instance-store'
-import { useAuthStore } from '@/stores/auth-store'
-import AddInstanceDialog from '@/components/AddInstanceDialog'
-import PageLayout from '@/components/page-layout'
-import PageHeader from '@/components/page-header'
 import { webPageTitle } from '@/lib/seo'
+import { useAuthStore } from '@/stores/auth-store'
+import { useActiveInstance } from '@/stores/instance-store'
+import AddInstanceDialog from '@/components/AddInstanceDialog'
 
 export const Route = createFileRoute('/')({
   staticData: { breadcrumbLabel: 'Dashboard' },
@@ -24,6 +34,7 @@ function IndexPage() {
   const [showAddInstance, setShowAddInstance] = useState(false)
   const authToken = useAuthStore((s) => s.token)
   const authExpiresAt = useAuthStore((s) => s.expiresAt)
+  const authUser = useAuthStore((s) => s.user)
   const clearAuth = useAuthStore((s) => s.clearAuth)
 
   useEffect(() => {
@@ -36,7 +47,6 @@ function IndexPage() {
     }
   }, [status?.setup_mode, navigate])
 
-  // When configured but not authenticated (or token expired), redirect to login
   useEffect(() => {
     if (status?.is_configured) {
       const now = Math.floor(Date.now() / 1000)
@@ -48,30 +58,29 @@ function IndexPage() {
     }
   }, [status?.is_configured, authToken, authExpiresAt, clearAuth, navigate])
 
-  // No active instance — show onboarding
   if (!instance) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6">
+      <div className="flex flex-1 flex-col items-center justify-center p-6">
         <div className="w-full max-w-md space-y-6">
-          <div className="text-center space-y-2">
+          <div className="space-y-2 text-center">
             <h1 className="text-2xl font-semibold tracking-tight">
               Welcome to oore.build
             </h1>
-            <p className="text-muted-foreground text-sm">
-              Connect to your first backend instance to get started.
+            <p className="text-sm text-muted-foreground">
+              Connect your first backend instance to begin.
             </p>
           </div>
 
           <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Instance Registry</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Add a backend instance to begin setup or connect to an
-                already-configured server.
+                Add a backend instance to start setup or connect to an already-configured daemon.
               </p>
-              <Button
-                onClick={() => setShowAddInstance(true)}
-                className="w-full"
-              >
+              <Button onClick={() => setShowAddInstance(true)} className="w-full">
+                <HugeiconsIcon icon={Add01Icon} size={16} />
                 Add Instance
               </Button>
             </CardContent>
@@ -88,12 +97,10 @@ function IndexPage() {
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex flex-1 items-center justify-center">
         <div className="flex items-center gap-3">
           <Spinner className="size-5" />
-          <p className="text-muted-foreground text-sm">
-            Connecting to backend...
-          </p>
+          <p className="text-sm text-muted-foreground">Connecting to backend...</p>
         </div>
       </div>
     )
@@ -101,14 +108,13 @@ function IndexPage() {
 
   if (error) {
     return (
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="max-w-md w-full">
+      <div className="flex flex-1 items-center justify-center p-6">
+        <div className="w-full max-w-md">
           <Alert variant="destructive">
             <AlertTitle>Connection failed</AlertTitle>
             <AlertDescription>
               Unable to reach the oore daemon. Make sure{' '}
-              <code className="bg-muted px-1 py-0.5 text-xs">oored</code> is
-              running and accessible.
+              <code className="bg-muted px-1 py-0.5 text-xs">oored</code> is running.
             </AlertDescription>
           </Alert>
         </div>
@@ -117,49 +123,146 @@ function IndexPage() {
   }
 
   if (status?.is_configured) {
-    return (
-      <PageLayout>
-        <PageHeader title="Dashboard" />
-        <div className="grid grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Instance</p>
-              <p className="text-sm font-medium font-mono truncate">{status.instance_id}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Status</p>
-              <p className="text-sm font-medium text-success">Ready</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Builds</p>
-              <p className="text-sm font-medium text-muted-foreground">Coming soon</p>
-            </CardContent>
-          </Card>
-        </div>
+    const isAdmin = authUser?.role === 'owner' || authUser?.role === 'admin'
 
-        <Card>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Build pipelines and runner management are coming in the next
-              release. Once available, your build history and active runners
-              will appear here.
-            </p>
-          </CardContent>
-        </Card>
+    return (
+      <PageLayout width="wide">
+        <PageHeader
+          title="Dashboard"
+          description="Operational overview for this connected instance."
+          meta={
+            <>
+              <Badge variant="success" className="gap-1">
+                <HugeiconsIcon icon={CheckmarkCircle02Icon} size={12} />
+                Instance ready
+              </Badge>
+              <span className="font-mono">{status.instance_id}</span>
+              {authUser?.role ? <Badge variant="outline">{authUser.role}</Badge> : null}
+            </>
+          }
+          actions={
+            <>
+              <Button variant="outline" render={<Link to="/projects" />}>
+                Projects
+              </Button>
+              <Button render={<Link to="/builds" />}>
+                Build Queue
+              </Button>
+            </>
+          }
+        />
+
+        <section className="grid gap-4 md:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Daemon status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2">
+                <Badge variant="success">online</Badge>
+                <span className="text-sm text-muted-foreground">Connected and authenticated</span>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Setup state</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm font-medium">ready</p>
+              <p className="text-xs text-muted-foreground">OIDC and owner bootstrap complete</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Operator</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="truncate text-sm font-medium">{authUser?.email ?? 'Unknown user'}</p>
+              <p className="text-xs text-muted-foreground">Role-based actions are enforced per route</p>
+            </CardContent>
+          </Card>
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Quick actions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <QuickAction
+                to="/projects"
+                title="Manage projects"
+                description="Create and maintain build-ready repositories and pipeline configs."
+              />
+              <QuickAction
+                to="/builds"
+                title="Inspect builds"
+                description="Open run details, stream logs, and download generated artifacts."
+              />
+              {isAdmin ? (
+                <QuickAction
+                  to="/settings/runners"
+                  title="Review runners"
+                  description="Track runner health and rename non-embedded runners."
+                />
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Control plane notes</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Alert>
+                <HugeiconsIcon icon={InformationCircleIcon} size={16} />
+                <AlertDescription>
+                  Build execution starts only after a runner heartbeats online and claims queued work.
+                </AlertDescription>
+              </Alert>
+              {isAdmin ? (
+                <Button variant="outline" render={<Link to="/settings/integrations" />}>
+                  <HugeiconsIcon icon={Setting07Icon} size={16} />
+                  Configure integrations
+                </Button>
+              ) : null}
+            </CardContent>
+          </Card>
+        </section>
       </PageLayout>
     )
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center">
+    <div className="flex flex-1 items-center justify-center">
       <div className="flex items-center gap-3">
         <Spinner className="size-5" />
-        <p className="text-muted-foreground text-sm">Loading...</p>
+        <p className="text-sm text-muted-foreground">Loading...</p>
       </div>
     </div>
+  )
+}
+
+function QuickAction({
+  to,
+  title,
+  description,
+}: {
+  to: '/projects' | '/builds' | '/settings/runners'
+  title: string
+  description: string
+}) {
+  return (
+    <Link
+      to={to}
+      className="flex items-center justify-between gap-3 border p-3 text-left transition-colors hover:bg-muted/40"
+    >
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+    </Link>
   )
 }

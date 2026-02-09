@@ -1,9 +1,16 @@
 import { Link, useLocation, useMatches } from '@tanstack/react-router'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { DashboardSquare01Icon, Folder02Icon, GitBranchIcon, Link04Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
+import {
+  DashboardSquare01Icon,
+  Folder02Icon,
+  GitBranchIcon,
+  Link04Icon,
+  UserMultiple02Icon,
+} from '@hugeicons/core-free-icons'
 import {
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -29,6 +36,12 @@ const ADMIN_ITEMS: Array<NavItem> = [
     title: 'Users',
     to: '/settings/users',
     icon: UserMultiple02Icon,
+    adminOnly: true,
+  },
+  {
+    title: 'Runners',
+    to: '/settings/runners',
+    icon: GitBranchIcon,
     adminOnly: true,
   },
   {
@@ -58,6 +71,7 @@ export default function NavMain() {
   return (
     <>
       <SidebarGroup>
+        <SidebarGroupLabel>Operations</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
             {PRIMARY_ITEMS.map((item) => (
@@ -79,6 +93,7 @@ export default function NavMain() {
         <>
           <Separator className="mx-2" />
           <SidebarGroup>
+            <SidebarGroupLabel>Settings</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {visibleAdminItems.map((item) => (

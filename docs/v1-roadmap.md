@@ -1,7 +1,7 @@
 # V1 Implementation Roadmap
 
 Status: Active - execution-first sequencing for V1 CI completion.
-Last assessed: 2026-02-08
+Last assessed: 2026-02-09
 
 ## Why This Revision
 
@@ -177,13 +177,15 @@ Dependency: Phase 2 complete.
 - [x] **3.5 [P0] Workspace isolation** - Ephemeral per-build working directory and deterministic cleanup.
 - [x] **3.6 [P0] Step executor** - Commit-pinned checkout (exact SHA when available, branch HEAD fallback) + script execution with step-level timing and exit code capture. Failed builds include accumulated step results.
 - [x] **3.7 [P0] Timeout and cancellation enforcement** - Server-initiated and operator-initiated cancellation with mid-step interruption via `tokio::select!`.
+- [x] **3.8 [P0] Single-host embedded runner default** - `oored` auto-starts a local embedded runner in default mode so queued builds execute without manual `oore runner start`. Advanced external/hybrid runner modes remain available via `OORED_RUNNER_MODE`.
 
 Exit criteria (all met):
 - A registered runner can claim and execute a queued build end-to-end.
+- A single-host daemon startup can claim queued builds without a separate manual runner process.
 - No double-claim on the same job.
 - Canceled/timed-out jobs transition to terminal state correctly.
 
-Feature docs: `2026-02-08-runner-protocol.md`, `2026-02-08-scheduling-and-lease-semantics.md`, `2026-02-08-build-isolation.md`.
+Feature docs: `2026-02-08-runner-protocol.md`, `2026-02-08-scheduling-and-lease-semantics.md`, `2026-02-08-build-isolation.md`, `2026-02-09-embedded-local-runner-default.md`.
 
 ## Phase 4: Logs + Artifacts + Distribution (`P0`) (Complete)
 
@@ -213,12 +215,14 @@ Dependency: Phases 2-4 complete and stable.
 - [x] **5.3 [P1] Pipeline schema validation** - Validate triggers, branch/tag patterns, required inputs/defaults. Dry-run validation endpoint at `POST /v1/pipelines/validate`.
 - [x] **5.4 [P1] Project/Pipeline UI** - List/detail/create/edit with safe defaults and validation feedback.
 - [x] **5.5 [P1] Trigger settings UI** - Toggle stale-build cancellation and trigger source controls.
+- [x] **5.6 [P1] Runner management UI** - Added `Settings -> Runners` page for runner inventory and external-runner rename flow. Embedded runners are visible but rename-locked.
+- [x] **5.7 [P1] Command-center UI redesign** - Reworked main authenticated app pages to table-first, operator-dense layouts with consistent `PageLayout`/`PageHeader` rhythm and settings-page visual alignment.
 
 Exit criteria (all met):
 - Developers can self-serve project/pipeline setup without direct DB/API intervention.
 - Invalid pipeline configs are blocked before execution.
 
-Feature docs: `2026-02-08-projects-api.md`, `2026-02-08-pipelines-api.md`, `2026-02-08-project-pipeline-ui.md`.
+Feature docs: `2026-02-08-projects-api.md`, `2026-02-08-pipelines-api.md`, `2026-02-08-project-pipeline-ui.md`, `2026-02-09-runner-management-ui.md`, `2026-02-09-command-center-ui-redesign.md`.
 
 ## Phase 6: Operator CLI Completeness (`P1`)
 

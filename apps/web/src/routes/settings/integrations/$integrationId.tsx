@@ -20,22 +20,8 @@ import {
   useSyncInstallations,
 } from '@/hooks/use-integrations'
 import { getIntegrationStatusVariant } from '@/lib/status-variants'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { webPageTitle } from '@/lib/seo'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,11 +33,20 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import PageLayout from '@/components/page-layout'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import PageHeader from '@/components/page-header'
-import { webPageTitle } from '@/lib/seo'
+import PageLayout from '@/components/page-layout'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 export const Route = createFileRoute('/settings/integrations/$integrationId')({
   staticData: { breadcrumbLabel: 'Details' },
@@ -124,17 +119,17 @@ function IntegrationDetailPage() {
 
   if (isLoading) {
     return (
-      <PageLayout>
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-48 w-full" />
+      <PageLayout width="wide">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-56 w-full" />
       </PageLayout>
     )
   }
 
   if (error) {
     return (
-      <PageLayout>
+      <PageLayout width="wide">
         <Alert variant="destructive">
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
           <AlertDescription>
@@ -152,52 +147,94 @@ function IntegrationDetailPage() {
   const repositories = reposData?.repositories ?? []
 
   return (
-    <PageLayout>
+    <PageLayout width="wide">
       <PageHeader
         title={integration.display_name ?? integration.provider}
-        back={{ to: '/settings/integrations', label: 'Back to Integrations' }}
+        back={{ to: '/settings/integrations', label: 'Integrations' }}
+        description="Installation and repository link state for this provider connection."
         meta={
           <>
             <Badge variant={getIntegrationStatusVariant(integration.status)}>
               {integration.status}
             </Badge>
             <Badge variant="outline">{integration.provider}</Badge>
+            <span className="font-mono">{integration.id.slice(0, 8)}</span>
           </>
         }
       />
 
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Installations</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">{installations.length}</p>
+            <p className="text-xs text-muted-foreground">Connected accounts</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Repositories</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">{repositories.length}</p>
+            <p className="text-xs text-muted-foreground">Synced repositories</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Auth mode</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm font-medium">{integration.auth_mode}</p>
+            <p className="text-xs text-muted-foreground">Host: {integration.host_url}</p>
+          </CardContent>
+        </Card>
+      </section>
+
       <Card>
         <CardHeader>
-          <CardTitle>App Info</CardTitle>
+          <CardTitle className="text-base">Connection details</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <dt className="text-muted-foreground">Provider</dt>
-            <dd>{integration.provider}</dd>
-            <dt className="text-muted-foreground">Host URL</dt>
-            <dd>{integration.host_url}</dd>
-            <dt className="text-muted-foreground">Auth Mode</dt>
-            <dd>{integration.auth_mode}</dd>
-            {integration.app_id && (
-              <>
-                <dt className="text-muted-foreground">App ID</dt>
-                <dd className="font-mono">{integration.app_id}</dd>
-              </>
-            )}
-            <dt className="text-muted-foreground">Created</dt>
-            <dd>{new Date(integration.created_at * 1000).toLocaleString()}</dd>
-          </dl>
+          <Table>
+            <TableBody>
+              <TableRow>
+                <TableCell className="w-56 text-muted-foreground">Provider</TableCell>
+                <TableCell>{integration.provider}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Host URL</TableCell>
+                <TableCell>{integration.host_url}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Auth mode</TableCell>
+                <TableCell>{integration.auth_mode}</TableCell>
+              </TableRow>
+              {integration.app_id ? (
+                <TableRow>
+                  <TableCell className="text-muted-foreground">App ID</TableCell>
+                  <TableCell className="font-mono text-xs">{integration.app_id}</TableCell>
+                </TableRow>
+              ) : null}
+              <TableRow>
+                <TableCell className="text-muted-foreground">Created</TableCell>
+                <TableCell>{new Date(integration.created_at * 1000).toLocaleString()}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Actions</CardTitle>
+          <CardTitle className="text-base">Actions</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
+        <CardContent className="flex flex-wrap gap-2">
           {integration.provider === 'gitlab' &&
             integration.auth_mode === 'oauth_app' &&
-            integration.status === 'inactive' && (
+            integration.status === 'inactive' ? (
               <Button
                 variant="outline"
                 onClick={() =>
@@ -213,8 +250,9 @@ function IntegrationDetailPage() {
                   ? 'Redirecting...'
                   : 'Authorize on GitLab'}
               </Button>
-            )}
-          {integration.provider === 'github' && integration.app_slug && (
+            ) : null}
+
+          {integration.provider === 'github' && integration.app_slug ? (
             <Button
               variant="outline"
               render={
@@ -232,7 +270,8 @@ function IntegrationDetailPage() {
               <HugeiconsIcon icon={Setting07Icon} size={16} />
               {installations.length > 0 ? 'Manage on GitHub' : 'Install on GitHub'}
             </Button>
-          )}
+          ) : null}
+
           <Button
             variant="outline"
             onClick={handleSync}
@@ -241,19 +280,21 @@ function IntegrationDetailPage() {
             <HugeiconsIcon icon={Refresh01Icon} size={16} />
             {syncMutation.isPending ? 'Syncing...' : 'Sync Installations'}
           </Button>
+
           <AlertDialog>
-            <AlertDialogTrigger render={
-              <Button variant="destructive">
-                <HugeiconsIcon icon={Delete02Icon} size={16} />
-                Disconnect
-              </Button>
-            } />
+            <AlertDialogTrigger
+              render={
+                <Button variant="destructive">
+                  <HugeiconsIcon icon={Delete02Icon} size={16} />
+                  Disconnect
+                </Button>
+              }
+            />
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Disconnect integration?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will remove the integration, all credentials, installations,
-                  and repository links. Webhooks will stop working.
+                  This removes credentials, installations, repository links, and webhook behavior.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -269,14 +310,13 @@ function IntegrationDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Installations ({installations.length})</CardTitle>
+          <CardTitle className="text-base">Installations ({installations.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {installations.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No installations yet
-              {integration.provider === 'github' && integration.app_slug
-                ? ' — install your GitHub App to get started.'
+              No installations yet{integration.provider === 'github' && integration.app_slug
+                ? ' - install your GitHub App to get started.'
                 : '.'}
             </p>
           ) : (
@@ -293,7 +333,7 @@ function IntegrationDetailPage() {
                   <TableRow key={inst.id}>
                     <TableCell>{inst.account_name}</TableCell>
                     <TableCell>{inst.account_type ?? '—'}</TableCell>
-                    <TableCell className="font-mono text-muted-foreground">{inst.external_id}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{inst.external_id}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -304,19 +344,17 @@ function IntegrationDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Repositories ({repositories.length})</CardTitle>
+          <CardTitle className="text-base">Repositories ({repositories.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {repositories.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No repositories synced yet.
-            </p>
+            <p className="text-sm text-muted-foreground">No repositories synced yet.</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Repository</TableHead>
-                  <TableHead>Default Branch</TableHead>
+                  <TableHead>Default branch</TableHead>
                   <TableHead>Visibility</TableHead>
                 </TableRow>
               </TableHeader>
@@ -324,7 +362,7 @@ function IntegrationDetailPage() {
                 {repositories.map((repo) => (
                   <TableRow key={repo.id}>
                     <TableCell>{repo.full_name}</TableCell>
-                    <TableCell className="font-mono text-muted-foreground">
+                    <TableCell className="font-mono text-xs text-muted-foreground">
                       {repo.default_branch ?? '—'}
                     </TableCell>
                     <TableCell>
