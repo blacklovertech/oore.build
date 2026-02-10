@@ -149,6 +149,10 @@ export default defineConfig({
             link: "/features/runner-management",
           },
           {
+            text: "Android Signing",
+            link: "/features/android-signing",
+          },
+          {
             text: "Artifact Storage Management",
             link: "/features/artifact-storage-management",
           },

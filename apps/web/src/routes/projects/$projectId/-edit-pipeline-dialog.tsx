@@ -33,12 +33,18 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
-import { useUpdatePipeline } from '@/hooks/use-pipelines'
+import {
+  usePipelineAndroidSigning,
+  useUpdatePipeline,
+  useUpdatePipelineAndroidSigning,
+} from '@/hooks/use-pipelines'
 import type {
+  AndroidSigningProfile,
   BuildPlatform,
   ConcurrencyPolicy,
   Pipeline,
   TriggerConfig,
+  UpdatePipelineAndroidSigningRequest,
   UpdatePipelineRequest,
 } from '@/lib/types'
 
@@ -50,6 +56,14 @@ const editPipelineSchema = z
     platform_android: z.boolean(),
     platform_ios: z.boolean(),
     platform_macos: z.boolean(),
+    android_signing_release_enabled: z.boolean(),
+    android_signing_release_store_password: z.string().optional(),
+    android_signing_release_key_alias: z.string().optional(),
+    android_signing_release_key_password: z.string().optional(),
+    android_signing_debug_enabled: z.boolean(),
+    android_signing_debug_store_password: z.string().optional(),
+    android_signing_debug_key_alias: z.string().optional(),
+    android_signing_debug_key_password: z.string().optional(),
     flutter_version: z
       .string()
       .optional()
@@ -185,6 +199,21 @@ function defaultArtifactPatterns(platforms: BuildPlatform[]): string[] {
   return [...patterns]
 }
 
+function trimToUndefined(value?: string): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer()
+  const bytes = new Uint8Array(arrayBuffer)
+  let binary = ''
+  for (const b of bytes) {
+    binary += String.fromCharCode(b)
+  }
+  return btoa(binary)
+}
+
 function hasCustomFallback(pipeline: Pipeline): boolean {
   const commands = pipeline.execution_config.commands
   if (commands.pre_build.length > 0) return true
@@ -220,6 +249,14 @@ function initialValues(pipeline: Pipeline): EditPipelineForm {
     platform_android: platformSet.has('android'),
     platform_ios: platformSet.has('ios'),
     platform_macos: platformSet.has('macos'),
+    android_signing_release_enabled: false,
+    android_signing_release_store_password: '',
+    android_signing_release_key_alias: '',
+    android_signing_release_key_password: '',
+    android_signing_debug_enabled: false,
+    android_signing_debug_store_password: '',
+    android_signing_debug_key_alias: '',
+    android_signing_debug_key_password: '',
     flutter_version: pipeline.execution_config.flutter_version ?? '',
     enable_customization: custom,
     pre_build_commands: toMultiline(pipeline.execution_config.commands.pre_build),
@@ -258,6 +295,8 @@ export default function EditPipelineDialog({
   pipeline,
 }: EditPipelineDialogProps) {
   const updateMutation = useUpdatePipeline()
+  const updateSigningMutation = useUpdatePipelineAndroidSigning()
+  const signingQuery = usePipelineAndroidSigning(pipeline.id)
 
   const form = useForm<EditPipelineForm>({
     resolver: zodResolver(editPipelineSchema),
@@ -273,6 +312,8 @@ export default function EditPipelineDialog({
     pipeline.concurrency.cancel_previous,
   )
   const [step, setStep] = useState(0)
+  const [releaseKeystoreFile, setReleaseKeystoreFile] = useState<File | null>(null)
+  const [debugKeystoreFile, setDebugKeystoreFile] = useState<File | null>(null)
 
   useEffect(() => {
     if (open) {
@@ -280,8 +321,27 @@ export default function EditPipelineDialog({
       setSelectedEvents(pipeline.trigger_config.events)
       setCancelPrevious(pipeline.concurrency.cancel_previous)
       setStep(0)
+      setReleaseKeystoreFile(null)
+      setDebugKeystoreFile(null)
     }
   }, [open, pipeline, form])
+
+  useEffect(() => {
+    if (!open || !signingQuery.data) return
+    const signing = signingQuery.data
+    form.setValue('android_signing_release_enabled', signing.release.enabled)
+    form.setValue(
+      'android_signing_release_key_alias',
+      signing.release.key_alias ?? '',
+    )
+    form.setValue('android_signing_release_store_password', '')
+    form.setValue('android_signing_release_key_password', '')
+
+    form.setValue('android_signing_debug_enabled', signing.debug.enabled)
+    form.setValue('android_signing_debug_key_alias', signing.debug.key_alias ?? '')
+    form.setValue('android_signing_debug_store_password', '')
+    form.setValue('android_signing_debug_key_password', '')
+  }, [open, signingQuery.data, form])
 
   function toggleEvent(event: string) {
     setSelectedEvents((prev) =>
@@ -300,6 +360,14 @@ export default function EditPipelineDialog({
         'platform_android',
         'platform_ios',
         'platform_macos',
+        'android_signing_release_enabled',
+        'android_signing_release_store_password',
+        'android_signing_release_key_alias',
+        'android_signing_release_key_password',
+        'android_signing_debug_enabled',
+        'android_signing_debug_store_password',
+        'android_signing_debug_key_alias',
+        'android_signing_debug_key_password',
         'flutter_version',
       ])
       if (!valid) return
@@ -330,7 +398,124 @@ export default function EditPipelineDialog({
     setStep((current) => Math.min(current + 1, STEP_LABELS.length - 1))
   }
 
-  function onSubmit(data: EditPipelineForm) {
+  async function buildSigningPayload(
+    data: EditPipelineForm,
+    signingData?: { debug: AndroidSigningProfile; release: AndroidSigningProfile },
+  ): Promise<UpdatePipelineAndroidSigningRequest | null> {
+    const releaseEnabled = data.android_signing_release_enabled
+    const debugEnabled = data.android_signing_debug_enabled
+
+    const releaseAlias = trimToUndefined(data.android_signing_release_key_alias)
+    const releaseStorePassword = trimToUndefined(
+      data.android_signing_release_store_password,
+    )
+    const releaseKeyPassword = trimToUndefined(
+      data.android_signing_release_key_password,
+    )
+    const debugAlias = trimToUndefined(data.android_signing_debug_key_alias)
+    const debugStorePassword = trimToUndefined(
+      data.android_signing_debug_store_password,
+    )
+    const debugKeyPassword = trimToUndefined(data.android_signing_debug_key_password)
+
+    const releaseHasStored = !!signingData?.release.has_keystore
+    const debugHasStored = !!signingData?.debug.has_keystore
+
+    if (
+      (releaseEnabled ||
+        debugEnabled ||
+        !!releaseKeystoreFile ||
+        !!debugKeystoreFile ||
+        !!releaseAlias ||
+        !!releaseStorePassword ||
+        !!releaseKeyPassword ||
+        !!debugAlias ||
+        !!debugStorePassword ||
+        !!debugKeyPassword) &&
+      !data.platform_android
+    ) {
+      toast.error('Android signing profiles require Android platform to be enabled')
+      return null
+    }
+
+    const profileErrors: string[] = []
+    if (releaseEnabled) {
+      if (!releaseKeystoreFile && !releaseHasStored) {
+        profileErrors.push(
+          'Release signing is enabled but no release keystore is configured',
+        )
+      }
+      if (!releaseAlias) profileErrors.push('Release signing key alias is required')
+      if (!releaseStorePassword && !signingData?.release.has_store_password) {
+        profileErrors.push('Release store password is required')
+      }
+      if (!releaseKeyPassword && !signingData?.release.has_key_password) {
+        profileErrors.push('Release key password is required')
+      }
+    }
+    if (debugEnabled) {
+      if (!debugKeystoreFile && !debugHasStored) {
+        profileErrors.push('Debug signing is enabled but no debug keystore is configured')
+      }
+      if (!debugAlias) profileErrors.push('Debug signing key alias is required')
+      if (!debugStorePassword && !signingData?.debug.has_store_password) {
+        profileErrors.push('Debug store password is required')
+      }
+      if (!debugKeyPassword && !signingData?.debug.has_key_password) {
+        profileErrors.push('Debug key password is required')
+      }
+    }
+    if (profileErrors.length > 0) {
+      toast.error(profileErrors[0] ?? 'Invalid Android signing settings')
+      return null
+    }
+
+    const releaseTouched =
+      releaseEnabled !== (signingData?.release.enabled ?? false) ||
+      !!releaseKeystoreFile ||
+      !!releaseAlias ||
+      !!releaseStorePassword ||
+      !!releaseKeyPassword
+    const debugTouched =
+      debugEnabled !== (signingData?.debug.enabled ?? false) ||
+      !!debugKeystoreFile ||
+      !!debugAlias ||
+      !!debugStorePassword ||
+      !!debugKeyPassword
+
+    if (!releaseTouched && !debugTouched) {
+      return null
+    }
+
+    return {
+      release: releaseTouched
+        ? {
+            enabled: releaseEnabled,
+            keystore_filename: releaseKeystoreFile?.name,
+            keystore_base64: releaseKeystoreFile
+              ? await fileToBase64(releaseKeystoreFile)
+              : undefined,
+            key_alias: releaseAlias,
+            store_password: releaseStorePassword,
+            key_password: releaseKeyPassword,
+          }
+        : undefined,
+      debug: debugTouched
+        ? {
+            enabled: debugEnabled,
+            keystore_filename: debugKeystoreFile?.name,
+            keystore_base64: debugKeystoreFile
+              ? await fileToBase64(debugKeystoreFile)
+              : undefined,
+            key_alias: debugAlias,
+            store_password: debugStorePassword,
+            key_password: debugKeyPassword,
+          }
+        : undefined,
+    }
+  }
+
+  async function onSubmit(data: EditPipelineForm) {
     const platforms = selectedPlatforms(data)
     if (platforms.length === 0) {
       toast.error('Pick at least one platform to build')
@@ -396,18 +581,22 @@ export default function EditPipelineDialog({
       concurrency,
     }
 
-    updateMutation.mutate(
-      { pipelineId: pipeline.id, data: payload },
-      {
-        onSuccess: () => {
-          toast.success('Pipeline updated')
-          onOpenChange(false)
-        },
-        onError: (err) => {
-          toast.error(`Failed to update pipeline: ${err.message}`)
-        },
-      },
-    )
+    const signingPayload = await buildSigningPayload(data, signingQuery.data)
+
+    try {
+      await updateMutation.mutateAsync({ pipelineId: pipeline.id, data: payload })
+      if (signingPayload) {
+        await updateSigningMutation.mutateAsync({
+          pipelineId: pipeline.id,
+          data: signingPayload,
+        })
+      }
+      toast.success('Pipeline updated')
+      onOpenChange(false)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      toast.error(`Failed to update pipeline: ${message}`)
+    }
   }
 
   const values = form.watch()
@@ -543,6 +732,223 @@ export default function EditPipelineDialog({
                       )}
                     />
                   </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-3 rounded-md border p-3">
+                  <p className="text-sm font-medium">Android signing profiles (per pipeline)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Configure release/debug keystore material and passwords from UI.
+                  </p>
+
+                  <FormField
+                    control={form.control}
+                    name="android_signing_release_enabled"
+                    render={({ field }) => (
+                      <FormItem>
+                        <label className="flex items-center gap-2 text-sm font-medium">
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(checked) => field.onChange(!!checked)}
+                          />
+                          Enable release signing
+                        </label>
+                        <p className="text-xs text-muted-foreground">
+                          {signingQuery.data?.release.has_keystore
+                            ? `Stored keystore: ${signingQuery.data.release.keystore_filename ?? 'present'}`
+                            : 'No stored release keystore'}
+                        </p>
+                      </FormItem>
+                    )}
+                  />
+
+                  {values.android_signing_release_enabled ? (
+                    <div className="grid gap-3 rounded-md border p-3">
+                      <FormItem>
+                        <FormLabel>Release keystore (.jks)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="file"
+                            accept=".jks,.keystore"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] ?? null
+                              setReleaseKeystoreFile(file)
+                            }}
+                          />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground">
+                          {releaseKeystoreFile
+                            ? `Selected: ${releaseKeystoreFile.name}`
+                            : 'Keep existing keystore or select a new file'}
+                        </p>
+                      </FormItem>
+
+                      <FormField
+                        control={form.control}
+                        name="android_signing_release_key_alias"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Release key alias</FormLabel>
+                            <FormControl>
+                              <Input className="font-mono" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="android_signing_release_store_password"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Release store password</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="password"
+                                placeholder={
+                                  signingQuery.data?.release.has_store_password
+                                    ? 'Leave empty to keep existing password'
+                                    : ''
+                                }
+                                className="font-mono"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="android_signing_release_key_password"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Release key password</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="password"
+                                placeholder={
+                                  signingQuery.data?.release.has_key_password
+                                    ? 'Leave empty to keep existing password'
+                                    : ''
+                                }
+                                className="font-mono"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  ) : null}
+
+                  <FormField
+                    control={form.control}
+                    name="android_signing_debug_enabled"
+                    render={({ field }) => (
+                      <FormItem>
+                        <label className="flex items-center gap-2 text-sm font-medium">
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(checked) => field.onChange(!!checked)}
+                          />
+                          Enable debug signing
+                        </label>
+                        <p className="text-xs text-muted-foreground">
+                          {signingQuery.data?.debug.has_keystore
+                            ? `Stored keystore: ${signingQuery.data.debug.keystore_filename ?? 'present'}`
+                            : 'No stored debug keystore'}
+                        </p>
+                      </FormItem>
+                    )}
+                  />
+
+                  {values.android_signing_debug_enabled ? (
+                    <div className="grid gap-3 rounded-md border p-3">
+                      <FormItem>
+                        <FormLabel>Debug keystore (.jks)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="file"
+                            accept=".jks,.keystore"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] ?? null
+                              setDebugKeystoreFile(file)
+                            }}
+                          />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground">
+                          {debugKeystoreFile
+                            ? `Selected: ${debugKeystoreFile.name}`
+                            : 'Keep existing keystore or select a new file'}
+                        </p>
+                      </FormItem>
+
+                      <FormField
+                        control={form.control}
+                        name="android_signing_debug_key_alias"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Debug key alias</FormLabel>
+                            <FormControl>
+                              <Input className="font-mono" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="android_signing_debug_store_password"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Debug store password</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="password"
+                                placeholder={
+                                  signingQuery.data?.debug.has_store_password
+                                    ? 'Leave empty to keep existing password'
+                                    : ''
+                                }
+                                className="font-mono"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="android_signing_debug_key_password"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Debug key password</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="password"
+                                placeholder={
+                                  signingQuery.data?.debug.has_key_password
+                                    ? 'Leave empty to keep existing password'
+                                    : ''
+                                }
+                                className="font-mono"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  ) : null}
                 </div>
 
                 <FormField
@@ -902,12 +1308,12 @@ export default function EditPipelineDialog({
               ) : (
                 <Button
                   type="button"
-                  disabled={updateMutation.isPending}
+                  disabled={updateMutation.isPending || updateSigningMutation.isPending}
                   onClick={() => {
                     void form.handleSubmit(onSubmit)()
                   }}
                 >
-                  {updateMutation.isPending ? (
+                  {updateMutation.isPending || updateSigningMutation.isPending ? (
                     <>
                       <Spinner className="size-4" />
                       Saving...

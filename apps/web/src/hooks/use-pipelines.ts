@@ -1,14 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   CreatePipelineRequest,
+  UpdatePipelineAndroidSigningRequest,
   UpdatePipelineRequest,
   ValidatePipelineRequest,
 } from '@/lib/types'
 import {
   createPipeline,
   deletePipeline,
+  getPipelineAndroidSigning,
   getPipeline,
   listPipelines,
+  updatePipelineAndroidSigning,
   updatePipeline,
   validatePipeline,
 } from '@/lib/api'
@@ -150,6 +153,51 @@ export function useValidatePipeline() {
       if (!baseUrl || !token)
         return Promise.reject(new Error('Not authenticated'))
       return validatePipeline(baseUrl, token, data)
+    },
+  })
+}
+
+export function usePipelineAndroidSigning(pipelineId: string) {
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useQuery({
+    queryKey: [instance?.id ?? '__none__', 'pipeline-android-signing', pipelineId],
+    queryFn: () => getPipelineAndroidSigning(baseUrl!, token!, pipelineId),
+    enabled: !!baseUrl && !!token && !!pipelineId,
+  })
+}
+
+export function useUpdatePipelineAndroidSigning() {
+  const queryClient = useQueryClient()
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useMutation({
+    mutationFn: ({
+      pipelineId,
+      data,
+    }: {
+      pipelineId: string
+      data: UpdatePipelineAndroidSigningRequest
+    }) => {
+      if (!baseUrl || !token)
+        return Promise.reject(new Error('Not authenticated'))
+      return updatePipelineAndroidSigning(baseUrl, token, pipelineId, data)
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: [
+          instance?.id ?? '__none__',
+          'pipeline-android-signing',
+          variables.pipelineId,
+        ],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'pipeline', variables.pipelineId],
+      })
     },
   })
 }

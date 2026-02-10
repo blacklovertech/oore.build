@@ -10,6 +10,7 @@ use common::{
     body_json, connect_pool, create_test_app, seed_github_integration, seed_project_chain,
     seed_test_user,
 };
+use sqlx::Row;
 use tower::ServiceExt;
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -961,4 +962,187 @@ async fn test_validate_pipeline_rejects_invalid_execution_config() {
             .any(|msg| msg.contains("execution_config.flutter_version")),
         "expected flutter_version validation error"
     );
+}
+
+#[tokio::test]
+async fn test_pipeline_android_signing_crud() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+    let user_id = seed_test_user(&pool).await;
+    let token = create_session_token(&pool, &user_id).await;
+
+    let (_, json) = json_request(
+        &app,
+        "POST",
+        "/v1/projects",
+        &token,
+        Some(serde_json::json!({ "name": "Signing Project" })),
+    )
+    .await;
+    let project_id = json["project"]["id"].as_str().unwrap();
+
+    let (_, json) = json_request(
+        &app,
+        "POST",
+        &format!("/v1/projects/{project_id}/pipelines"),
+        &token,
+        Some(serde_json::json!({ "name": "Signing Pipeline" })),
+    )
+    .await;
+    let pipeline_id = json["pipeline"]["id"].as_str().unwrap().to_string();
+
+    let (status, json) = json_request(
+        &app,
+        "PUT",
+        &format!("/v1/pipelines/{pipeline_id}/android-signing"),
+        &token,
+        Some(serde_json::json!({
+            "release": {
+                "enabled": true,
+                "keystore_filename": "release-upload.jks",
+                "keystore_base64": "ZmFrZS1rZXlzdG9yZS1ieXRlcw==",
+                "store_password": "store-pass",
+                "key_alias": "releaseAlias",
+                "key_password": "key-pass"
+            }
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "put signing profile: {json}");
+    assert_eq!(json["release"]["enabled"].as_bool(), Some(true));
+    assert_eq!(json["release"]["has_keystore"].as_bool(), Some(true));
+    assert_eq!(
+        json["release"]["keystore_filename"].as_str(),
+        Some("release-upload.jks")
+    );
+    assert_eq!(json["release"]["key_alias"].as_str(), Some("releaseAlias"));
+    assert_eq!(json["debug"]["enabled"].as_bool(), Some(false));
+
+    let (status, json) = json_request(
+        &app,
+        "GET",
+        &format!("/v1/pipelines/{pipeline_id}/android-signing"),
+        &token,
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "get signing profile: {json}");
+    assert_eq!(json["release"]["enabled"].as_bool(), Some(true));
+
+    let row = sqlx::query(
+        "SELECT keystore_encrypted, store_password_encrypted, key_alias_encrypted, key_password_encrypted \
+         FROM pipeline_android_signing_profiles WHERE pipeline_id = ?1 AND build_type = 'release'",
+    )
+    .bind(&pipeline_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let encrypted_keystore: String = row.get("keystore_encrypted");
+    let encrypted_store_password: String = row.get("store_password_encrypted");
+    let encrypted_alias: String = row.get("key_alias_encrypted");
+    let encrypted_key_password: String = row.get("key_password_encrypted");
+    assert_ne!(encrypted_keystore, "ZmFrZS1rZXlzdG9yZS1ieXRlcw==");
+    assert_ne!(encrypted_store_password, "store-pass");
+    assert_ne!(encrypted_alias, "releaseAlias");
+    assert_ne!(encrypted_key_password, "key-pass");
+}
+
+#[tokio::test]
+async fn test_runner_fetches_pipeline_android_signing_for_assigned_job() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+    let user_id = seed_test_user(&pool).await;
+    let integration_id = seed_github_integration(&pool, &user_id, "secret").await;
+    let (project_id, pipeline_id) =
+        seed_project_chain(&pool, &integration_id, &user_id, "org/repo-signing").await;
+
+    let now = common::now_unix();
+    let runner_id = uuid::Uuid::new_v4().to_string();
+    let runner_token = oored::token::generate_token();
+    let runner_token_hash = oored::token::hash_token(&runner_token);
+    sqlx::query(
+        "INSERT INTO runners (id, name, token_hash, status, capabilities, registered_by, created_at, updated_at) \
+         VALUES (?1, 'runner-signing', ?2, 'busy', '{}', ?3, ?4, ?4)",
+    )
+    .bind(&runner_id)
+    .bind(&runner_token_hash)
+    .bind(&user_id)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let release_keystore = oored::crypto::encrypt("ZmFrZS1ieXRlcw==", &common::TEST_ENCRYPTION_KEY)
+        .unwrap();
+    let release_store_password =
+        oored::crypto::encrypt("store-pass", &common::TEST_ENCRYPTION_KEY).unwrap();
+    let release_alias =
+        oored::crypto::encrypt("releaseAlias", &common::TEST_ENCRYPTION_KEY).unwrap();
+    let release_key_password =
+        oored::crypto::encrypt("key-pass", &common::TEST_ENCRYPTION_KEY).unwrap();
+    sqlx::query(
+        "INSERT INTO pipeline_android_signing_profiles (
+            id, pipeline_id, build_type, enabled,
+            keystore_filename, keystore_encrypted, keystore_checksum,
+            store_password_encrypted, key_alias_encrypted, key_password_encrypted,
+            created_by, updated_by, created_at, updated_at
+         ) VALUES (?1, ?2, 'release', 1, 'release.jks', ?3, 'checksum', ?4, ?5, ?6, ?7, ?7, ?8, ?8)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(&pipeline_id)
+    .bind(&release_keystore)
+    .bind(&release_store_password)
+    .bind(&release_alias)
+    .bind(&release_key_password)
+    .bind(&user_id)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let build_id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO builds (id, project_id, pipeline_id, build_number, status, trigger_type, config_snapshot, runner_id, queued_at, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, 1, 'assigned', 'manual', '{}', ?4, ?5, ?5, ?5)",
+    )
+    .bind(&build_id)
+    .bind(&project_id)
+    .bind(&pipeline_id)
+    .bind(&runner_id)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let req = Request::builder()
+        .uri(format!(
+            "/v1/runners/{runner_id}/jobs/{build_id}/android-signing"
+        ))
+        .method("GET")
+        .header(http::header::AUTHORIZATION, format!("Bearer {runner_token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let json = body_json(resp.into_body()).await;
+
+    assert_eq!(status, StatusCode::OK, "runner signing lookup: {json}");
+    assert_eq!(
+        json["release"]["keystore_filename"].as_str(),
+        Some("release.jks")
+    );
+    assert_eq!(
+        json["release"]["keystore_base64"].as_str(),
+        Some("ZmFrZS1ieXRlcw==")
+    );
+    assert_eq!(json["release"]["store_password"].as_str(), Some("store-pass"));
+    assert_eq!(json["release"]["key_alias"].as_str(), Some("releaseAlias"));
+    assert_eq!(json["release"]["key_password"].as_str(), Some("key-pass"));
 }

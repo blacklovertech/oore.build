@@ -595,3 +595,37 @@ export interface ValidatePipelineResponse {
   valid: boolean
   errors?: string[]
 }
+
+export type AndroidSigningBuildType = 'debug' | 'release'
+
+export interface AndroidSigningProfileInput {
+  enabled: boolean
+  keystore_filename?: string
+  keystore_base64?: string
+  store_password?: string
+  key_alias?: string
+  key_password?: string
+}
+
+export interface UpdatePipelineAndroidSigningRequest {
+  debug?: AndroidSigningProfileInput
+  release?: AndroidSigningProfileInput
+}
+
+export interface AndroidSigningProfile {
+  build_type: AndroidSigningBuildType
+  enabled: boolean
+  has_keystore: boolean
+  keystore_filename?: string
+  keystore_checksum?: string
+  key_alias?: string
+  has_store_password: boolean
+  has_key_password: boolean
+  updated_at?: number
+}
+
+export interface PipelineAndroidSigningResponse {
+  pipeline_id: string
+  debug: AndroidSigningProfile
+  release: AndroidSigningProfile
+}

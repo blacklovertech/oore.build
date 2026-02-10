@@ -1443,6 +1443,82 @@ pub struct ValidatePipelineResponse {
     pub errors: Vec<String>,
 }
 
+// ── Pipeline Android signing types ──────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AndroidSigningBuildType {
+    Debug,
+    Release,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AndroidSigningProfileInput {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keystore_filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keystore_base64: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub store_password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_alias: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_password: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdatePipelineAndroidSigningRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<AndroidSigningProfileInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release: Option<AndroidSigningProfileInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AndroidSigningProfile {
+    pub build_type: AndroidSigningBuildType,
+    pub enabled: bool,
+    pub has_keystore: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keystore_filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keystore_checksum: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_alias: Option<String>,
+    pub has_store_password: bool,
+    pub has_key_password: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineAndroidSigningResponse {
+    pub pipeline_id: String,
+    pub debug: AndroidSigningProfile,
+    pub release: AndroidSigningProfile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunnerAndroidSigningProfile {
+    pub build_type: AndroidSigningBuildType,
+    pub enabled: bool,
+    pub keystore_filename: String,
+    pub keystore_base64: String,
+    pub store_password: String,
+    pub key_alias: String,
+    pub key_password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunnerAndroidSigningResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<RunnerAndroidSigningProfile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release: Option<RunnerAndroidSigningProfile>,
+}
+
 // ── Build log types ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1625,5 +1701,28 @@ mod tests {
         assert_eq!(json, "\"keychain\"");
         let parsed: KeyStorageMode = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed, KeyStorageMode::Keychain);
+    }
+
+    #[test]
+    fn android_signing_profile_input_round_trip_json() {
+        let request = UpdatePipelineAndroidSigningRequest {
+            debug: Some(AndroidSigningProfileInput {
+                enabled: true,
+                keystore_filename: Some("debug.jks".to_string()),
+                keystore_base64: Some("ZmFrZQ==".to_string()),
+                store_password: Some("store-pass".to_string()),
+                key_alias: Some("debugAlias".to_string()),
+                key_password: Some("key-pass".to_string()),
+            }),
+            release: None,
+        };
+
+        let json = serde_json::to_string(&request).expect("serialize");
+        let parsed: UpdatePipelineAndroidSigningRequest =
+            serde_json::from_str(&json).expect("deserialize");
+        let debug = parsed.debug.expect("debug profile");
+        assert!(debug.enabled);
+        assert_eq!(debug.keystore_filename.as_deref(), Some("debug.jks"));
+        assert_eq!(debug.key_alias.as_deref(), Some("debugAlias"));
     }
 }

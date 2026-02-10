@@ -1,7 +1,7 @@
 # V1 User Journey (Execution-First)
 
 Status: Active guidance for product, API, and UI completion checks.
-Last updated: 2026-02-07
+Last updated: 2026-02-10
 
 ## Purpose
 
@@ -161,10 +161,12 @@ User action:
 
 System outcome:
 - Runner uploads artifact metadata and binaries.
+- Runner applies platform signing prerequisites before publishing release artifacts (Android keystore, iOS/macOS cert/profile/notary workflow).
 - API returns short-lived signed download links with RBAC checks.
 
 Done when:
 - Artifact list shows type, size, checksum, and timestamp.
+- Signed release artifacts are installable for their target platform (Android APK/AAB, iOS ad-hoc IPA, macOS signed/notarized app package).
 - Expired links fail safely and are re-issuable by authorized users.
 
 ### 10) Operator and team follow-up

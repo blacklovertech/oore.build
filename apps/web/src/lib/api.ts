@@ -37,6 +37,7 @@ import type {
   OidcConfigureRequest,
   OidcConfigureResponse,
   PipelineDetailResponse,
+  PipelineAndroidSigningResponse,
   ProjectDetailResponse,
   ReEnableUserResponse,
   SetupCompleteResponse,
@@ -45,6 +46,7 @@ import type {
   SetupStatus,
   SyncInstallationsResponse,
   UpdatePipelineRequest,
+  UpdatePipelineAndroidSigningRequest,
   UpdateArtifactStorageSettingsRequest,
   UpdateInstancePreferencesRequest,
   UpdateProjectRequest,
@@ -814,6 +816,35 @@ export function validatePipeline(
     '/v1/pipelines/validate',
     {
       method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function getPipelineAndroidSigning(
+  baseUrl: string,
+  token: string,
+  pipelineId: string,
+): Promise<PipelineAndroidSigningResponse> {
+  return request<PipelineAndroidSigningResponse>(
+    baseUrl,
+    `/v1/pipelines/${pipelineId}/android-signing`,
+    { headers: authHeaders(token) },
+  )
+}
+
+export function updatePipelineAndroidSigning(
+  baseUrl: string,
+  token: string,
+  pipelineId: string,
+  data: UpdatePipelineAndroidSigningRequest,
+): Promise<PipelineAndroidSigningResponse> {
+  return request<PipelineAndroidSigningResponse>(
+    baseUrl,
+    `/v1/pipelines/${pipelineId}/android-signing`,
+    {
+      method: 'PUT',
       headers: authHeaders(token),
       body: JSON.stringify(data),
     },

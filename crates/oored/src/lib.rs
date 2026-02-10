@@ -10,6 +10,7 @@ pub mod integrations;
 pub mod logs;
 pub mod observability;
 pub mod oidc;
+pub mod pipeline_signing;
 pub mod pipelines;
 pub mod projects;
 pub mod rbac;
@@ -990,6 +991,11 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .route("/v1/projects/{project_id}/pipelines", get(pipelines::list_pipelines).post(pipelines::create_pipeline))
         .route("/v1/pipelines/{pipeline_id}", get(pipelines::get_pipeline).patch(pipelines::update_pipeline).delete(pipelines::delete_pipeline))
         .route("/v1/pipelines/validate", post(pipelines::validate_pipeline))
+        .route(
+            "/v1/pipelines/{pipeline_id}/android-signing",
+            get(pipeline_signing::get_pipeline_android_signing)
+                .put(pipeline_signing::update_pipeline_android_signing),
+        )
         // Build endpoints
         .route("/v1/projects/{project_id}/builds", post(builds::create_build))
         .route("/v1/builds", get(builds::list_builds))
@@ -1002,6 +1008,10 @@ async fn build_router_inner(store: SetupStore, encryption_key: Vec<u8>, _skip_oi
         .route("/v1/runners/{runner_id}/claim", post(runners::claim_job))
         .route("/v1/runners/{runner_id}/jobs/{job_id}/status", post(runners::update_job_status))
         .route("/v1/runners/{runner_id}/jobs/{job_id}", get(runners::get_job_status))
+        .route(
+            "/v1/runners/{runner_id}/jobs/{job_id}/android-signing",
+            get(pipeline_signing::get_job_android_signing),
+        )
         .route("/v1/runners", get(runners::list_runners))
         // Build log endpoints
         .route("/v1/runners/{runner_id}/jobs/{job_id}/logs", post(logs::append_build_logs))

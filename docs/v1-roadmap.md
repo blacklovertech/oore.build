@@ -1,12 +1,13 @@
 # V1 Implementation Roadmap
 
 Status: Active - execution-first sequencing for V1 CI completion.
-Last assessed: 2026-02-09
+Last assessed: 2026-02-10
 
 ## Why This Revision
 
 - Previous sequencing over-weighted project/pipeline CRUD before a complete CI execution loop.
 - Industry CI/CD systems (Codemagic, GitHub Actions, Buildkite, CircleCI, GitLab CI) prioritize: trigger -> plan -> queue -> claim -> execute -> logs/artifacts -> completion.
+- Code signing work was under-specified even though signing is part of the V1 product contract.
 - This roadmap now follows that flow and marks every remaining task with explicit priority.
 
 ## Priority Legend
@@ -227,9 +228,31 @@ Exit criteria (all met):
 
 Feature docs: `2026-02-08-projects-api.md`, `2026-02-08-pipelines-api.md`, `2026-02-08-project-pipeline-ui.md`, `2026-02-09-runner-management-ui.md`, `2026-02-09-command-center-ui-redesign.md`, `2026-02-09-file-first-pipeline-config-and-ui-fallback.md`.
 
+## Phase 5.5: Code Signing for Ad-hoc Distribution (`P0`, In Progress)
+
+Dependency: Phases 3-5 complete.
+
+<<<<<<< ours
+- [x] **5.11 [P0] Android signing bootstrap compatibility fallback (Codemagic-compatible env contract)** - Runner prepares `android/key.properties` in ephemeral workspace when Flutter Android build commands are present and signing env vars are provided (`CM_KEYSTORE_PATH` or `CM_KEYSTORE` plus password/alias vars); used when no pipeline-managed signing profile exists.
+=======
+- [x] **5.11 [P0] Android signing bootstrap compatibility fallback (`OORE_ANDROID_*` env contract)** - Runner prepares `android/key.properties` in ephemeral workspace when Flutter Android build commands are present and signing env vars are provided (`OORE_ANDROID_KEYSTORE_PATH` or `OORE_ANDROID_KEYSTORE_BASE64` plus password/alias vars); used when no pipeline-managed signing profile exists.
+>>>>>>> theirs
+- [x] **5.12 [P0] Android signing credential management API/UI** - Added encrypted at-rest, pipeline-scoped Android signing profiles (`debug`/`release`) with owner/admin UI workflow in pipeline create/edit dialogs and runner retrieval over authenticated job endpoints.
+- [ ] **5.13 [P0] iOS signing asset orchestration** - Import/manage certs + provisioning profiles, create ephemeral keychains, and match profiles by bundle identifier/export method.
+- [ ] **5.14 [P0] iOS ad-hoc export contract** - Enforce ad-hoc export defaults, required metadata checks, and signed IPA validation before distribution.
+- [ ] **5.15 [P1] macOS signing + notarization pipeline** - Implement Developer ID signing + `notarytool` submission/polling/stapling with build-surface status.
+- [ ] **5.16 [P1] Signing diagnostics (`oore doctor` + runner preflight)** - Add actionable diagnostics for keystore/certificate/profile/notary prerequisites.
+
+Exit criteria:
+- Android release builds can be signed without committing key material to repository history.
+- iOS ad-hoc builds produce installable signed IPA artifacts with auditable signing provenance.
+- macOS release artifacts are signed and notarized (or fail with explicit diagnostics).
+
+Feature docs: `2026-02-10-android-signing-bootstrap-codemagic-env.md`, `2026-02-10-pipeline-scoped-android-signing-ui.md`.
+
 ## Phase 6: Operator CLI Completeness (`P1`)
 
-Dependency: Phases 2-5 complete.
+Dependency: Phases 2-5.5 complete.
 
 - [ ] **6.1 [P1] `oore login`** - OIDC terminal flow.
 - [ ] **6.2 [P1] `oore status`** - Instance health, queue depth, runner inventory, recent builds.
@@ -361,6 +384,7 @@ Exit criteria:
 | Scheduling/execution | In-process scheduler, runner registration, claim/lease, workspace isolation, step executor, timeout enforcement | None for V1 | Complete |
 | Logs/artifacts | SSE streaming, log ingestion, local or S3-compatible artifacts, signed URLs, live UI | None for V1 | Complete |
 | Project/pipeline UX | CRUD APIs, validation, trigger settings, management UI | Complete | Complete |
+| Code signing | Android bootstrap + pipeline-scoped encrypted signing profiles (debug/release) with UI management | iOS signing/profiles, macOS notarization | Phase 5.5 (`P0/P1`) |
 | Distribution portal | Build details + artifact downloads exist in main app | Dedicated QA/viewer release portal, publish workflow, changelogs, install-first UX | Phase 8 (`P2`, Future) |
 | CLI operations | Setup + runner register/start | login/status/config/doctor | Phase 6 (`P1`) |
 | Reliability/security | Partial baseline | E2E, retry, hardening, release gate | Phase 7 (`P2`) |

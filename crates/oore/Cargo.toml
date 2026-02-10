@@ -12,6 +12,7 @@ dirs.workspace = true
 hex.workspace = true
 humantime.workspace = true
 oore-contract = { path = "../oore-contract" }
+oore-runner = { path = "../oore-runner" }
 rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true

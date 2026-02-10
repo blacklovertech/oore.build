@@ -11,7 +11,12 @@ import { toast } from 'sonner'
 import { getActiveInstanceOrRedirect, requireAuthOrRedirect } from '@/lib/instance-context'
 import { useBuilds } from '@/hooks/use-builds'
 import { useHasPermission } from '@/hooks/use-permissions'
-import { useDeletePipeline, usePipeline, useUpdatePipeline } from '@/hooks/use-pipelines'
+import {
+  useDeletePipeline,
+  usePipeline,
+  usePipelineAndroidSigning,
+  useUpdatePipeline,
+} from '@/hooks/use-pipelines'
 import { useProject } from '@/hooks/use-projects'
 import { getPipelineStatusVariant, getStatusVariant } from '@/lib/status-variants'
 import { webPageTitle } from '@/lib/seo'
@@ -70,6 +75,7 @@ function PipelineDetailPage() {
   const { projectId, pipelineId } = Route.useParams()
   const navigate = useNavigate()
   const { data, isLoading, error } = usePipeline(pipelineId)
+  const signingQuery = usePipelineAndroidSigning(pipelineId)
   const { data: projectData } = useProject(projectId)
   const { data: buildsData } = useBuilds({
     pipeline_id: pipelineId,
@@ -433,6 +439,23 @@ function PipelineDetailPage() {
                   {pipeline.execution_config.artifact_patterns.length > 0
                     ? pipeline.execution_config.artifact_patterns.join(' | ')
                     : 'none'}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="text-muted-foreground">Android signing</TableCell>
+                <TableCell className="text-xs">
+                  {signingQuery.data ? (
+                    [
+                      signingQuery.data.release.enabled
+                        ? `release: enabled (${signingQuery.data.release.keystore_filename ?? 'keystore configured'})`
+                        : 'release: disabled',
+                      signingQuery.data.debug.enabled
+                        ? `debug: enabled (${signingQuery.data.debug.keystore_filename ?? 'keystore configured'})`
+                        : 'debug: disabled',
+                    ].join(' | ')
+                  ) : (
+                    'not configured'
+                  )}
                 </TableCell>
               </TableRow>
             </TableBody>
