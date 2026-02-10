@@ -13,20 +13,12 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncBufReadExt;
 
 const AUTO_CONFIG_PATHS: [&str; 2] = [".oore.yaml", ".oore.yml"];
-<<<<<<< ours
-const CM_KEYSTORE_PATH_ENV: &str = "CM_KEYSTORE_PATH";
-const CM_KEYSTORE_B64_ENV: &str = "CM_KEYSTORE";
-const CM_KEYSTORE_PASSWORD_ENV: &str = "CM_KEYSTORE_PASSWORD";
-const CM_KEY_ALIAS_ENV: &str = "CM_KEY_ALIAS";
-const CM_KEY_PASSWORD_ENV: &str = "CM_KEY_PASSWORD";
-=======
 const OORE_ANDROID_KEYSTORE_PATH_ENV: &str = "OORE_ANDROID_KEYSTORE_PATH";
 const OORE_ANDROID_KEYSTORE_B64_ENV: &str = "OORE_ANDROID_KEYSTORE_BASE64";
 const OORE_ANDROID_KEYSTORE_PASSWORD_ENV: &str = "OORE_ANDROID_KEYSTORE_PASSWORD";
 const OORE_ANDROID_KEY_ALIAS_ENV: &str = "OORE_ANDROID_KEY_ALIAS";
 const OORE_ANDROID_KEY_PASSWORD_ENV: &str = "OORE_ANDROID_KEY_PASSWORD";
 const OORE_ANDROID_KEY_PROPERTIES_PATH_ENV: &str = "OORE_ANDROID_KEY_PROPERTIES_PATH";
->>>>>>> theirs
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RunnerConfig {
@@ -96,8 +88,6 @@ struct AndroidSigningInputs {
     key_password: String,
 }
 
-<<<<<<< ours
-=======
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AndroidSigningMaterialization {
     keystore_path: PathBuf,
@@ -112,7 +102,6 @@ struct AndroidSigningPreparation {
     materialization: AndroidSigningMaterialization,
 }
 
->>>>>>> theirs
 fn trim_to_opt(value: Option<String>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim();
@@ -126,19 +115,11 @@ fn trim_to_opt(value: Option<String>) -> Option<String> {
 
 fn collect_android_signing_env(read_env: impl Fn(&str) -> Option<String>) -> AndroidSigningEnv {
     AndroidSigningEnv {
-<<<<<<< ours
-        keystore_path: trim_to_opt(read_env(CM_KEYSTORE_PATH_ENV)),
-        keystore_b64: trim_to_opt(read_env(CM_KEYSTORE_B64_ENV)),
-        keystore_password: trim_to_opt(read_env(CM_KEYSTORE_PASSWORD_ENV)),
-        key_alias: trim_to_opt(read_env(CM_KEY_ALIAS_ENV)),
-        key_password: trim_to_opt(read_env(CM_KEY_PASSWORD_ENV)),
-=======
         keystore_path: trim_to_opt(read_env(OORE_ANDROID_KEYSTORE_PATH_ENV)),
         keystore_b64: trim_to_opt(read_env(OORE_ANDROID_KEYSTORE_B64_ENV)),
         keystore_password: trim_to_opt(read_env(OORE_ANDROID_KEYSTORE_PASSWORD_ENV)),
         key_alias: trim_to_opt(read_env(OORE_ANDROID_KEY_ALIAS_ENV)),
         key_password: trim_to_opt(read_env(OORE_ANDROID_KEY_PASSWORD_ENV)),
->>>>>>> theirs
     }
 }
 
@@ -146,11 +127,7 @@ fn decode_base64_keystore(value: &str) -> anyhow::Result<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(value)
         .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(value))
-<<<<<<< ours
-        .map_err(|e| anyhow::anyhow!("invalid base64 value in {CM_KEYSTORE_B64_ENV}: {e}"))
-=======
         .map_err(|e| anyhow::anyhow!("invalid base64 value in {OORE_ANDROID_KEYSTORE_B64_ENV}: {e}"))
->>>>>>> theirs
 }
 
 fn require_signing_field(value: Option<String>, env_key: &str) -> anyhow::Result<String> {
@@ -173,20 +150,12 @@ fn resolve_android_signing_inputs(env: &AndroidSigningEnv) -> anyhow::Result<Opt
         fs::read(&path).map_err(|e| {
             anyhow::anyhow!(
                 "failed to read keystore from {} ({}): {e}",
-<<<<<<< ours
-                CM_KEYSTORE_PATH_ENV,
-=======
                 OORE_ANDROID_KEYSTORE_PATH_ENV,
->>>>>>> theirs
                 path.display()
             )
         })?
     } else {
-<<<<<<< ours
-        let b64 = require_signing_field(env.keystore_b64.clone(), CM_KEYSTORE_B64_ENV)?;
-=======
         let b64 = require_signing_field(env.keystore_b64.clone(), OORE_ANDROID_KEYSTORE_B64_ENV)?;
->>>>>>> theirs
         decode_base64_keystore(&b64)?
     };
 
@@ -198,15 +167,6 @@ fn resolve_android_signing_inputs(env: &AndroidSigningEnv) -> anyhow::Result<Opt
         keystore_bytes,
         keystore_password: require_signing_field(
             env.keystore_password.clone(),
-<<<<<<< ours
-            CM_KEYSTORE_PASSWORD_ENV,
-        )?,
-        key_alias: require_signing_field(env.key_alias.clone(), CM_KEY_ALIAS_ENV)?,
-        key_password: require_signing_field(env.key_password.clone(), CM_KEY_PASSWORD_ENV)?,
-    }))
-}
-
-=======
             OORE_ANDROID_KEYSTORE_PASSWORD_ENV,
         )?,
         key_alias: require_signing_field(env.key_alias.clone(), OORE_ANDROID_KEY_ALIAS_ENV)?,
@@ -236,7 +196,6 @@ fn android_signing_prepared_marker(
     )
 }
 
->>>>>>> theirs
 fn is_android_flutter_build_command(command: &str) -> bool {
     let trimmed = command.trim_start();
     trimmed.starts_with("flutter build apk")
@@ -254,11 +213,7 @@ fn requires_android_signing(build_commands: &[String]) -> bool {
 fn materialize_android_signing_files(
     workspace: &Path,
     inputs: &AndroidSigningInputs,
-<<<<<<< ours
-) -> anyhow::Result<()> {
-=======
 ) -> anyhow::Result<AndroidSigningMaterialization> {
->>>>>>> theirs
     let android_dir = workspace.join("android");
     if !android_dir.is_dir() {
         anyhow::bail!(
@@ -276,10 +231,7 @@ fn materialize_android_signing_files(
 
     let keystore_file_name = "oore-upload-keystore.jks";
     let keystore_path = app_dir.join(keystore_file_name);
-<<<<<<< ours
-=======
     let keystore_overwrote_existing = keystore_path.exists();
->>>>>>> theirs
     fs::write(&keystore_path, &inputs.keystore_bytes).map_err(|e| {
         anyhow::anyhow!("failed to write keystore {}: {e}", keystore_path.display())
     })?;
@@ -292,10 +244,7 @@ fn materialize_android_signing_files(
     }
 
     let key_properties_path = android_dir.join("key.properties");
-<<<<<<< ours
-=======
     let key_properties_overwrote_existing = key_properties_path.exists();
->>>>>>> theirs
     let key_properties = format!(
         "storePassword={}\nkeyPassword={}\nkeyAlias={}\nstoreFile={}\n",
         inputs.keystore_password, inputs.key_password, inputs.key_alias, keystore_file_name
@@ -307,41 +256,24 @@ fn materialize_android_signing_files(
         )
     })?;
 
-<<<<<<< ours
-    Ok(())
-=======
     Ok(AndroidSigningMaterialization {
         keystore_path,
         key_properties_path,
         keystore_overwrote_existing,
         key_properties_overwrote_existing,
     })
->>>>>>> theirs
 }
 
 fn prepare_android_signing_if_configured(
     workspace: &Path,
     build_commands: &[String],
-<<<<<<< ours
-) -> anyhow::Result<bool> {
-    if !requires_android_signing(build_commands) {
-        return Ok(false);
-=======
 ) -> anyhow::Result<Option<AndroidSigningPreparation>> {
     if !requires_android_signing(build_commands) {
         return Ok(None);
->>>>>>> theirs
     }
 
     let env = collect_android_signing_env(|key| std::env::var(key).ok());
     let Some(inputs) = resolve_android_signing_inputs(&env)? else {
-<<<<<<< ours
-        return Ok(false);
-    };
-
-    materialize_android_signing_files(workspace, &inputs)?;
-    Ok(true)
-=======
         return Ok(None);
     };
 
@@ -350,7 +282,6 @@ fn prepare_android_signing_if_configured(
         inputs,
         materialization,
     }))
->>>>>>> theirs
 }
 
 fn android_signing_variant_for_command(command: &str) -> Option<AndroidSigningBuildType> {
@@ -1331,12 +1262,6 @@ async fn execute_build(
         Err(e) => return (steps, Err(e)),
     };
 
-<<<<<<< ours
-    let build_commands = execution_plan.stage_commands.build.as_slice();
-    match determine_android_signing_variant(build_commands) {
-        Ok(Some(variant)) => {
-            let mut prepared_from_server = false;
-=======
     let mut signing_source: Option<&str> = None;
     let mut signing_variant: Option<AndroidSigningBuildType> = None;
     let mut signing_preparation: Option<AndroidSigningPreparation> = None;
@@ -1344,21 +1269,12 @@ async fn execute_build(
     match determine_android_signing_variant(build_commands) {
         Ok(Some(variant)) => {
             signing_variant = Some(variant);
->>>>>>> theirs
             match fetch_job_android_signing(client, daemon_url, config, &job.build_id).await {
                 Ok(Some(server_profiles)) => {
                     if let Some(profile) = select_runner_signing_profile(&server_profiles, variant)
                     {
                         match signing_inputs_from_runner_profile(profile) {
                             Ok(inputs) => {
-<<<<<<< ours
-                                if let Err(e) =
-                                    materialize_android_signing_files(workspace.as_path(), &inputs)
-                                {
-                                    return (steps, Err(e));
-                                }
-                                prepared_from_server = true;
-=======
                                 let materialization =
                                     match materialize_android_signing_files(workspace.as_path(), &inputs)
                                     {
@@ -1370,7 +1286,6 @@ async fn execute_build(
                                     materialization,
                                 });
                                 signing_source = Some("pipeline_profile");
->>>>>>> theirs
                                 println!(
                                     "Prepared Android signing files from pipeline profile ({variant:?})"
                                 );
@@ -1385,16 +1300,6 @@ async fn execute_build(
                 }
             }
 
-<<<<<<< ours
-            if !prepared_from_server {
-                match prepare_android_signing_if_configured(workspace.as_path(), build_commands) {
-                    Ok(true) => {
-                        println!(
-                            "Prepared Android signing files from environment fallback (CM_* vars)"
-                        );
-                    }
-                    Ok(false) => {}
-=======
             if signing_preparation.is_none() {
                 match prepare_android_signing_if_configured(workspace.as_path(), build_commands) {
                     Ok(Some(prep)) => {
@@ -1405,7 +1310,6 @@ async fn execute_build(
                         );
                     }
                     Ok(None) => {}
->>>>>>> theirs
                     Err(e) => return (steps, Err(e)),
                 }
             }
@@ -2264,19 +2168,11 @@ mod tests {
     #[test]
     fn android_signing_requires_all_required_fields() {
         let env = signing_env_from_pairs(&[
-<<<<<<< ours
-            (CM_KEYSTORE_B64_ENV, "ZmFrZS1rZXlzdG9yZQ=="),
-            (CM_KEYSTORE_PASSWORD_ENV, "store-pass"),
-        ]);
-        let err = resolve_android_signing_inputs(&env).expect_err("missing env must fail");
-        assert!(err.to_string().contains(CM_KEY_ALIAS_ENV));
-=======
             (OORE_ANDROID_KEYSTORE_B64_ENV, "ZmFrZS1rZXlzdG9yZQ=="),
             (OORE_ANDROID_KEYSTORE_PASSWORD_ENV, "store-pass"),
         ]);
         let err = resolve_android_signing_inputs(&env).expect_err("missing env must fail");
         assert!(err.to_string().contains(OORE_ANDROID_KEY_ALIAS_ENV));
->>>>>>> theirs
     }
 
     #[test]
@@ -2284,17 +2180,10 @@ mod tests {
         let workspace = temp_workspace();
         fs::create_dir_all(workspace.join("android/app")).expect("mkdir android/app");
         let env = signing_env_from_pairs(&[
-<<<<<<< ours
-            (CM_KEYSTORE_B64_ENV, "ZmFrZS1rZXlzdG9yZS1ieXRlcw=="),
-            (CM_KEYSTORE_PASSWORD_ENV, "store-pass"),
-            (CM_KEY_ALIAS_ENV, "upload"),
-            (CM_KEY_PASSWORD_ENV, "key-pass"),
-=======
             (OORE_ANDROID_KEYSTORE_B64_ENV, "ZmFrZS1rZXlzdG9yZS1ieXRlcw=="),
             (OORE_ANDROID_KEYSTORE_PASSWORD_ENV, "store-pass"),
             (OORE_ANDROID_KEY_ALIAS_ENV, "upload"),
             (OORE_ANDROID_KEY_PASSWORD_ENV, "key-pass"),
->>>>>>> theirs
         ]);
 
         let inputs = resolve_android_signing_inputs(&env)
