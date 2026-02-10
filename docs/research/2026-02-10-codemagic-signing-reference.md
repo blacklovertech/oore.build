@@ -31,22 +31,9 @@ Observed Codemagic pattern:
 - Build environment exposes keystore variables to scripts.
 - Android key configuration is materialized into `android/key.properties` during CI execution.
 
-<<<<<<< ours
-Common variables used by Codemagic examples:
-
-- `CM_KEYSTORE_PATH` (or file reference path)
-- `CM_KEYSTORE_PASSWORD`
-- `CM_KEY_ALIAS`
-- `CM_KEY_PASSWORD`
-
-Practical implication for oore.build:
-
-- A runner can produce identical behavior by generating `android/key.properties` in an ephemeral workspace from those variable names.
-=======
 Practical implication for oore.build:
 
 - A runner can produce identical behavior by generating `android/key.properties` in an ephemeral workspace, but should expose oore-owned names (`OORE_ANDROID_*`) rather than provider-specific env names.
->>>>>>> theirs
 
 ### iOS
 
@@ -79,11 +66,7 @@ Practical implication for oore.build:
 
 ### Android phase (immediate)
 
-<<<<<<< ours
-- Support Codemagic-compatible env names in runner.
-=======
 - Support `OORE_ANDROID_*` env names in runner.
->>>>>>> theirs
 - Accept either keystore path or base64 keystore payload.
 - Generate `android/key.properties` at runtime only.
 - Never persist raw signing material in repo snapshot or logs.

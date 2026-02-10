@@ -30,11 +30,7 @@ Codemagic's documented model shows a practical phased implementation path:
    - operators upload signing assets (JKS) per pipeline and per build type (`debug`, `release`)
    - operators configure alias and passwords in UI/API
    - credentials are encrypted at rest and only exposed to assigned runners at execution time
-<<<<<<< ours
-3. Keep Codemagic-compatible `CM_*` env variables as a compatibility fallback when no pipeline signing profile is configured.
-=======
 3. Use `OORE_ANDROID_*` variables for environment-driven Android signing fallback when no pipeline signing profile is configured.
->>>>>>> theirs
 4. Materialize Android signing files only inside the ephemeral build workspace (`android/key.properties` and keystore file under `android/app/`), never in repository state.
 5. Treat iOS/macOS signing as next phases that require encrypted signing-asset management and ephemeral keychain/notarization flows.
 
@@ -46,11 +42,7 @@ Signing is a core product capability. Pipeline-scoped UI management is the inten
 
 ### Migration compatibility without sacrificing UX
 
-<<<<<<< ours
-Codemagic-compatible env names remain useful for migration and temporary setups, but do not replace managed signing profiles.
-=======
 `OORE_ANDROID_*` names provide a clear, product-owned contract for migration and temporary setups without coupling to another CI provider's variable namespace.
->>>>>>> theirs
 
 ### Security alignment
 
@@ -63,11 +55,7 @@ iOS/macOS signing requires significantly more state and tooling (cert/profile li
 ## Consequences
 
 - Android signed build support is available through encrypted pipeline-scoped profiles managed in UI/API.
-<<<<<<< ours
-- Android `CM_*` env support remains available as fallback compatibility behavior.
-=======
 - Android `OORE_ANDROID_*` env support remains available as fallback behavior.
->>>>>>> theirs
 - iOS/macOS phases remain explicit roadmap work with higher implementation scope.
 - Roadmap and journey docs must reflect this ordering and gate criteria.
 

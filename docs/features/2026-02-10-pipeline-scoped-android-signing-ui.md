@@ -36,11 +36,7 @@ Runner behavior:
 
 - Runner resolves Android build variant (debug/release) from build commands.
 - Runner fetches pipeline signing profile for assigned job and materializes `android/key.properties` + keystore file in ephemeral workspace.
-<<<<<<< ours
-- Existing env-based `CM_*` signing remains as fallback when no pipeline profile is configured.
-=======
 - Existing env-based `OORE_ANDROID_*` signing remains as fallback when no pipeline profile is configured.
->>>>>>> theirs
 
 ## Security Considerations
 
