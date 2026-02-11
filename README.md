@@ -1,6 +1,12 @@
-# oore.build
+<a href="https://zerodha.tech"><img src="https://zerodha.tech/static/images/github-badge.svg" align="right" /></a>
 
-Self-hosted, Flutter-first mobile CI and internal app distribution platform.
+<p align="center">
+  <img src=".github/logo.svg" alt="oore.build" width="80" height="80" />
+</p>
+
+<h1 align="center">oore.build</h1>
+
+<p align="center">Self-hosted, Flutter-first mobile CI and internal app distribution platform.</p>
 
 > **Alpha** — oore.build is under active development. APIs, config formats, and CLI flags will change without notice. Use at your own risk.
 
