@@ -14,7 +14,7 @@ This tutorial walks you through connecting a GitHub account to your oore.build i
 
 ## 1. Start the GitHub integration
 
-1. Open the oore.build web UI at `http://localhost:3000`
+1. Open the oore.build web UI at `https://ci.oore.build` (or your self-hosted UI)
 2. Sign in with your OIDC provider
 3. Navigate to **Settings** and select **Integrations**
 4. Click **Connect GitHub**

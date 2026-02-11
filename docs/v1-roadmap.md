@@ -271,6 +271,7 @@ Dependency: Phases 2-6 functional.
 - [ ] **7.4 [P2] Security hardening** - Input validation audit, path traversal defenses, strict URL TTL enforcement.
 - [ ] **7.5 [P2] Operational docs** - Deploy/runbook/recovery guidance.
 - [ ] **7.6 [P2] Final release validation** - `make validate` and handoff checklist.
+- [x] **7.7 [P1] Release installer + onboarding bootstrap** - Added tag-driven GitHub release packaging for macOS (`arm64`, `x86_64`) with checksum assets, release-based `scripts/install.sh` (`curl -fsSL https://oore.build/install | bash`), neutral landing site plan (`apps/site`), and hosted-UI-first onboarding docs.
 
 Feature docs required: E2E Tests, Security Hardening, Deployment/Operations.
 
@@ -383,7 +384,8 @@ Exit criteria:
 | Code signing | Android bootstrap + pipeline-scoped encrypted signing profiles (debug/release) with UI management | iOS signing/profiles, macOS notarization | Phase 5.5 (`P0/P1`) |
 | Distribution portal | Build details + artifact downloads exist in main app | Dedicated QA/viewer release portal, publish workflow, changelogs, install-first UX | Phase 8 (`P2`, Future) |
 | CLI operations | Setup + runner register/start | login/status/config/doctor | Phase 6 (`P1`) |
-| Reliability/security | Partial baseline | E2E, retry, hardening, release gate | Phase 7 (`P2`) |
+| Installer/onboarding | Release-based macOS installer, interactive first-run prompts, hosted-UI onboarding docs | Signed installer provenance and upgrade channels | Phase 7 (`P1/P2`) |
+| Reliability/security | Partial baseline + release packaging CI | E2E, retry, hardening, release gate | Phase 7 (`P2`) |
 
 ## Notes
 

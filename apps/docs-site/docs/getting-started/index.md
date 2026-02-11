@@ -34,5 +34,6 @@ The web UI connects to your daemon over HTTPS. Your source code and signing keys
 Follow these pages in order to get your first instance running:
 
 1. [**Prerequisites**](/getting-started/prerequisites) — check your system meets the requirements
-2. [**Install**](/getting-started/install) — clone and build oore.build from source
-3. [**Set Up Your Instance**](/getting-started/first-instance) — run the setup wizard and connect your identity provider
+2. [**Install**](/getting-started/install) — install release binaries via `curl -fsSL https://oore.build/install | bash`
+3. [**Hosted UI Onboarding**](/getting-started/hosted-ui-onboarding) — connect your backend to `ci.oore.build`
+4. [**Set Up Your Instance**](/getting-started/first-instance) — run the setup wizard and connect your identity provider

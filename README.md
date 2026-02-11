@@ -28,32 +28,37 @@ oore.build lets you run your own mobile CI server. V1 targets Android, iOS, and 
 ## Prerequisites
 
 - macOS (backend requirement for V1)
-- [Rust](https://rustup.rs/) (stable, edition 2024)
-- [Bun](https://bun.sh/) (package manager for the frontend)
+- `curl`, `tar`, and `shasum` (for release installer)
+
+For source development, also install [Rust](https://rustup.rs/) and [Bun](https://bun.sh/).
 
 ## Quick Start
 
 ```bash
-# Install dependencies
-bun install
-
-# Start the daemon
-make run-daemon
-
-# In another terminal, open a setup window
-make run-cli
-
-# In another terminal, start the web UI
-make dev-web
+# Install latest release binaries (macOS)
+curl -fsSL https://oore.build/install | bash
 ```
 
-Then open `http://localhost:3000` and follow the setup wizard.
+Then open `https://ci.oore.build`, add your backend instance URL, and complete setup.
+
+Detailed setup docs: `https://docs.oore.build`
+
+## Development (from source)
+
+```bash
+bun install
+
+make run-daemon       # Start oored on 127.0.0.1:8787
+make run-cli          # Generate setup token
+make dev-web          # Local web UI (http://localhost:3000)
+```
 
 ## Project Structure
 
 ```
 apps/web/           React 19 + TanStack Router (product UI)
 apps/docs-site/     VitePress documentation site
+apps/site/          Neutral landing/install site (`oore.build`)
 crates/oored/       Daemon — Axum HTTP server
 crates/oore/        Operator CLI — Clap
 crates/oore-runner/ Build runner agent
@@ -68,7 +73,8 @@ All commands are available as `make` targets:
 ```bash
 make dev-web          # Web UI dev server (port 3000)
 make dev-docs         # Docs dev server (VitePress)
-make build            # Build everything (web + docs + cargo check)
+make dev-site         # Landing site dev server (port 3002)
+make build            # Build everything (web + docs + site + cargo check)
 make check            # Lint web + cargo check
 make test-web         # Run web tests (Vitest)
 make test-rust        # Run Rust tests

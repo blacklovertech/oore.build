@@ -121,6 +121,10 @@ export default defineConfig({
             { text: "Prerequisites", link: "/getting-started/prerequisites" },
             { text: "Install", link: "/getting-started/install" },
             {
+              text: "Hosted UI Onboarding",
+              link: "/getting-started/hosted-ui-onboarding",
+            },
+            {
               text: "Set Up Your Instance",
               link: "/getting-started/first-instance",
             },

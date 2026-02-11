@@ -4,126 +4,86 @@ status: implemented
 
 # Install oore.build
 
-This page walks you through cloning the repository, installing dependencies, and verifying the build.
+This page walks you through installing prebuilt backend binaries from GitHub Releases.
 
 ## What you need
 
-- All [prerequisites](/getting-started/prerequisites) installed and verified
-- A terminal with `git`, `cargo`, and `bun` available
+- macOS host (V1 backend runtime target)
+- `curl`
+- Internet access to `github.com`, `ci.oore.build`, and `docs.oore.build`
 
-## Clone the repository
-
-```bash
-git clone https://github.com/devaryakjha/oore.build.git
-cd oore.build
-```
-
-## Install frontend dependencies
+## Install (latest release)
 
 ```bash
-bun install
+curl -fsSL https://oore.build/install | bash
 ```
 
-## Verify the build
+The installer:
 
-Run the full build to confirm everything compiles and links correctly:
+- Detects your architecture (`arm64` or `x86_64`)
+- Downloads the matching release tarball
+- Verifies SHA-256 checksums
+- Installs `oored` and `oore` under `~/.oore/bin`
+- Prompts for optional first-run actions (start daemon, generate setup token, open links)
+
+## Install a pinned version
 
 ```bash
-make build
+OORE_VERSION=v0.2.0 curl -fsSL https://oore.build/install | bash
 ```
 
-This runs three targets in sequence:
+## Non-interactive mode (automation)
 
-| Target | What it checks |
-|---|---|
-| `make build-web` | Frontend production build (Vite) |
-| `make build-docs` | Documentation site build (VitePress) |
-| `make cargo-check` | Rust workspace compile check (all crates) |
-
-If all three succeed, your environment is ready.
-
-## Start the development servers
-
-Verify the full stack by starting each component:
-
-::: code-group
-
-```bash [Daemon]
-make run-daemon
-# Starts oored on 127.0.0.1:8787
-# Embedded runner starts automatically in default mode
+```bash
+OORE_NONINTERACTIVE=1 OORE_START_DAEMON=true \
+  curl -fsSL https://oore.build/install | bash
 ```
 
-```bash [Web UI]
-make dev-web
-# Starts Vite dev server on port 3000
+If `OORE_NONINTERACTIVE=1` and `OORE_START_DAEMON` is not set, daemon startup is skipped.
+
+## Verify installation
+
+```bash
+~/.oore/bin/oored version
+~/.oore/bin/oore --version
 ```
 
-:::
+## Next step: connect from hosted UI
 
-You should see daemon log output like:
+After installation, open [ci.oore.build](https://ci.oore.build), add your backend instance URL, and complete setup.
 
-```
-INFO oored: using database path="/Users/you/Library/Application Support/oore/oore.db"
-INFO oored: database ready instance_id="..." state=BootstrapPending
-INFO oored: encryption key ready
-INFO oored: starting oored daemon listen=127.0.0.1:8787
-```
+Continue with [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding).
+
+## Installer environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OORE_VERSION` | `latest` | Release selector (`latest` or tag like `v0.2.0`) |
+| `OORE_INSTALL_ROOT` | `~/.oore` | Installation directory |
+| `OORE_GITHUB_REPO` | `devaryakjha/oore.build` | GitHub repo used for release downloads |
+| `OORE_NONINTERACTIVE` | `0` | Disable prompts when set to `1` |
+| `OORE_START_DAEMON` | unset | Non-interactive daemon startup behavior (`true` or `false`) |
 
 ## Troubleshooting
 
-### Rust compilation errors
+### Unsupported architecture
 
-If you see errors about missing crate features or edition 2024:
+The installer currently supports macOS `arm64` and `x86_64`.
 
-```bash
-rustup update stable
-```
+### Checksum mismatch
 
-Edition 2024 requires Rust 1.85 or later.
+The installer exits before installing binaries if checksums do not match. Re-run once to rule out transient download issues. If it persists, do not continue and verify release assets in GitHub.
 
-### Bun lockfile conflicts
+### Daemon startup failed
 
-If `bun install` fails with lockfile errors:
+Check logs:
 
 ```bash
-rm bun.lock
-bun install
+cat ~/.oore/logs/oored.log
 ```
 
-### SQLite connection errors
-
-The daemon stores its database at `~/Library/Application Support/oore/oore.db` by default. Override with:
+Then run diagnostics:
 
 ```bash
-export OORE_SETUP_STATE_FILE=/path/to/custom.db
+~/.oore/bin/oore doctor
 ```
-
-Or pass directly to the daemon:
-
-```bash
-cargo run -p oored -- run --state-file /path/to/custom.db
-```
-
-## Available make targets
-
-| Target | Description |
-|---|---|
-| `make dev-web` | Web app dev server (port 3000) |
-| `make dev-docs` | VitePress dev server (port 4173) |
-| `make build-web` | Production build (web) |
-| `make build-docs` | VitePress production build |
-| `make test-web` | Run web app tests (Vitest) |
-| `make lint-web` | ESLint |
-| `make fix-web` | Prettier + ESLint auto-fix |
-| `make cargo-check` | Compile check all Rust crates |
-| `make run-daemon` | Run oored on 127.0.0.1:8787 |
-| `make run-cli` | Run `oore setup open --ttl 15m` |
-| `make doctor` | Check required tooling |
-| `make build` | build-web + build-docs + cargo-check |
-| `make check` | lint-web + cargo-check |
-| `make validate` | Full pre-handoff validation |
-
-## Next step
-
-[Set up your instance](/getting-started/first-instance)

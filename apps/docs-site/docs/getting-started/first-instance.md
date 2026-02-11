@@ -8,7 +8,7 @@ This tutorial walks you through the oore.build setup wizard — from starting th
 
 ## What you need
 
-- oore.build [installed](/getting-started/install) and build verified
+- oore.build [installed](/getting-started/install)
 - An OIDC provider configured with a client application (see [Configure OIDC](/guides/oidc/) if you haven't done this yet)
 - Your OIDC **issuer URL**, **client ID**, and **client secret** (if required by your provider)
 
@@ -17,7 +17,7 @@ This tutorial walks you through the oore.build setup wizard — from starting th
 Open a terminal and start `oored`:
 
 ```bash
-make run-daemon
+~/.oore/bin/oored run --listen 127.0.0.1:8787
 ```
 
 You should see:
@@ -40,7 +40,7 @@ Override the listen address with `--listen` or the `OORED_LISTEN_ADDR` environme
 In a second terminal, generate a one-time bootstrap token:
 
 ```bash
-make run-cli
+~/.oore/bin/oore setup open --ttl 15m
 ```
 
 This runs `oore setup open --ttl 15m` and outputs:
@@ -54,14 +54,14 @@ State:   bootstrap_pending
 DB:      /Users/you/Library/Application Support/oore/oore.db
 
 To complete setup, either:
-  1. Open http://localhost:3000/setup in your browser and paste this token
-  2. Run: oore setup
+  1. Open https://ci.oore.build and add http://127.0.0.1:8787 as an instance, then continue setup
+  2. Run: ~/.oore/bin/oore setup
 ```
 
 Copy the token value. You'll need it in the next step.
 
 ::: warning
-The bootstrap token is single-use and expires after its TTL (default: 15 minutes). If it expires, run `make run-cli` again to generate a new one.
+The bootstrap token is single-use and expires after its TTL (default: 15 minutes). If it expires, run `~/.oore/bin/oore setup open --ttl 15m` again.
 :::
 
 ## 3. Complete setup
@@ -70,15 +70,11 @@ Choose one of two methods: the **web UI** or the **interactive CLI**.
 
 ### Option A: Web UI
 
-1. Start the web dev server in a third terminal:
+1. Open [ci.oore.build](https://ci.oore.build).
+2. Add your backend instance URL (`http://127.0.0.1:8787` for local setup).
+3. Open the setup flow for that instance.
 
-   ```bash
-   make dev-web
-   ```
-
-2. Open `http://localhost:3000/setup` in your browser.
-
-3. Follow the four steps:
+4. Follow the four steps:
 
    | Step | What you do |
    |---|---|
@@ -92,7 +88,7 @@ Choose one of two methods: the **web UI** or the **interactive CLI**.
 Run the setup command:
 
 ```bash
-cargo run -p oore -- setup
+~/.oore/bin/oore setup
 ```
 
 The CLI walks through the same four steps:
@@ -175,7 +171,11 @@ For the full state machine reference, see [Setup States](/reference/setup-states
 
 ### "Cannot reach daemon"
 
-Make sure `oored` is running. Start it with `make run-daemon`.
+Make sure `oored` is running. Start it with:
+
+```bash
+~/.oore/bin/oored run --listen 127.0.0.1:8787
+```
 
 ### "Setup already complete"
 

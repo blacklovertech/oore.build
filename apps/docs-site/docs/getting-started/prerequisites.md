@@ -10,49 +10,30 @@ Before installing oore.build, verify that your system meets these requirements.
 
 | Requirement | Details |
 |---|---|
-| **Operating system** | macOS (required for the daemon and CLI in V1) |
-| **Xcode Command Line Tools** | Required for iOS/macOS builds. Run `xcode-select --install` if not present. |
-| **Internet access** | Required during setup for OIDC provider discovery and Git operations |
+| **Operating system** | macOS (required for daemon and CLI in V1) |
+| **Network access** | Reachability to GitHub Releases, your OIDC provider, and your source control provider |
+| **Xcode Command Line Tools** | Required for iOS/macOS build jobs (`xcode-select --install`) |
 
-## Required tools
+## Required tools for release installer
 
-Install these before proceeding. Each tool includes a verification command — run it to confirm the tool is available.
+The one-line installer (`curl -fsSL https://oore.build/install | bash`) requires:
 
-### Rust toolchain
+- `curl`
+- `tar`
+- `shasum`
 
-oore.build is written in Rust (edition 2024, requires Rust 1.85+).
+macOS includes these by default.
 
-Install via [rustup](https://rustup.rs/):
+## Required tools for running Flutter build jobs
 
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
+After install, runners/build hosts should have:
 
-Verify:
+- `git`
+- `fvm`
+- `flutter`
+- `xcodebuild`
 
-```bash
-rustc --version
-# Expected: rustc 1.85.0 or later
-```
-
-### Bun
-
-The web UI uses [Bun](https://bun.sh/docs/installation) as its package manager and runtime.
-
-```bash
-curl -fsSL https://bun.sh/install | bash
-```
-
-Verify:
-
-```bash
-bun --version
-# Expected: 1.0 or later
-```
-
-### FVM (Flutter Version Manager)
-
-oore.build uses [FVM](https://fvm.app/documentation/getting-started/installation) to manage Flutter versions per project.
+Install FVM via Homebrew:
 
 ```bash
 brew tap leoafarias/fvm
@@ -63,35 +44,36 @@ Verify:
 
 ```bash
 fvm --version
+flutter --version
+xcodebuild -version
 ```
 
-### SQLite
+## Optional tools for source development
 
-The daemon uses SQLite for persistent state. macOS ships with SQLite pre-installed. Optionally install a newer version:
+If you plan to build oore.build from source (instead of using release binaries), install:
 
-```bash
-brew install sqlite
-```
+- Rust toolchain (`rustup`, Rust 1.85+)
+- Bun (frontend package manager/runtime)
 
 ## OIDC provider account
 
-oore.build uses OIDC for all authentication — there are no local passwords. You need an account with an OIDC-compatible identity provider. During setup, you will need:
+oore.build uses OIDC for all authentication. You will need:
 
-- **Issuer URL** — the provider's OpenID Connect discovery endpoint (e.g., `https://accounts.google.com`)
-- **Client ID** — obtained by creating an OAuth 2.0 application in your provider
-- **Client secret** (optional) — some providers require this for the authorization code flow
+- **Issuer URL**
+- **Client ID**
+- **Client secret** (if required by your provider)
 
-If you don't have an OIDC provider yet, see [Configure OIDC](/guides/oidc/) for provider-specific setup instructions.
+If you don't have an OIDC provider configured yet, see [Configure OIDC](/guides/oidc/).
 
 ## Quick check
 
-Run the built-in diagnostic tool after installing the required tools:
+Run diagnostics after installation:
 
 ```bash
-make doctor
+~/.oore/bin/oore doctor
 ```
 
-This checks for `git`, `rustc`, `cargo`, `bun`, `fvm`, `flutter`, and `xcodebuild`.
+`oore doctor` currently checks a broad toolchain set (including Rust and Bun). Missing Rust/Bun does not block release-binary installation, but it does block source-development workflows.
 
 ## Next step
 

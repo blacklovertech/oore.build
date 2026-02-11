@@ -15,7 +15,7 @@ This tutorial walks you through creating a project, configuring a pipeline, and 
 
 ## 1. Create a project
 
-1. Open the web UI at `http://localhost:3000`
+1. Open the web UI at `https://ci.oore.build` (or your self-hosted UI)
 2. Sign in with your OIDC provider
 3. Click **New Project**
 4. Select your integration (GitHub or GitLab)
@@ -126,10 +126,10 @@ For the full state machine, see [Build States](/reference/build-states).
 
 ### Flutter commands fail
 
-Run `make doctor` to check your toolchain:
+Run `~/.oore/bin/oore doctor` to check your toolchain:
 
 ```bash
-make doctor
+~/.oore/bin/oore doctor
 ```
 
 Ensure `fvm` and `flutter` are installed and accessible.

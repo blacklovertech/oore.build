@@ -1,9 +1,9 @@
-.PHONY: dev-web dev-docs build-web build-demo deploy-demo deploy-web deploy-ci build-docs build check \
-       test-web lint-web fix-web \
-       test-docs lint-docs fix-docs \
-       cargo-check run-daemon run-daemon-debug run-daemon-release \
-       run-runner register-runner run-cli doctor \
-       docs-check ui-init install-local validate
+.PHONY: dev-web dev-docs dev-site build-web build-demo deploy-demo deploy-web deploy-ci build-site deploy-site build-docs build check \
+	       test-web lint-web fix-web \
+	       test-docs lint-docs fix-docs \
+	       cargo-check run-daemon run-daemon-debug run-daemon-release \
+	       run-runner register-runner run-cli doctor \
+	       docs-check ui-init install-local validate
 
 RUNNER_DAEMON_URL ?= http://127.0.0.1:8787
 RUNNER_CONFIG ?= $(HOME)/.oore/runner.json
@@ -40,8 +40,17 @@ fix-web:
 dev-docs:
 	bun run dev:docs
 
+dev-site:
+	bun run dev:site
+
 build-docs:
 	bun run build:docs
+
+build-site:
+	bun run build:site
+
+deploy-site: build-site
+	wrangler pages deploy apps/site/dist --project-name=oore
 
 deploy-docs: build-docs
 	wrangler pages deploy apps/docs-site/docs/.vitepress/dist --project-name=oore-docs
@@ -95,8 +104,8 @@ ui-init:
 	bun run ui:init
 
 # ── Aggregate Targets ─────────────────────────────────────────────
-build: build-web build-docs cargo-check
+build: build-web build-docs build-site cargo-check
 
 check: lint-web cargo-check
 
-validate: docs-check build-web build-docs cargo-check
+validate: docs-check build-web build-docs build-site cargo-check

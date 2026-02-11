@@ -1,0 +1,3 @@
+/install
+  Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+  Content-Type: text/plain; charset=utf-8
