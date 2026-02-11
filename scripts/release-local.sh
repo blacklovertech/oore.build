@@ -95,6 +95,29 @@ prepare_worktree() {
   git -C "$ROOT_DIR" worktree add --detach "$WORKTREE_DIR" "$RELEASE_TAG" >/dev/null
 }
 
+ensure_tag_matches_workspace_version() {
+  local cargo_toml="$WORKTREE_DIR/Cargo.toml"
+  local workspace_version=""
+
+  [[ -f "$cargo_toml" ]] || die "Missing workspace Cargo.toml in release source: $cargo_toml"
+
+  workspace_version="$(
+    awk -F'"' '
+      /^\[workspace\.package\]/ { in_section=1; next }
+      in_section && /^[[:space:]]*version[[:space:]]*=/ { print $2; exit }
+      in_section && /^\[/ { in_section=0 }
+    ' "$cargo_toml"
+  )"
+
+  [[ -n "$workspace_version" ]] || die "Unable to read workspace.package.version from $cargo_toml"
+
+  if [[ "$workspace_version" != "$RELEASE_VERSION" ]]; then
+    die "Tag/version mismatch: tag=$RELEASE_TAG expects version=$RELEASE_VERSION but workspace.package.version=$workspace_version. Update Cargo.toml version or retag."
+  fi
+
+  log "Version check passed: $RELEASE_TAG matches workspace.package.version=$workspace_version"
+}
+
 build_binaries() {
   log "Building release binaries for $RELEASE_TAG..."
   (
@@ -212,6 +235,7 @@ main() {
   ensure_dependencies
   normalize_tag "$TAG_INPUT"
   prepare_worktree
+  ensure_tag_matches_workspace_version
   build_binaries
   package_release
 
