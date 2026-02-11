@@ -2,9 +2,9 @@
 status: implemented
 ---
 
-# Release Automation on macOS (No GitHub Actions)
+# Release Automation on macOS
 
-Use this flow when GitHub Actions is unavailable. A dedicated macOS host (for example, a Mac mini) builds release artifacts and uploads them to Cloudflare R2 behind `https://dl.oore.build`.
+Use this flow with a dedicated macOS host (for example, a Mac mini) that builds release artifacts and uploads them to Cloudflare R2 behind `https://dl.oore.build`.
 
 ## Prerequisites
 

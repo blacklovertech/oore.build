@@ -86,7 +86,7 @@ make doctor           # Check system prerequisites
 
 ## Release Automation (macOS + R2)
 
-If GitHub Actions is unavailable, publish releases from a dedicated Mac mini:
+Releases are published from a dedicated Mac mini:
 
 ```bash
 make release-local TAG=v0.2.0          # Build + upload one release to R2
