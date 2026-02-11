@@ -1,0 +1,57 @@
+---
+status: implemented
+---
+
+# Environment Variables
+
+All environment variables recognized by oore.build components.
+
+## Daemon (oored)
+
+| Variable | Default | Description |
+|---|---|---|
+| `OORED_LISTEN_ADDR` | `127.0.0.1:8787` | Address and port for the daemon to listen on |
+| `OORED_RUNNER_MODE` | (embedded) | Runner mode: omit for embedded, `external` for external-only |
+| `OORE_SETUP_STATE_FILE` | Platform default | Override SQLite database path |
+| `OORE_CORS_ORIGINS` | `http://localhost:3000,https://ci.oore.build` | Comma-separated allowed CORS origins |
+| `OORE_CORS_ORIGIN` | — | Single allowed CORS origin (backward compatible) |
+| `RUST_LOG` | `info` | Log level filter (uses `tracing` subscriber) |
+
+Default database path: `~/Library/Application Support/oore/oore.db`
+
+Default encryption key path: `~/Library/Application Support/oore/encryption.key`
+
+## CLI (oore)
+
+| Variable | Default | Description |
+|---|---|---|
+| `OORE_DAEMON_URL` | `http://127.0.0.1:8787` | Daemon URL for CLI commands |
+| `OORE_SETUP_STATE_FILE` | Platform default | Override SQLite database path |
+| `OORE_SESSION_TOKEN` | — | Session token for `oore runner register` |
+
+## Runner
+
+Environment variables set by the runner during build execution:
+
+| Variable | Description |
+|---|---|
+| `OORE_KEYSTORE_PATH` | Path to Android keystore file (when Android signing is configured) |
+| `OORE_KEYSTORE_PASSWORD` | Android keystore password |
+| `OORE_KEY_ALIAS` | Android key alias |
+| `OORE_KEY_PASSWORD` | Android key password |
+
+Additionally, any environment variables defined in the pipeline's `env` configuration are set during builds.
+
+## Pipeline configuration
+
+Environment variables can be set per-pipeline in `.oore.yaml`:
+
+```yaml
+env:
+  - key: JAVA_HOME
+    value: /usr/local/opt/openjdk@17
+  - key: MY_BUILD_VAR
+    value: custom-value
+```
+
+Or via the pipeline editor in the web UI.

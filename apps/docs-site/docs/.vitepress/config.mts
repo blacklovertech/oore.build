@@ -130,6 +130,7 @@ export default defineConfig({
             },
             { text: "Connect GitHub", link: "/getting-started/connect-github" },
             { text: "First Build", link: "/getting-started/first-build" },
+            { text: "First Signed Build", link: "/getting-started/first-signed-build" },
           ],
         },
       ],
@@ -158,6 +159,24 @@ export default defineConfig({
           ],
         },
         {
+          text: "Signing",
+          items: [
+            { text: "Android Keystore", link: "/guides/signing/android-keystore" },
+            { text: "Android Gradle", link: "/guides/signing/android-gradle" },
+            { text: "iOS Certificates", link: "/guides/signing/ios-certificates" },
+            { text: "iOS Manual Signing", link: "/guides/signing/ios-manual-signing" },
+            { text: "iOS API Signing", link: "/guides/signing/ios-api-signing" },
+            { text: "iOS Device Registration", link: "/guides/signing/ios-device-registration" },
+          ],
+        },
+        {
+          text: "Artifacts",
+          items: [
+            { text: "Configure Storage", link: "/guides/artifacts/configure-storage" },
+            { text: "Download Artifacts", link: "/guides/artifacts/download-artifacts" },
+          ],
+        },
+        {
           text: "Multi-Instance",
           items: [
             { text: "Add Instance", link: "/guides/multi-instance/add-instance" },
@@ -176,6 +195,8 @@ export default defineConfig({
             { text: "Builds", link: "/reference/api/builds" },
             { text: "Integrations", link: "/reference/api/integrations" },
             { text: "Build Logs", link: "/reference/api/logs" },
+            { text: "Runners", link: "/reference/api/runners" },
+            { text: "Artifacts", link: "/reference/api/artifacts" },
           ],
         },
         {
@@ -189,6 +210,7 @@ export default defineConfig({
           text: "Configuration",
           items: [
             { text: ".oore.yaml", link: "/reference/config/oore-yaml" },
+            { text: "Environment Variables", link: "/reference/config/environment-variables" },
           ],
         },
         {
@@ -206,6 +228,7 @@ export default defineConfig({
             { text: "Architecture", link: "/concepts/architecture" },
             { text: "Build Execution", link: "/concepts/build-execution" },
             { text: "Multi-Instance", link: "/concepts/multi-instance" },
+            { text: "Code Signing", link: "/concepts/signing-overview" },
           ],
         },
       ],
