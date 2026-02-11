@@ -1,26 +1,30 @@
+---
+status: implemented
+---
+
 # oore setup
 
 The `setup` command configures a fresh oore.build instance. It can be run interactively (default) or used to generate bootstrap tokens with the `open` subcommand.
 
-## Interactive Setup
+## Interactive setup
 
 ```bash
-oore setup
+oore setup [--daemon-url <url>]
 ```
 
-Runs the full 4-step interactive setup flow from the terminal. This is the CLI equivalent of the [web-based setup wizard](/features/setup-wizard-ui).
+Runs the full 4-step interactive setup flow from the terminal. This is the CLI equivalent of the web-based setup wizard.
 
 ### Flags
 
-| Flag | Default | Env Var | Description |
+| Flag | Default | Env var | Description |
 |---|---|---|---|
 | `--daemon-url` | `http://127.0.0.1:8787` | `OORE_DAEMON_URL` | URL of the oored daemon |
 
-### Interactive Flow
+### Interactive flow
 
 The interactive setup walks through 4 steps. At each step, the command checks the current state and skips already-completed steps.
 
-#### Step 1: Bootstrap Token Verification
+#### Step 1: Bootstrap token verification
 
 ```
 [Step 1/4] Bootstrap token verification
@@ -31,31 +35,32 @@ The interactive setup walks through 4 steps. At each step, the command checks th
 ```
 
 The CLI:
-1. Connects to the daemon and checks `GET /v1/public/setup-status`
+1. Checks the daemon state via `GET /v1/public/setup-status`
 2. Opens the local SQLite database
 3. Generates a bootstrap token with a 15-minute TTL
-4. Verifies the token against the daemon via `POST /v1/setup/bootstrap-token/verify`
+4. Verifies the token via `POST /v1/setup/bootstrap-token/verify`
 5. Stores the returned session token in memory for subsequent steps
 
-#### Step 2: OIDC Configuration
+#### Step 2: OIDC configuration
 
 ```
 [Step 2/4] OIDC provider configuration
   OIDC Issuer URL: https://accounts.google.com
   Client ID: your-client-id.apps.googleusercontent.com
   Client Secret (optional, press Enter to skip): ****
-  Configuring OIDC provider...
   > OIDC provider configured. Issuer: https://accounts.google.com
 ```
 
 The CLI prompts for:
-- **OIDC Issuer URL** -- text input (required)
-- **Client ID** -- text input (required)
-- **Client Secret** -- password input (optional, hidden)
+- **OIDC Issuer URL** — text input (required)
+- **Client ID** — text input (required)
+- **Client Secret** — password input (optional, hidden)
 
-Submits to `POST /v1/setup/oidc/configure` with Bearer auth. On failure, offers to retry.
+Submits to `POST /v1/setup/oidc/configure` with Bearer auth.
 
-#### Step 3: Owner Account
+To obtain these values, see the [OIDC setup guides](/guides/oidc/).
+
+#### Step 3: Owner account
 
 ```
 [Step 3/4] Owner account setup
@@ -71,12 +76,12 @@ Submits to `POST /v1/setup/oidc/configure` with Bearer auth. On failure, offers 
 
 The CLI:
 1. Binds a TCP listener on a random free port on `127.0.0.1`
-2. Displays the redirect URI for the operator to whitelist in their IdP
+2. Displays the redirect URI for the operator to add to their IdP's allowed callback URLs
 3. Calls `POST /v1/setup/owner/start-oidc` with the loopback redirect URI
-4. Opens the authorization URL in the default browser (`open` command on macOS)
+4. Opens the authorization URL in the default browser (`open` on macOS)
 5. Waits for the IdP to redirect back to the loopback listener
-6. Extracts the `code` and `state` query parameters from the callback
-7. Submits to `POST /v1/setup/owner/verify-oidc` to exchange the code and create the owner
+6. Extracts the `code` and `state` query parameters
+7. Submits to `POST /v1/setup/owner/verify-oidc`
 8. Sends an HTML success page to the browser
 
 If the browser cannot be opened automatically, the authorization URL is printed for manual navigation.
@@ -89,26 +94,28 @@ If the browser cannot be opened automatically, the authorization URL is printed 
   Completing setup...
   > Setup complete! Instance ID: 550e8400-e29b-41d4-a716-446655440000
 
-Your oore.build instance is ready. Run 'oore status' to verify.
+Your oore.build instance is ready.
 ```
 
-Calls `POST /v1/setup/complete` with Bearer auth. The operator must confirm before proceeding.
+Calls `POST /v1/setup/complete` with Bearer auth.
 
 ::: danger
 This step is irreversible. Once confirmed, all setup endpoints are permanently disabled.
 :::
 
-### State Resumption
+### State resumption
 
-If the daemon is already past certain steps (e.g., OIDC is already configured from a previous partial setup), the CLI detects this and skips completed steps automatically.
+If the daemon is already past certain steps (e.g., OIDC was configured in a previous partial setup), the CLI detects this and skips completed steps automatically.
 
-### Error Handling
+### Error handling
 
-- **Cannot reach daemon**: Prints a message suggesting to start `oored run`
-- **Setup already complete**: Exits with a message confirming `ready` state
-- **Session expired**: Exits with a message to restart setup
-- **OIDC configuration error**: Offers retry with fresh inputs
-- **OIDC authentication error**: Displays the IdP error in the browser and exits
+| Situation | Behavior |
+|---|---|
+| Cannot reach daemon | Prints a message suggesting to start `oored run` |
+| Setup already complete | Exits confirming `ready` state |
+| Session expired | Exits with a message to restart setup |
+| OIDC configuration error | Offers retry with fresh inputs |
+| OIDC authentication error | Displays the IdP error in the browser and exits |
 
 ---
 
@@ -118,17 +125,17 @@ If the daemon is already past certain steps (e.g., OIDC is already configured fr
 oore setup open [--ttl <duration>] [--json] [--state-file <path>]
 ```
 
-Generate a one-time bootstrap token for initializing an oore.build instance. This token is used as the first step in the [setup wizard](/features/setup-wizard).
+Generate a one-time bootstrap token for initializing an oore.build instance. This token is used as the first step in the setup process.
 
 ### Flags
 
-| Flag | Default | Env Var | Description |
+| Flag | Default | Env var | Description |
 |---|---|---|---|
-| `--ttl` | `15m` | -- | Token time-to-live (e.g., `5m`, `1h`, `30s`) |
-| `--json` | `false` | -- | Output in machine-readable JSON format |
+| `--ttl` | `15m` | — | Token time-to-live (e.g., `5m`, `1h`, `30s`) |
+| `--json` | `false` | — | Output in machine-readable JSON format |
 | `--state-file` | Platform default | `OORE_SETUP_STATE_FILE` | Override the database path |
 
-### TTL Format
+### TTL format
 
 The `--ttl` flag accepts [humantime](https://docs.rs/humantime/) duration strings:
 
@@ -141,7 +148,7 @@ The `--ttl` flag accepts [humantime](https://docs.rs/humantime/) duration string
 
 ### Output
 
-#### Default (Human-Readable)
+#### Default (human-readable)
 
 ```
 Bootstrap token generated.

@@ -1,23 +1,35 @@
 ---
 layout: home
-
+status: implemented
 hero:
-  name: Oore CI
-  text: Self-hosted mobile CI
-  tagline: Flutter-first build system with internal app distribution. OIDC-secured, macOS-native, no vendor lock-in.
+  name: oore.build
+  text: Flutter-first mobile CI
+  tagline: Self-hosted build system with internal app distribution. OIDC-secured, macOS-native, no vendor lock-in.
   actions:
     - theme: brand
       text: Get Started
-      link: /guide/overview
+      link: /getting-started/
     - theme: alt
       text: View on GitHub
       link: https://github.com/devaryakjha/oore.build
 
 features:
   - title: Self-Hosted CI
-    details: Run your own build infrastructure on macOS. Full control over your build pipeline, signing keys, and artifacts with no data leaving your network.
+    details: Run your own build infrastructure on macOS. Full control over signing keys, build artifacts, and distribution — nothing leaves your network unless you choose.
   - title: Flutter-First
-    details: Purpose-built for Flutter with first-class Android, iOS, and macOS build support. Optimized workflows for the Flutter development lifecycle.
+    details: Purpose-built for Flutter. Android, iOS, and macOS builds with automatic Flutter version management via FVM and file-first pipeline configuration.
   - title: OIDC Security
-    details: Enterprise-grade authentication via OpenID Connect. Integrate with your existing identity provider — no local passwords, no shared secrets.
+    details: Enterprise-grade authentication with your existing identity provider. Google, Okta, Azure AD, Auth0, and Keycloak — no local passwords, ever.
 ---
+
+## Who is this for?
+
+<div class="vp-doc">
+
+| I want to... | Start here |
+|---|---|
+| **Set up oore.build for the first time** | [Getting Started](/getting-started/) |
+| **Configure my OIDC provider** | [OIDC Guides](/guides/oidc/) |
+| **Look up an API endpoint or CLI flag** | [Reference](/reference/api/) |
+
+</div>
