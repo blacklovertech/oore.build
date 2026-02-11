@@ -131,6 +131,7 @@ export default defineConfig({
             { text: "Connect GitHub", link: "/getting-started/connect-github" },
             { text: "First Build", link: "/getting-started/first-build" },
             { text: "First Signed Build", link: "/getting-started/first-signed-build" },
+            { text: "Invite Your Team", link: "/getting-started/invite-your-team" },
           ],
         },
       ],
@@ -140,6 +141,10 @@ export default defineConfig({
           items: [
             { text: "Overview", link: "/guides/oidc/" },
             { text: "Google", link: "/guides/oidc/google" },
+            { text: "Okta", link: "/guides/oidc/okta" },
+            { text: "Azure AD", link: "/guides/oidc/azure-ad" },
+            { text: "Auth0", link: "/guides/oidc/auth0" },
+            { text: "Keycloak", link: "/guides/oidc/keycloak" },
           ],
         },
         {
@@ -177,6 +182,14 @@ export default defineConfig({
           ],
         },
         {
+          text: "Users",
+          items: [
+            { text: "Invite Users", link: "/guides/users/invite-users" },
+            { text: "Manage Roles", link: "/guides/users/manage-roles" },
+            { text: "Disable Users", link: "/guides/users/disable-users" },
+          ],
+        },
+        {
           text: "Multi-Instance",
           items: [
             { text: "Add Instance", link: "/guides/multi-instance/add-instance" },
@@ -194,6 +207,8 @@ export default defineConfig({
             { text: "Pipelines", link: "/reference/api/pipelines" },
             { text: "Builds", link: "/reference/api/builds" },
             { text: "Integrations", link: "/reference/api/integrations" },
+            { text: "Auth", link: "/reference/api/auth" },
+            { text: "Users", link: "/reference/api/users" },
             { text: "Build Logs", link: "/reference/api/logs" },
             { text: "Runners", link: "/reference/api/runners" },
             { text: "Artifacts", link: "/reference/api/artifacts" },
@@ -214,10 +229,11 @@ export default defineConfig({
           ],
         },
         {
-          text: "State Machines",
+          text: "State Machines & RBAC",
           items: [
             { text: "Setup States", link: "/reference/setup-states" },
             { text: "Build States", link: "/reference/build-states" },
+            { text: "Roles & Permissions", link: "/reference/rbac" },
           ],
         },
       ],
@@ -229,6 +245,7 @@ export default defineConfig({
             { text: "Build Execution", link: "/concepts/build-execution" },
             { text: "Multi-Instance", link: "/concepts/multi-instance" },
             { text: "Code Signing", link: "/concepts/signing-overview" },
+            { text: "Security Model", link: "/concepts/security-model" },
           ],
         },
       ],
