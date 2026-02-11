@@ -1,7 +1,17 @@
 // Fixed demo constants — single source of truth for all mock data cross-references.
 
 export const DEMO_INSTANCE_ID = 'demo-00000000-0000-0000-0000-000000000001'
-export const DEMO_INSTANCE_URL = '' // empty = same-origin; MSW intercepts before network
+// Resolved at runtime by enableDemoMode() via getDemoInstanceUrl().
+// Must be a truthy string so `!!baseUrl` checks pass in query hooks.
+// MSW intercepts fetch requests before they hit the network.
+export const DEMO_INSTANCE_URL = 'https://demo.oore.build'
+
+/** Returns the real origin at runtime so MSW path matching works correctly. */
+export function getDemoInstanceUrl(): string {
+  return typeof window !== 'undefined'
+    ? window.location.origin
+    : DEMO_INSTANCE_URL
+}
 export const DEMO_INSTANCE_LABEL = 'Demo Instance'
 
 export const DEMO_USER_ID = 'usr-demo-owner-001'

@@ -3,14 +3,18 @@ import {
   DEMO_AUTH_TOKEN,
   DEMO_INSTANCE_ID,
   DEMO_INSTANCE_LABEL,
-  DEMO_INSTANCE_URL,
   DEMO_OIDC_SUBJECT,
   DEMO_USER_EMAIL,
   DEMO_USER_ID,
   DEMO_USER_ROLE,
+  getDemoInstanceUrl,
 } from './seed'
 
 function seedDemoStores() {
+  // Use current origin so `!!baseUrl` checks pass in query hooks and
+  // MSW intercepts the full-URL fetches before they hit the network.
+  const instanceUrl = getDemoInstanceUrl()
+
   // Seed instance store — matches zustand/persist format (name: 'oore_instances')
   const instanceStorePayload = {
     state: {
@@ -18,7 +22,7 @@ function seedDemoStores() {
         [DEMO_INSTANCE_ID]: {
           id: DEMO_INSTANCE_ID,
           label: DEMO_INSTANCE_LABEL,
-          url: DEMO_INSTANCE_URL,
+          url: instanceUrl,
           addedAt: Date.now(),
         },
       },
