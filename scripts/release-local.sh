@@ -168,27 +168,32 @@ upload_to_r2() {
   log "Uploading artifacts to r2://$R2_BUCKET/$R2_PREFIX/$RELEASE_TAG/"
 
   wrangler r2 object put "$R2_BUCKET/$R2_PREFIX/$RELEASE_TAG/$arm_asset" \
+    --remote \
     --file "$out_dir/$arm_asset" \
     --content-type "application/gzip" \
     --cache-control "public, max-age=31536000, immutable"
 
   wrangler r2 object put "$R2_BUCKET/$R2_PREFIX/$RELEASE_TAG/$x64_asset" \
+    --remote \
     --file "$out_dir/$x64_asset" \
     --content-type "application/gzip" \
     --cache-control "public, max-age=31536000, immutable"
 
   wrangler r2 object put "$R2_BUCKET/$R2_PREFIX/$RELEASE_TAG/$checksum_asset" \
+    --remote \
     --file "$out_dir/$checksum_asset" \
     --content-type "text/plain; charset=utf-8" \
     --cache-control "public, max-age=31536000, immutable"
 
   wrangler r2 object put "$R2_BUCKET/$R2_PREFIX/$RELEASE_TAG/manifest.json" \
+    --remote \
     --file "$out_dir/manifest.json" \
     --content-type "application/json; charset=utf-8" \
     --cache-control "public, max-age=300, must-revalidate"
 
   if normalize_bool "$PUBLISH_LATEST"; then
     wrangler r2 object put "$R2_BUCKET/$R2_PREFIX/latest.json" \
+      --remote \
       --file "$RELEASE_DIST_ROOT/latest.json" \
       --content-type "application/json; charset=utf-8" \
       --cache-control "public, max-age=60, must-revalidate"
