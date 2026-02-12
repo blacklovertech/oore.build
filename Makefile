@@ -13,6 +13,7 @@ RUNNER_SESSION_TOKEN ?=
 RUNNER_NAME ?= $(shell hostname)
 OORED_LOG_LEVEL ?= info
 OORED_DEV_DATA_DIR ?= $(HOME)/.oore/dev
+OORE_DEV_SETUP_STATE_FILE ?= $(OORED_DEV_DATA_DIR)/oore.db
 
 # ── Frontend: Web App ─────────────────────────────────────────────
 dev-web:
@@ -88,7 +89,7 @@ register-runner:
 	cargo run -p oore -- runner register --daemon-url $(RUNNER_DAEMON_URL) --token $(RUNNER_SESSION_TOKEN) --name "$(RUNNER_NAME)"
 
 run-cli:
-	cargo run -p oore -- setup open --ttl 15m
+	OORE_SETUP_STATE_FILE=$(OORE_DEV_SETUP_STATE_FILE) cargo run -p oore -- setup open --ttl 15m
 
 doctor:
 	cargo run -p oore -- doctor

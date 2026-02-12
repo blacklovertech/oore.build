@@ -49,7 +49,7 @@ Detailed setup docs: `https://docs.oore.build`
 bun install
 
 make run-daemon       # Start oored on 127.0.0.1:8787
-make run-cli          # Generate setup token
+make run-cli          # Generate setup token in isolated dev DB
 make dev-web          # Local web UI (http://localhost:3000)
 make clean-dev-state  # Remove isolated dev daemon data (~/.oore/dev)
 ```

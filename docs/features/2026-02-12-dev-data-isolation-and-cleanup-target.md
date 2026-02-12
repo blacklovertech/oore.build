@@ -39,12 +39,15 @@ Runtime/config behavior changes:
 
 - `make run-daemon`, `make run-daemon-debug`, and `make run-daemon-release` now set:
   - `OORED_DATA_DIR=$(HOME)/.oore/dev`
+- `make run-cli` now sets:
+  - `OORE_SETUP_STATE_FILE=$(HOME)/.oore/dev/oore.db`
 - Added `make clean-dev-state` to remove that dev root.
 - Existing production deployments are unaffected unless `OORED_DATA_DIR`/`OORE_DATA_DIR` is explicitly set.
 
 ## Acceptance Criteria
 
 - [x] Dev daemon runs use isolated data root by default through Makefile.
+- [x] Local setup token generation (`make run-cli`) writes to isolated dev DB by default.
 - [x] Daemon path defaults (db/key/local-artifacts) resolve through shared data-root logic.
 - [x] Dev cleanup target removes isolated dev data only.
 - [x] Docs include new env var and dev cleanup workflow.
