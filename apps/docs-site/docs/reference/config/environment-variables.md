@@ -12,14 +12,17 @@ All environment variables recognized by oore.build components.
 |---|---|---|
 | `OORED_LISTEN_ADDR` | `127.0.0.1:8787` | Address and port for the daemon to listen on |
 | `OORED_RUNNER_MODE` | (embedded) | Runner mode: omit for embedded, `external` for external-only |
+| `OORED_DATA_DIR` | Platform default | Override daemon data root directory (`oore.db`, `encryption.key`, local artifacts default path) |
 | `OORE_SETUP_STATE_FILE` | Platform default | Override SQLite database path |
 | `OORE_CORS_ORIGINS` | `http://localhost:3000,https://ci.oore.build` | Comma-separated allowed CORS origins |
 | `OORE_CORS_ORIGIN` | — | Single allowed CORS origin (backward compatible) |
 | `RUST_LOG` | `info` | Log level filter (uses `tracing` subscriber) |
 
-Default database path: `~/Library/Application Support/oore/oore.db`
+Data root resolution order: `OORED_DATA_DIR` -> `OORE_DATA_DIR` -> `~/Library/Application Support/oore`
 
-Default encryption key path: `~/Library/Application Support/oore/encryption.key`
+Default database path: `<data-root>/oore.db`
+
+Default encryption key path: `<data-root>/encryption.key`
 
 ## CLI (oore)
 

@@ -51,7 +51,10 @@ bun install
 make run-daemon       # Start oored on 127.0.0.1:8787
 make run-cli          # Generate setup token
 make dev-web          # Local web UI (http://localhost:3000)
+make clean-dev-state  # Remove isolated dev daemon data (~/.oore/dev)
 ```
+
+`make run-daemon*` targets use an isolated dev data root (`~/.oore/dev`) so local source runs do not collide with production daemon data.
 
 ## Project Structure
 

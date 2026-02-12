@@ -11,7 +11,7 @@ use sqlx::{Row, SqlitePool};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::util::now_unix;
+use crate::util::{now_unix, resolve_oored_data_dir};
 
 /// SQLite-backed state store for the setup state machine.
 pub struct SetupStore {
@@ -51,7 +51,8 @@ impl SetupStore {
     /// Resolve the database path from (in priority order):
     /// 1. Explicit `override_path` argument
     /// 2. `OORE_SETUP_STATE_FILE` env var
-    /// 3. Default: `~/Library/Application Support/oore/oore.db` (via `dirs::data_dir()`)
+    /// 3. Default: `<data_root>/oore.db` where data root is:
+    ///    `OORED_DATA_DIR` -> `OORE_DATA_DIR` -> `dirs::data_dir()/oore`
     pub fn resolve_path(override_path: Option<&str>) -> anyhow::Result<PathBuf> {
         if let Some(p) = override_path {
             return Ok(PathBuf::from(p));
@@ -61,9 +62,7 @@ impl SetupStore {
             return Ok(PathBuf::from(p));
         }
 
-        let data_dir = dirs::data_dir()
-            .context("could not determine platform data directory (dirs::data_dir)")?;
-        Ok(data_dir.join("oore").join("oore.db"))
+        Ok(resolve_oored_data_dir()?.join("oore.db"))
     }
 
     /// Load the setup state from the database.

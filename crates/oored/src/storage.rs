@@ -379,8 +379,13 @@ impl EffectiveStorageConfig {
 }
 
 fn default_local_artifacts_dir() -> PathBuf {
-    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("oore").join("artifacts")
+    match crate::util::resolve_oored_data_dir() {
+        Ok(root) => root.join("artifacts"),
+        Err(_) => {
+            let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+            base.join("oore").join("artifacts")
+        }
+    }
 }
 
 pub fn build_backend_from_config(

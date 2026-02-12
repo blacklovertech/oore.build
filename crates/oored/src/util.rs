@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
@@ -10,6 +11,26 @@ pub fn now_unix() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+/// Resolve the daemon data root directory.
+///
+/// Priority:
+/// 1. `OORED_DATA_DIR`
+/// 2. `OORE_DATA_DIR`
+/// 3. Platform data dir default (`dirs::data_dir()/oore`)
+pub fn resolve_oored_data_dir() -> anyhow::Result<PathBuf> {
+    if let Ok(p) = std::env::var("OORED_DATA_DIR") {
+        return Ok(PathBuf::from(p));
+    }
+
+    if let Ok(p) = std::env::var("OORE_DATA_DIR") {
+        return Ok(PathBuf::from(p));
+    }
+
+    let data_dir = dirs::data_dir()
+        .ok_or_else(|| anyhow::anyhow!("could not determine platform data directory (dirs::data_dir)"))?;
+    Ok(data_dir.join("oore"))
 }
 
 /// Extract a Bearer token from the Authorization header.

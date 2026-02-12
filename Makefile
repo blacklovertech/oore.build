@@ -4,13 +4,15 @@
 	       cargo-check run-daemon run-daemon-debug run-daemon-release \
 	       run-runner register-runner run-cli doctor \
 	       docs-check ui-init install-local validate \
-	       release-local release-poll-tags release-webhook-server install-release-poller install-release-webhook install-release-webhook-daemon release-cut
+	       release-local release-poll-tags release-webhook-server install-release-poller install-release-webhook install-release-webhook-daemon release-cut \
+	       clean-dev-state
 
 RUNNER_DAEMON_URL ?= http://127.0.0.1:8787
 RUNNER_CONFIG ?= $(HOME)/.oore/runner.json
 RUNNER_SESSION_TOKEN ?=
 RUNNER_NAME ?= $(shell hostname)
 OORED_LOG_LEVEL ?= info
+OORED_DEV_DATA_DIR ?= $(HOME)/.oore/dev
 
 # ── Frontend: Web App ─────────────────────────────────────────────
 dev-web:
@@ -70,13 +72,13 @@ cargo-check:
 	cargo check --workspace
 
 run-daemon:
-	RUST_LOG=$(OORED_LOG_LEVEL) cargo run -p oored -- run --listen 127.0.0.1:8787
+	OORED_DATA_DIR=$(OORED_DEV_DATA_DIR) RUST_LOG=$(OORED_LOG_LEVEL) cargo run -p oored -- run --listen 127.0.0.1:8787
 
 run-daemon-debug:
-	RUST_LOG=debug cargo run -p oored -- run --listen 127.0.0.1:8787
+	OORED_DATA_DIR=$(OORED_DEV_DATA_DIR) RUST_LOG=debug cargo run -p oored -- run --listen 127.0.0.1:8787
 
 run-daemon-release:
-	RUST_LOG=info cargo run -p oored --release -- run --listen 127.0.0.1:8787
+	OORED_DATA_DIR=$(OORED_DEV_DATA_DIR) RUST_LOG=info cargo run -p oored --release -- run --listen 127.0.0.1:8787
 
 run-runner:
 	cargo run -p oore -- runner start --daemon-url $(RUNNER_DAEMON_URL) --config $(RUNNER_CONFIG)
@@ -119,6 +121,10 @@ install-release-webhook:
 
 install-release-webhook-daemon:
 	bash scripts/install-launchd-release-webhook-daemon.sh
+
+clean-dev-state:
+	rm -rf "$(OORED_DEV_DATA_DIR)"
+	@echo "Removed dev daemon data at $(OORED_DEV_DATA_DIR)"
 
 # ── Documentation & Validation ────────────────────────────────────
 docs-check:
