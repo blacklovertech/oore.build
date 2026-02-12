@@ -48,10 +48,19 @@ Detailed setup docs: `https://docs.oore.build`
 ```bash
 bun install
 
-make run-daemon       # Start oored on 127.0.0.1:8787
-make run-cli          # Generate setup token
+make clean-dev-state  # Wipe isolated dev data (~/.oore/dev.noindex)
+make run-daemon       # Start oored with isolated dev data
+make run-cli          # Generate setup token against dev DB
+make dev-fresh-setup  # Clean dev state, local build, start daemon, start tunnel, generate setup token
 make dev-web          # Local web UI (http://localhost:3000)
 ```
+
+`make dev-fresh-setup` starts a Cloudflare quick tunnel by default and prints the assigned public URL.  
+Disable it with `OORE_DEV_ENABLE_TUNNEL=0 make dev-fresh-setup`.
+It runs token-only setup by default for hosted UI E2E.  
+Use `OORE_DEV_SETUP_MODE=cli make dev-fresh-setup` only when you explicitly want CLI-driven OIDC setup.
+Dev state uses a `.noindex` directory and writes `.metadata_never_index` to reduce Spotlight indexing load on macOS.
+`make clean-dev-state` also stops the matching dev daemon and Cloudflare tunnel for the configured dev URL/port before deleting state.
 
 ## Project Structure
 
@@ -81,6 +90,8 @@ make test-rust        # Run Rust tests
 make cargo-check      # Type-check Rust workspace
 make run-daemon       # Start oored on 127.0.0.1:8787
 make run-cli          # Open a setup window (15 min TTL)
+make clean-dev-state  # Remove isolated dev daemon data directory
+make dev-fresh-setup  # Fresh local build + tunnel + token-first UI setup simulation
 make doctor           # Check system prerequisites
 ```
 

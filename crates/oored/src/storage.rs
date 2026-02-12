@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 
 use crate::crypto;
 use crate::token::{generate_token, hash_token};
-use crate::util::now_unix;
+use crate::util::{now_unix, resolve_oored_data_dir};
 
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
@@ -379,8 +379,9 @@ impl EffectiveStorageConfig {
 }
 
 fn default_local_artifacts_dir() -> PathBuf {
-    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("oore").join("artifacts")
+    resolve_oored_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("artifacts")
 }
 
 pub fn build_backend_from_config(
