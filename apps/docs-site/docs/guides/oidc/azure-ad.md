@@ -30,9 +30,10 @@ For detailed instructions, see [Register an application — Microsoft Entra](htt
 
 1. Go to **Authentication** in the app registration
 2. Under **Web > Redirect URIs**, add:
-   - `http://localhost:3000/setup/owner/callback`
-   - Your production URL (e.g., `https://ci.oore.build/auth/callback`)
+   - `https://ci.oore.build/auth/callback` (or your custom domain)
 3. Click **Save**
+
+Both setup and regular sign-in use the same `/auth/callback` path — you only need one URI per origin.
 
 ## 3. Create a client secret
 

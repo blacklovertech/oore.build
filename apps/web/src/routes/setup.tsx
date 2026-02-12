@@ -14,10 +14,43 @@ import { useSetupStore } from '@/stores/setup-store'
 import { useSessionCountdown } from '@/hooks/use-session-countdown'
 import { getSetupStatus } from '@/lib/api'
 import { getActiveInstanceOrRedirect } from '@/lib/instance-context'
+import { useInstanceStore } from '@/stores/instance-store'
 import { webPageTitle } from '@/lib/seo'
+
+function maybeAutoAddBackendInstance() {
+  const params = new URLSearchParams(window.location.search)
+  const backendUrl = params.get('backend')
+  if (!backendUrl) return
+
+  // Validate URL
+  try {
+    new URL(backendUrl)
+  } catch {
+    return
+  }
+
+  // Only auto-add if instance store is empty (prevents phishing via crafted links)
+  const store = useInstanceStore.getState()
+  if (Object.keys(store.instances).length > 0) return
+
+  // Auto-add the instance
+  const id = store.addInstance(
+    new URL(backendUrl).hostname,
+    backendUrl.replace(/\/+$/, ''),
+  )
+  store.setActiveInstance(id)
+
+  // Scrub the query parameter from the URL
+  const url = new URL(window.location.href)
+  url.searchParams.delete('backend')
+  window.history.replaceState({}, '', url.pathname + url.search)
+}
 
 export const Route = createFileRoute('/setup')({
   beforeLoad: async () => {
+    // Handle ?backend= query param before instance guards
+    maybeAutoAddBackendInstance()
+
     const instance = getActiveInstanceOrRedirect()
     try {
       const status = await getSetupStatus(instance.url)

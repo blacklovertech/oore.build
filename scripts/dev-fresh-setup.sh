@@ -13,6 +13,9 @@ OORE_DEV_CLEAN="${OORE_DEV_CLEAN:-1}"
 OORE_DEV_HEALTH_TIMEOUT_SECS="${OORE_DEV_HEALTH_TIMEOUT_SECS:-45}"
 OORE_DEV_ENABLE_TUNNEL="${OORE_DEV_ENABLE_TUNNEL:-1}"
 OORE_DEV_TUNNEL_TIMEOUT_SECS="${OORE_DEV_TUNNEL_TIMEOUT_SECS:-45}"
+OORE_DEV_HOSTED_UI="${OORE_DEV_HOSTED_UI:-https://ci.oore.build}"
+OORE_DEV_AUTO_OPEN="${OORE_DEV_AUTO_OPEN:-1}"
+OORE_DEV_WATCH="${OORE_DEV_WATCH:-1}"
 
 OORE_DEV_LOG_DIR="$OORED_DEV_DATA_DIR/logs"
 OORE_DEV_DAEMON_LOG="$OORE_DEV_LOG_DIR/oored-dev.log"
@@ -156,9 +159,17 @@ build_local_binaries() {
 start_dev_daemon() {
   mkdir -p "$OORE_DEV_LOG_DIR"
 
+  # Build CORS origins: defaults + tunnel origin if available
+  local cors_origins="http://localhost:3000,https://ci.oore.build"
+  if [[ -n "$OORE_DEV_PUBLIC_TUNNEL_URL" ]]; then
+    cors_origins="${cors_origins},${OORE_DEV_PUBLIC_TUNNEL_URL}"
+    log "CORS origins include tunnel: $OORE_DEV_PUBLIC_TUNNEL_URL"
+  fi
+
   log "Starting dev daemon on $OORED_DEV_LISTEN_ADDR..."
   OORED_DATA_DIR="$OORED_DEV_DATA_DIR" \
   OORE_SETUP_STATE_FILE="$OORE_DEV_SETUP_STATE_FILE" \
+  OORE_CORS_ORIGINS="$cors_origins" \
   RUST_LOG="$OORE_DEV_LOG_LEVEL" \
   "$OORED_BIN" run --listen "$OORED_DEV_LISTEN_ADDR" >"$OORE_DEV_DAEMON_LOG" 2>&1 &
   echo "$!" > "$OORE_DEV_DAEMON_PID_FILE"
@@ -184,6 +195,7 @@ start_cloudflare_tunnel() {
 
   have_cmd cloudflared || die "cloudflared is required for tunnel mode. Install it or set OORE_DEV_ENABLE_TUNNEL=0."
 
+  mkdir -p "$OORE_DEV_LOG_DIR"
   log "Starting Cloudflare quick tunnel for $OORE_DEV_DAEMON_URL..."
   cloudflared tunnel --url "$OORE_DEV_DAEMON_URL" --no-autoupdate >"$OORE_DEV_TUNNEL_LOG" 2>&1 &
   echo "$!" > "$OORE_DEV_TUNNEL_PID_FILE"
@@ -219,6 +231,75 @@ start_cloudflare_tunnel() {
       die "Timed out waiting for Cloudflare tunnel URL."
     fi
     sleep 1
+  done
+}
+
+is_already_configured() {
+  local status_json
+  status_json="$(curl -fsS "$OORE_DEV_DAEMON_URL/v1/public/setup-status" 2>/dev/null)" || return 1
+  echo "$status_json" | grep -q '"is_configured"[[:space:]]*:[[:space:]]*true'
+}
+
+open_setup_ui() {
+  if ! is_true "$OORE_DEV_AUTO_OPEN"; then
+    return 0
+  fi
+  if ! have_cmd open; then
+    log "Cannot auto-open browser (open command unavailable)."
+    return 1
+  fi
+
+  local backend_url="$OORE_DEV_DAEMON_URL"
+  if [[ -n "$OORE_DEV_PUBLIC_TUNNEL_URL" ]]; then
+    backend_url="$OORE_DEV_PUBLIC_TUNNEL_URL"
+  fi
+
+  local setup_url="${OORE_DEV_HOSTED_UI}/setup?backend=${backend_url}"
+  log "Opening: $setup_url"
+  open "$setup_url" >/dev/null 2>&1 || true
+}
+
+watch_setup() {
+  if ! is_true "$OORE_DEV_WATCH"; then
+    return 0
+  fi
+
+  printf '\nWaiting for setup to complete in the browser...\n'
+  printf 'Press Ctrl+C to exit (setup can continue in the browser).\n\n'
+
+  local prev_state=""
+  local current_state=""
+  local status_json=""
+
+  while true; do
+    status_json="$(curl -fsS "$OORE_DEV_DAEMON_URL/v1/public/setup-status" 2>/dev/null)" || {
+      sleep 5
+      continue
+    }
+
+    current_state="$(echo "$status_json" | sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+
+    if [[ "$current_state" != "$prev_state" ]]; then
+      printf '  Current state: %s\n' "$current_state"
+      prev_state="$current_state"
+    fi
+
+    if echo "$status_json" | grep -q '"is_configured"[[:space:]]*:[[:space:]]*true'; then
+      local instance_id
+      instance_id="$(echo "$status_json" | sed -n 's/.*"instance_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+      printf '\nSetup complete! Instance ID: %s\n' "$instance_id"
+      printf 'Your oore.build dev instance is ready.\n\n'
+      local backend_url="$OORE_DEV_DAEMON_URL"
+      if [[ -n "$OORE_DEV_PUBLIC_TUNNEL_URL" ]]; then
+        backend_url="$OORE_DEV_PUBLIC_TUNNEL_URL"
+      fi
+      printf '  Dashboard:  %s\n' "$OORE_DEV_HOSTED_UI"
+      printf '  API:        %s\n' "$backend_url"
+      printf '  Docs:       https://docs.oore.build\n\n'
+      return 0
+    fi
+
+    sleep 5
   done
 }
 
@@ -268,12 +349,12 @@ print_summary() {
   fi
   if [[ -n "$OORE_DEV_BOOTSTRAP_TOKEN" ]]; then
     log "Bootstrap token: $OORE_DEV_BOOTSTRAP_TOKEN"
-    log "Next: open https://ci.oore.build, add backend URL, and complete setup in UI."
+    local backend_url="$OORE_DEV_DAEMON_URL"
     if [[ -n "$OORE_DEV_PUBLIC_TUNNEL_URL" ]]; then
-      log "Backend URL for hosted UI: $OORE_DEV_PUBLIC_TUNNEL_URL"
-    else
-      log "Backend URL for hosted UI: $OORE_DEV_DAEMON_URL"
+      backend_url="$OORE_DEV_PUBLIC_TUNNEL_URL"
     fi
+    log "Setup UI: ${OORE_DEV_HOSTED_UI}/setup?backend=${backend_url}"
+    log "Backend URL: $backend_url"
   fi
   log "Status endpoint:"
   curl -fsS "$OORE_DEV_DAEMON_URL/v1/public/setup-status" || true
@@ -290,10 +371,16 @@ main() {
   clean_dev_state
   mark_no_spotlight_index
   build_local_binaries
-  start_dev_daemon
   start_cloudflare_tunnel
+  start_dev_daemon
   run_setup_flow
   print_summary
+
+  # Auto-open hosted UI and watch for completion if we generated a token
+  if [[ -n "$OORE_DEV_BOOTSTRAP_TOKEN" ]]; then
+    open_setup_ui || true
+    watch_setup || true
+  fi
 }
 
 main "$@"

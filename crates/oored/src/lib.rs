@@ -39,6 +39,7 @@ use oore_contract::{
     OidcConfigureRequest, OidcConfigureResponse, OidcSecretRecord, OwnerRecord,
     SetupCompleteResponse, SetupOidcStartRequest, SetupOidcStartResponse, SetupOidcVerifyRequest,
     SetupOidcVerifyResponse, SetupSessionRecord, SetupState, SetupStateFile, SetupStatus,
+    SetupSummaryResponse,
 };
 use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
@@ -82,6 +83,8 @@ pub struct AppState {
     pub storage: Arc<RwLock<storage::StorageBackend>>,
     /// In-memory store for short-lived SSE streaming tokens.
     pub stream_tokens: logs::StreamTokenStore,
+    /// Origins allowed for redirect URIs (derived from CORS config at startup).
+    pub allowed_origins: Vec<String>,
 }
 
 // ── Constants ────────────────────────────────────────────────────
@@ -142,8 +145,18 @@ fn should_skip_oidc_discovery(state: &AppState) -> bool {
     }
 }
 
-/// Validate a redirect_uri: must be http://localhost or http://127.0.0.1 (any port).
-pub fn validate_redirect_uri(uri: &str) -> Result<(), (StatusCode, Json<ApiError>)> {
+/// Validate a redirect_uri against the allowed origins list.
+///
+/// Rules:
+/// 1. Must be a valid URL with no embedded credentials.
+/// 2. `http://localhost:{any}` and `http://127.0.0.1:{any}` are always allowed.
+/// 3. Non-localhost URIs must use `https` scheme.
+/// 4. Path must be exactly `/auth/callback` (the single unified callback route).
+/// 5. Origin must appear in `allowed_origins`.
+pub fn validate_redirect_uri(
+    uri: &str,
+    allowed_origins: &[String],
+) -> Result<(), (StatusCode, Json<ApiError>)> {
     let parsed = url::Url::parse(uri).map_err(|_| {
         api_err(
             StatusCode::BAD_REQUEST,
@@ -151,14 +164,6 @@ pub fn validate_redirect_uri(uri: &str) -> Result<(), (StatusCode, Json<ApiError
             "redirect_uri is not a valid URL",
         )
     })?;
-
-    if parsed.scheme() != "http" {
-        return Err(api_err(
-            StatusCode::BAD_REQUEST,
-            "invalid_redirect_uri",
-            "redirect_uri must use http scheme",
-        ));
-    }
 
     // Reject URLs with embedded credentials
     if !parsed.username().is_empty() || parsed.password().is_some() {
@@ -169,14 +174,58 @@ pub fn validate_redirect_uri(uri: &str) -> Result<(), (StatusCode, Json<ApiError
         ));
     }
 
-    match parsed.host_str() {
-        Some("localhost") | Some("127.0.0.1") => Ok(()),
-        _ => Err(api_err(
+    let host = parsed.host_str().unwrap_or("");
+    let is_localhost = host == "localhost" || host == "127.0.0.1";
+
+    // Localhost always allowed with http
+    if is_localhost {
+        if parsed.scheme() != "http" {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                "invalid_redirect_uri",
+                "localhost redirect_uri must use http scheme",
+            ));
+        }
+        // Validate path
+        if parsed.path() != "/auth/callback" {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                "invalid_redirect_uri",
+                "redirect_uri path must be /auth/callback",
+            ));
+        }
+        return Ok(());
+    }
+
+    // Non-localhost: require https
+    if parsed.scheme() != "https" {
+        return Err(api_err(
             StatusCode::BAD_REQUEST,
             "invalid_redirect_uri",
-            "redirect_uri host must be localhost or 127.0.0.1",
-        )),
+            "non-localhost redirect_uri must use https scheme",
+        ));
     }
+
+    // Validate path
+    if parsed.path() != "/auth/callback" {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_redirect_uri",
+            "redirect_uri path must be /auth/callback",
+        ));
+    }
+
+    // Check origin against allowed list
+    let origin = parsed.origin().ascii_serialization();
+    if !allowed_origins.iter().any(|o| o == &origin) {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_redirect_uri",
+            "redirect_uri origin is not in the allowed origins list",
+        ));
+    }
+
+    Ok(())
 }
 
 /// Validate the setup session token against the current state file.
@@ -531,7 +580,7 @@ async fn setup_oidc_start(
     Json(req): Json<SetupOidcStartRequest>,
 ) -> ApiResult<SetupOidcStartResponse> {
     // H5: Validate redirect_uri
-    validate_redirect_uri(&req.redirect_uri)?;
+    validate_redirect_uri(&req.redirect_uri, &state.allowed_origins)?;
 
     // Validate setup session and state
     {
@@ -1046,6 +1095,44 @@ async fn complete_setup(
     }))
 }
 
+/// `GET /v1/setup/summary`
+///
+/// Returns a summary of the current setup configuration including issuer URL
+/// and owner email. Session-gated — requires a valid setup session token.
+async fn setup_summary(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResult<SetupSummaryResponse> {
+    let store = state.store.lock().await;
+    let mut sf = store.load().await.map_err(|e| {
+        error!(error = %e, "failed to load setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to load setup state",
+        )
+    })?;
+
+    validate_session(&mut sf, &headers)?;
+
+    // Persist the bumped session expiry
+    store.save(&sf).await.map_err(|e| {
+        error!(error = %e, "failed to save setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save setup state",
+        )
+    })?;
+
+    Ok(Json(SetupSummaryResponse {
+        instance_id: sf.instance_id,
+        state: sf.setup_state,
+        issuer_url: sf.oidc_config.as_ref().map(|c| c.issuer_url.clone()),
+        owner_email: sf.owner.as_ref().map(|o| o.email.clone()),
+    }))
+}
+
 // ── Router builder ──────────────────────────────────────────────
 
 /// Build the Axum router with all setup and auth endpoints, given a `SetupStore`,
@@ -1099,6 +1186,19 @@ async fn build_router_inner(
     // Initialize artifact storage backend from DB settings (or env fallback).
     let storage_backend = storage::load_backend(store.pool(), &encryption_key).await;
 
+    // CORS origins from env var(s), defaults to local web + hosted UI.
+    // Resolved before AppState so we can derive allowed_origins for redirect URI validation.
+    let cors_origins = resolve_cors_origins();
+    let allowed_origins: Vec<String> = cors_origins
+        .iter()
+        .filter_map(|hv| hv.to_str().ok().map(|s| s.to_string()))
+        .collect();
+    info!(origins = ?cors_origins, "configured CORS origins");
+    info!(
+        max_bytes = artifacts::MAX_LOCAL_UPLOAD_BYTES,
+        "configured local artifact upload size limit"
+    );
+
     let shared_state = Arc::new(AppState {
         store: Mutex::new(store),
         sessions: session_store,
@@ -1111,6 +1211,7 @@ async fn build_router_inner(
         scheduler: sched.clone(),
         storage: Arc::new(RwLock::new(storage_backend)),
         stream_tokens: logs::StreamTokenStore::new(),
+        allowed_origins,
     });
 
     // Start background tasks (lease timeout, build timeout, heartbeat monitor)
@@ -1119,14 +1220,6 @@ async fn build_router_inner(
         let pool = store_guard.pool().clone();
         background::start_background_tasks(pool, sched);
     }
-
-    // CORS origins from env var(s), defaults to local web + hosted UI.
-    let cors_origins = resolve_cors_origins();
-    info!(origins = ?cors_origins, "configured CORS origins");
-    info!(
-        max_bytes = artifacts::MAX_LOCAL_UPLOAD_BYTES,
-        "configured local artifact upload size limit"
-    );
 
     let cors = CorsLayer::new()
         .allow_origin(cors_origins)
@@ -1188,6 +1281,7 @@ async fn build_router_inner(
         .route("/v1/setup/owner/start-oidc", post(setup_oidc_start))
         .route("/v1/setup/owner/verify-oidc", post(setup_oidc_verify))
         .route("/v1/setup/complete", post(complete_setup))
+        .route("/v1/setup/summary", get(setup_summary))
         // Auth endpoints (only functional when setup_state == Ready)
         .route("/v1/auth/oidc/start", get(auth::oidc_start))
         .route("/v1/auth/oidc/callback", post(auth::oidc_callback))

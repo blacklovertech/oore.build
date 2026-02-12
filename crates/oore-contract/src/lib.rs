@@ -139,6 +139,16 @@ pub struct SetupCompleteResponse {
     pub instance_id: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetupSummaryResponse {
+    pub instance_id: String,
+    pub state: SetupState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issuer_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_email: Option<String>,
+}
+
 // ── Structured API error ────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

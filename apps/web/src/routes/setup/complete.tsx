@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { useCompleteSetup, useSetupStatus } from '@/hooks/use-setup'
+import { useCompleteSetup, useSetupSummary, useSetupStatus } from '@/hooks/use-setup'
 import { useSetupStore } from '@/stores/setup-store'
 import { getApiErrorMessage } from '@/lib/api'
 import { webPageTitle } from '@/lib/seo'
@@ -37,6 +37,7 @@ function CompleteStep() {
   const setCurrentStep = useSetupStore((s) => s.setCurrentStep)
   const completeMutation = useCompleteSetup()
   const { data: status } = useSetupStatus()
+  const { data: summary } = useSetupSummary()
 
   const errorMessage = completeMutation.error
     ? getApiErrorMessage(completeMutation.error, {
@@ -108,7 +109,7 @@ function CompleteStep() {
       ) : (
         <div className="space-y-4">
           {/* Configuration review */}
-          {status ? (
+          {(status || summary) ? (
             <div className="border p-3 space-y-2 text-sm">
               <p className="font-medium text-xs uppercase tracking-wider text-muted-foreground">
                 Configuration Summary
@@ -116,15 +117,31 @@ function CompleteStep() {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">State</span>
                 <Badge variant="secondary" className="text-xs">
-                  {status.state}
+                  {status?.state ?? summary?.state}
                 </Badge>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Instance</span>
-                <code className="text-xs">
-                  {status.instance_id.slice(0, 8)}...
+                <code className="text-xs font-mono">
+                  {summary?.instance_id ?? status?.instance_id}
                 </code>
               </div>
+              {summary?.issuer_url ? (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground shrink-0">OIDC Issuer</span>
+                  <code className="text-xs font-mono truncate">
+                    {summary.issuer_url}
+                  </code>
+                </div>
+              ) : null}
+              {summary?.owner_email ? (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Owner</span>
+                  <span className="text-xs">
+                    {summary.owner_email}
+                  </span>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

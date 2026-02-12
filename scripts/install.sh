@@ -7,15 +7,28 @@ OORE_RELEASE_BASE_URL="${OORE_RELEASE_BASE_URL:-https://dl.oore.build/releases}"
 OORE_RELEASE_MANIFEST_URL="${OORE_RELEASE_MANIFEST_URL:-$OORE_RELEASE_BASE_URL/latest.json}"
 OORE_NONINTERACTIVE="${OORE_NONINTERACTIVE:-0}"
 OORE_START_DAEMON="${OORE_START_DAEMON:-}"
+OORE_HOSTED_UI="${OORE_HOSTED_UI:-https://ci.oore.build}"
 
 BIN_DIR="$OORE_INSTALL_ROOT/bin"
 LOG_DIR="$OORE_INSTALL_ROOT/logs"
 DAEMON_LOG="$LOG_DIR/oored.log"
 DAEMON_PID_FILE="$OORE_INSTALL_ROOT/oored.pid"
+DAEMON_URL="http://127.0.0.1:8787"
 RELEASE_TAG=""
 RELEASE_VERSION=""
 RELEASE_ARCH=""
 TMP_DIR=""
+CURRENT_STEP=0
+TOTAL_STEPS=5
+
+step() {
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  printf '[%d/%d] %-28s' "$CURRENT_STEP" "$TOTAL_STEPS" "$1"
+}
+
+step_done() {
+  printf '%s\n' "$1"
+}
 
 log() {
   printf '[oore-install] %s\n' "$*"
@@ -224,14 +237,74 @@ start_daemon() {
   return 1
 }
 
+is_already_configured() {
+  local status_json
+  status_json="$(curl -fsS "$DAEMON_URL/v1/public/setup-status" 2>/dev/null)" || return 1
+  # Check if is_configured is true in the JSON response
+  echo "$status_json" | grep -q '"is_configured"[[:space:]]*:[[:space:]]*true'
+}
+
 generate_setup_token() {
-  if ! curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
+  if ! curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
     log "Daemon is not healthy. Skipping token generation. Check logs: $DAEMON_LOG"
     return 1
   fi
 
+  # Skip if instance is already configured (reinstall/upgrade)
+  if is_already_configured; then
+    log "Instance is already configured. Skipping token generation."
+    return 0
+  fi
+
   "$BIN_DIR/oore" setup open --ttl 15m \
     || die "Failed to generate setup token. Check daemon logs: $DAEMON_LOG"
+}
+
+open_setup_ui() {
+  if ! have_cmd open; then
+    log 'Cannot auto-open browser because the `open` command is unavailable.'
+    return 1
+  fi
+  local setup_url="${OORE_HOSTED_UI}/setup?backend=${DAEMON_URL}"
+  open "$setup_url" >/dev/null 2>&1 || true
+  return 0
+}
+
+watch_setup() {
+  printf '\nWaiting for setup to complete in the browser...\n'
+
+  local prev_state=""
+  local current_state=""
+  local status_json=""
+
+  while true; do
+    status_json="$(curl -fsS "$DAEMON_URL/v1/public/setup-status" 2>/dev/null)" || {
+      sleep 5
+      continue
+    }
+
+    current_state="$(echo "$status_json" | sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+
+    if [[ "$current_state" != "$prev_state" ]]; then
+      printf '  Current state: %s\n' "$current_state"
+      prev_state="$current_state"
+    fi
+
+    # Check if setup is complete
+    if echo "$status_json" | grep -q '"is_configured"[[:space:]]*:[[:space:]]*true'; then
+      local instance_id
+      instance_id="$(echo "$status_json" | sed -n 's/.*"instance_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+      printf '\n'
+      printf 'Setup complete! Instance ID: %s\n' "$instance_id"
+      printf 'Your oore.build instance is ready.\n\n'
+      printf '  Dashboard:  %s\n' "$OORE_HOSTED_UI"
+      printf '  API:        %s\n' "$DAEMON_URL"
+      printf '  Docs:       https://docs.oore.build\n\n'
+      return 0
+    fi
+
+    sleep 5
+  done
 }
 
 open_links() {
@@ -239,7 +312,7 @@ open_links() {
     log 'Cannot auto-open links because the `open` command is unavailable.'
     return 1
   fi
-  open 'https://ci.oore.build' >/dev/null 2>&1 || true
+  open "$OORE_HOSTED_UI" >/dev/null 2>&1 || true
   open 'https://docs.oore.build' >/dev/null 2>&1 || true
   return 0
 }
@@ -303,39 +376,71 @@ main() {
   ensure_dependency uname
   ensure_dependency mktemp
 
+  # Step 1: Detect platform
+  step "Detecting platform..."
   detect_arch
-  TMP_DIR="$(mktemp -d)"
-  resolve_release_tag
-  download_release_assets
-  verify_archive_checksum
-  install_binaries
+  step_done "macOS $RELEASE_ARCH"
 
-  log "Installed oored and oore from $RELEASE_TAG into $BIN_DIR."
-  log "Installed VERSION: $(cat "$OORE_INSTALL_ROOT/VERSION")"
+  TMP_DIR="$(mktemp -d)"
+
+  # Step 2: Download
+  resolve_release_tag
+  step "Downloading $RELEASE_TAG..."
+  download_release_assets
+  step_done "oore_${RELEASE_VERSION}_darwin_${RELEASE_ARCH}.tar.gz"
+
+  # Step 3: Verify checksum
+  step "Verifying checksum..."
+  verify_archive_checksum
+  step_done "SHA-256 verified"
+
+  # Step 4: Install binaries
+  step "Installing binaries..."
+  install_binaries
+  step_done "$BIN_DIR/{oored,oore}"
 
   if is_noninteractive; then
+    # Step 5: Non-interactive daemon handling
     if [[ -n "$OORE_START_DAEMON" ]]; then
       if normalize_bool "$OORE_START_DAEMON"; then
+        step "Starting daemon..."
         start_daemon || die "Daemon startup failed. Check logs: $DAEMON_LOG"
+        step_done "$DAEMON_URL (healthy)"
       else
         if [[ "$?" -eq 2 ]]; then
           die 'OORE_START_DAEMON must be one of: true,false,1,0,yes,no,on,off.'
         fi
-        log 'Skipping daemon startup (OORE_START_DAEMON=false).'
+        step "Starting daemon..."
+        step_done "skipped (OORE_START_DAEMON=false)"
       fi
     else
-      log 'Skipping daemon startup (non-interactive mode default).'
+      step "Starting daemon..."
+      step_done "skipped (non-interactive default)"
     fi
   else
-    if prompt_yes_no 'Start oored now?' 'y'; then
-      start_daemon || log "Daemon startup failed. Check logs: $DAEMON_LOG"
-      if prompt_yes_no 'Generate setup token now?' 'y'; then
-        generate_setup_token || true
-      fi
-    fi
+    # Step 5: Interactive — auto-start daemon
+    step "Starting daemon..."
+    if start_daemon; then
+      step_done "$DAEMON_URL (healthy)"
 
-    if prompt_yes_no 'Open ci.oore.build and docs.oore.build in your browser?' 'y'; then
-      open_links || true
+      # Auto-generate bootstrap token if not already configured
+      if ! is_already_configured; then
+        printf '\n'
+        generate_setup_token || true
+
+        printf '\nPress Ctrl+C to exit (setup can continue in the browser).\n'
+
+        # Open hosted UI with pre-filled backend URL
+        open_setup_ui || true
+
+        # Watch for setup completion
+        watch_setup || true
+      else
+        printf '\n'
+        log "Instance is already configured."
+      fi
+    else
+      step_done "failed (check $DAEMON_LOG)"
     fi
   fi
 

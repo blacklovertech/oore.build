@@ -71,6 +71,13 @@ export interface SetupCompleteResponse {
   instance_id: string
 }
 
+export interface SetupSummaryResponse {
+  instance_id: string
+  state: SetupState
+  issuer_url?: string
+  owner_email?: string
+}
+
 // ── Auth response types ─────────────────────────────────────────
 
 export interface AuthenticatedUser {

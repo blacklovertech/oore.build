@@ -1,13 +1,8 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useCallback, useEffect, useRef } from 'react'
-import { z } from 'zod'
+import { useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import {
-  useSetupOidcStart,
-  useSetupOidcVerify,
-  useSetupStatus,
-} from '@/hooks/use-setup'
+import { useSetupOidcStart, useSetupStatus } from '@/hooks/use-setup'
 import { useSetupStore } from '@/stores/setup-store'
 import { ApiClientError } from '@/lib/api'
 import {
@@ -16,13 +11,7 @@ import {
 } from '@/lib/instance-context'
 import { webPageTitle } from '@/lib/seo'
 
-const ownerSearchSchema = z.object({
-  code: z.string().optional(),
-  state: z.string().optional(),
-})
-
 export const Route = createFileRoute('/setup/owner')({
-  validateSearch: ownerSearchSchema,
   beforeLoad: () => {
     const instance = getActiveInstanceOrRedirect()
     requireSetupSessionOrRedirect(instance.id)
@@ -62,17 +51,13 @@ function getErrorMessage(error: Error | null): string | null {
 }
 
 function OwnerStep() {
-  const { code, state: oidcState } = Route.useSearch()
   const navigate = useNavigate()
   const sessionToken = useSetupStore((s) => s.sessionToken)
   const setCurrentStep = useSetupStore((s) => s.setCurrentStep)
   const startMutation = useSetupOidcStart()
-  const verifyMutation = useSetupOidcVerify()
   const { data: status } = useSetupStatus()
 
-  const errorMessage =
-    getErrorMessage(startMutation.error) ??
-    getErrorMessage(verifyMutation.error)
+  const errorMessage = getErrorMessage(startMutation.error)
 
   useEffect(() => {
     document.title = webPageTitle('Setup Owner')
@@ -82,30 +67,9 @@ function OwnerStep() {
     setCurrentStep(2)
   }, [setCurrentStep])
 
-  // Guard against double-firing the verify mutation.
-  const verifyAttempted = useRef(false)
-
-  // Fire the verify request when we have code+state from the OIDC redirect.
-  // The mutation response may or may not arrive (the full-page redirect to
-  // the IdP and back can cause the fetch to behave unreliably). Navigation
-  // is handled separately via setup-status polling below.
-  useEffect(() => {
-    if (code && oidcState && sessionToken && !verifyAttempted.current) {
-      verifyAttempted.current = true
-      verifyMutation.mutate(
-        { sessionToken, code, state: oidcState },
-        {
-          onError: () => {
-            verifyAttempted.current = false
-          },
-        },
-      )
-    }
-  }, [code, oidcState, sessionToken])
-
-  // Navigate based on backend state, not mutation response. The setup-status
-  // query polls every 3 seconds. Once the backend transitions to owner_created
-  // (whether we got the mutation response or not), we move forward.
+  // Navigate based on backend state. The setup-status query polls every 3s.
+  // Once the backend transitions to owner_created (whether from the unified
+  // callback or any other path), we move forward.
   useEffect(() => {
     if (status?.state === 'owner_created') {
       setCurrentStep(3)
@@ -116,15 +80,17 @@ function OwnerStep() {
   const handleStartOidc = useCallback(() => {
     if (!sessionToken) return
 
-    // The redirect URI is the current page so the OIDC provider redirects back here
-    const redirectUri = `${window.location.origin}/setup/owner`
+    // Use the unified callback URI
+    const redirectUri = `${window.location.origin}/auth/callback`
     startMutation.mutate(
       { sessionToken, redirectUri },
       {
         onSuccess: (data) => {
-          // Store the OIDC state in sessionStorage so we can restore if needed
+          // Store context so the unified callback knows this is a setup flow
           try {
             sessionStorage.setItem('oore_oidc_state', data.state)
+            sessionStorage.setItem('oore_oidc_flow', 'setup_owner')
+            sessionStorage.setItem('oore_setup_session_token', sessionToken)
           } catch {
             // ignore
           }
@@ -134,33 +100,6 @@ function OwnerStep() {
       },
     )
   }, [sessionToken])
-
-  // Show verifying state while processing the callback
-  if (code && oidcState) {
-    return (
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="text-lg font-medium">Owner Account</h2>
-          <p className="text-sm text-muted-foreground">
-            Verifying your identity with the OIDC provider...
-          </p>
-        </div>
-
-        {errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Authentication failed</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        {verifyMutation.isError ? (
-          <Button onClick={handleStartOidc} className="w-full">
-            Try Again
-          </Button>
-        ) : null}
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-4">

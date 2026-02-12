@@ -28,11 +28,11 @@ Go to the **Settings** tab and set:
 
 | Field | Value |
 |---|---|
-| **Allowed Callback URLs** | `http://localhost:3000/auth/callback, http://localhost:3000/setup/owner/callback` |
+| **Allowed Callback URLs** | `http://localhost:3000/auth/callback, https://ci.oore.build/auth/callback` |
 | **Allowed Logout URLs** | `http://localhost:3000` |
 | **Allowed Web Origins** | `http://localhost:3000` |
 
-For production, add your custom domain URLs as well.
+Both setup and regular sign-in use the same `/auth/callback` path — you only need one URI per origin. For a custom domain, replace the hosted UI URI with yours.
 
 Click **Save Changes**.
 

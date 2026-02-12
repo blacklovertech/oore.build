@@ -4,6 +4,7 @@ import {
   completeSetup,
   configureOidc,
   getSetupStatus,
+  getSetupSummary,
   setupOidcStart,
   setupOidcVerify,
   verifyBootstrapToken,
@@ -105,6 +106,17 @@ export function useSetupOidcVerify() {
       }
       void queryClient.invalidateQueries({ queryKey })
     },
+  })
+}
+
+export function useSetupSummary() {
+  const instance = useActiveInstance()
+  const sessionToken = useSetupStore((s) => s.sessionToken)
+
+  return useQuery({
+    queryKey: [instance?.id ?? '__none__', 'setup-summary'] as const,
+    queryFn: () => getSetupSummary(requireInstance(instance), sessionToken!),
+    enabled: !!instance && !!sessionToken,
   })
 }
 

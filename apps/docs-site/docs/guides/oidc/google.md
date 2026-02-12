@@ -32,14 +32,10 @@ This guide walks you through creating a Google OAuth 2.0 application and connect
 
    ```
    http://localhost:3000/auth/callback
-   http://localhost:3000/setup/owner/callback
-   ```
-
-   For production, also add your custom domain:
-
-   ```
    https://ci.oore.build/auth/callback
    ```
+
+   Both setup and regular sign-in use the same `/auth/callback` path, so you only need one URI per origin.
 
    ::: tip
    If you plan to use the CLI for setup, you'll also need to add the loopback URI shown by the CLI (e.g., `http://localhost:52341`). The CLI displays this before opening the browser.

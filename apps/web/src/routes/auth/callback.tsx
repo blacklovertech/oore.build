@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import type { OidcCallbackResponse } from '@/lib/types'
+import { setupOidcVerify } from '@/lib/api'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -16,6 +17,8 @@ function cleanupOidcSessionStorage() {
   try {
     sessionStorage.removeItem('oore_oidc_state')
     sessionStorage.removeItem('oore_oidc_instance')
+    sessionStorage.removeItem('oore_oidc_flow')
+    sessionStorage.removeItem('oore_setup_session_token')
   } catch {
     // ignore
   }
@@ -33,8 +36,6 @@ function AuthCallbackPage() {
 
   useEffect(() => {
     // Guard against React StrictMode double-execution.
-    // The backend consumes the OIDC state on first use, so a second
-    // request with the same state would fail with a CSRF error.
     if (exchangeStartedRef.current) return
     exchangeStartedRef.current = true
 
@@ -47,12 +48,16 @@ function AuthCallbackPage() {
       return
     }
 
-    // Retrieve stored OIDC state
+    // Retrieve stored OIDC context
     let storedState: string | null = null
     let instanceId: string | null = null
+    let flow: string | null = null
+    let setupSessionToken: string | null = null
     try {
       storedState = sessionStorage.getItem('oore_oidc_state')
       instanceId = sessionStorage.getItem('oore_oidc_instance')
+      flow = sessionStorage.getItem('oore_oidc_flow')
+      setupSessionToken = sessionStorage.getItem('oore_setup_session_token')
     } catch {
       // sessionStorage unavailable
     }
@@ -63,20 +68,68 @@ function AuthCallbackPage() {
       return
     }
 
-    // Resolve the instance URL
-    const instances = useInstanceStore.getState().instances
+    // Route based on flow type
+    if (flow === 'setup_owner') {
+      handleSetupOwnerFlow(code, state, setupSessionToken)
+    } else {
+      handleAuthFlow(code, state, instanceId)
+    }
+  }, [navigate, setAuth])
 
+  function handleSetupOwnerFlow(
+    code: string,
+    state: string,
+    setupSessionToken: string | null,
+  ) {
+    if (!setupSessionToken) {
+      cleanupOidcSessionStorage()
+      setError('Missing setup session token. Please restart the setup process.')
+      return
+    }
+
+    // Get the active instance URL for the API call
+    const activeId = useInstanceStore.getState().activeInstanceId
+    const instances = useInstanceStore.getState().instances
+    const instance = activeId ? instances[activeId] : undefined
+
+    if (!instance) {
+      cleanupOidcSessionStorage()
+      setError('Could not find the active instance. Please restart setup.')
+      return
+    }
+
+    // POST to verify-oidc with the setup session token
+    setupOidcVerify(instance.url, setupSessionToken, code, state)
+      .then(() => {
+        cleanupOidcSessionStorage()
+        void navigate({ to: '/setup/complete' })
+      })
+      .catch((e: unknown) => {
+        cleanupOidcSessionStorage()
+        setError(
+          e instanceof Error ? e.message : 'Setup owner verification failed',
+        )
+      })
+  }
+
+  function handleAuthFlow(
+    code: string,
+    state: string,
+    instanceId: string | null,
+  ) {
+    const instances = useInstanceStore.getState().instances
     const instance = instanceId ? instances[instanceId] : undefined
+
     if (!instance) {
       cleanupOidcSessionStorage()
       setError('Could not find the instance you were logging into.')
       return
     }
 
-    // Sync auth store context before storing the token
+    // Sync auth store context
     useAuthStore.getState().setInstanceContext(instance.id)
 
-    // Exchange code for token via POST (keeps auth code out of URL/logs)
+    // Exchange code for token via POST
     const callbackUrl = `${instance.url}/v1/auth/oidc/callback`
 
     fetch(callbackUrl, {
@@ -98,7 +151,6 @@ function AuthCallbackPage() {
           throw new Error('Incomplete user profile received from server')
         }
 
-        // Store auth token
         setAuth(data.session_token, data.expires_at, {
           email: data.user.email,
           oidc_subject: data.user.oidc_subject,
@@ -114,7 +166,7 @@ function AuthCallbackPage() {
         cleanupOidcSessionStorage()
         setError(e instanceof Error ? e.message : 'Authentication failed')
       })
-  }, [navigate, setAuth])
+  }
 
   if (error) {
     return (

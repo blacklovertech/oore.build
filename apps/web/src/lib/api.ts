@@ -46,6 +46,7 @@ import type {
   SetupOidcStartResponse,
   SetupOidcVerifyResponse,
   SetupStatus,
+  SetupSummaryResponse,
   SyncInstallationsResponse,
   UpdateArtifactStorageSettingsRequest,
   UpdateInstancePreferencesRequest,
@@ -88,12 +89,19 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const method = (options.method ?? 'GET').toUpperCase()
+  // Only set Content-Type on requests with a body. GET/HEAD without it
+  // avoids triggering CORS preflight (important for tunneled backends).
+  const headers: Record<string, string> = {
+    ...(method !== 'GET' && method !== 'HEAD'
+      ? { 'Content-Type': 'application/json' }
+      : {}),
+    ...(options.headers as Record<string, string>),
+  }
+
   const res = await fetch(`${baseUrl}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   })
 
   if (!res.ok) {
@@ -202,6 +210,15 @@ export function completeSetup(
 ): Promise<SetupCompleteResponse> {
   return request<SetupCompleteResponse>(baseUrl, '/v1/setup/complete', {
     method: 'POST',
+    headers: authHeaders(sessionToken),
+  })
+}
+
+export function getSetupSummary(
+  baseUrl: string,
+  sessionToken: string,
+): Promise<SetupSummaryResponse> {
+  return request<SetupSummaryResponse>(baseUrl, '/v1/setup/summary', {
     headers: authHeaders(sessionToken),
   })
 }

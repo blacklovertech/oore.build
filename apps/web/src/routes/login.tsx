@@ -95,6 +95,7 @@ function LoginPage() {
       try {
         sessionStorage.setItem('oore_oidc_state', data.state)
         sessionStorage.setItem('oore_oidc_instance', instance.id)
+        sessionStorage.setItem('oore_oidc_flow', 'auth')
       } catch {
         // sessionStorage unavailable
       }

@@ -40,13 +40,19 @@ When creating your OAuth application, add these redirect URIs:
 
 | Context | Redirect URI |
 |---|---|
-| Web UI (development) | `http://localhost:3000/auth/callback` |
-| Web UI (production) | `https://ci.oore.build/auth/callback` (or your custom domain) |
-| CLI setup (loopback) | `http://localhost:*` (the CLI uses a random port) |
-| Setup wizard | `http://localhost:3000/setup/owner/callback` |
+| Hosted UI (ci.oore.build) | `https://ci.oore.build/auth/callback` |
+| Local dev UI | `http://localhost:3000/auth/callback` |
+| Custom domain | `https://your-domain.com/auth/callback` |
+| CLI loopback | `http://localhost:*` (dynamic port shown by CLI) |
 
 ::: tip
+Both setup and regular sign-in use the same `/auth/callback` path. You only need one redirect URI per origin.
+
 Some providers don't support wildcard ports. In that case, the CLI will display the exact `http://localhost:<port>` URI before opening the browser — add it to your allowed redirect URIs at that point.
+:::
+
+::: tip
+The setup wizard displays the exact redirect URI to configure based on how you access the UI.
 :::
 
 ## Provider guides
@@ -56,10 +62,10 @@ Follow the guide for your identity provider:
 | Provider | Guide |
 |---|---|
 | Google Workspace / Cloud Identity | [Google OIDC setup](/guides/oidc/google) |
-| Okta | Coming in Wave 4 |
-| Azure AD / Entra ID | Coming in Wave 4 |
-| Auth0 | Coming in Wave 4 |
-| Keycloak | Coming in Wave 4 |
+| Okta | [Okta OIDC setup](/guides/oidc/okta) |
+| Azure AD / Entra ID | [Azure AD OIDC setup](/guides/oidc/azure-ad) |
+| Auth0 | [Auth0 OIDC setup](/guides/oidc/auth0) |
+| Keycloak | [Keycloak OIDC setup](/guides/oidc/keycloak) |
 
 Any provider that supports [OpenID Connect Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html) will work. If your provider isn't listed above, use the general configuration steps:
 
