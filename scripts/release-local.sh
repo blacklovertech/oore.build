@@ -79,7 +79,7 @@ resolve_rust_toolchain() {
   [[ -n "$RUST_TOOLCHAIN" ]] || die "Unable to determine active Rust toolchain."
 
   RUST_HOST_TARGET="$(
-    rustup run "$RUST_TOOLCHAIN" rustc -vV | awk -F': ' '/^host: / {print $2; exit}'
+    rustup run "$RUST_TOOLCHAIN" rustc -vV | awk -F': ' '/^host: / {print $2}'
   )"
   [[ -n "$RUST_HOST_TARGET" ]] || die "Unable to determine Rust host target for toolchain '$RUST_TOOLCHAIN'."
 
@@ -118,6 +118,7 @@ repair_rust_target() {
 ensure_rust_target_usable() {
   local target="$1"
   local target_libdir=""
+  local core_rlib=""
 
   target_libdir="$(
     rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
@@ -134,7 +135,8 @@ ensure_rust_target_usable() {
     die "Rust target '$target' still unusable after repair (missing target libdir)."
   fi
 
-  if ! find "$target_libdir" -maxdepth 1 -name 'libcore-*.rlib' | grep -q .; then
+  core_rlib="$(find "$target_libdir" -maxdepth 1 -name 'libcore-*.rlib' -print -quit)"
+  if [[ -z "$core_rlib" ]]; then
     repair_rust_target "$target"
     target_libdir="$(
       rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
@@ -144,7 +146,8 @@ ensure_rust_target_usable() {
   if [[ -z "$target_libdir" || ! -d "$target_libdir" ]]; then
     die "Rust target '$target' still unusable after repair (missing target libdir)."
   fi
-  if ! find "$target_libdir" -maxdepth 1 -name 'libcore-*.rlib' | grep -q .; then
+  core_rlib="$(find "$target_libdir" -maxdepth 1 -name 'libcore-*.rlib' -print -quit)"
+  if [[ -z "$core_rlib" ]]; then
     die "Rust target '$target' appears broken for toolchain '$RUST_TOOLCHAIN' (libcore not found in $target_libdir)."
   fi
 }
