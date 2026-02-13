@@ -16,6 +16,8 @@ TMP_DIR=""
 WORKTREE_DIR=""
 RELEASE_TAG=""
 RELEASE_VERSION=""
+RUST_TOOLCHAIN=""
+RUST_HOST_TARGET=""
 
 log() {
   printf '[release-local] %s\n' "$*"
@@ -55,7 +57,7 @@ cleanup() {
 
 ensure_dependencies() {
   local dep
-  for dep in git cargo rustup tar shasum mktemp date bun curl unzip; do
+  for dep in git rustup tar shasum mktemp date bun curl unzip; do
     have_cmd "$dep" || die "$dep is required."
   done
 
@@ -69,23 +71,82 @@ ensure_dependencies() {
   fi
 }
 
-ensure_rust_target_installed() {
-  local target="$1"
-  local toolchain=""
-
-  toolchain="$(
+resolve_rust_toolchain() {
+  RUST_TOOLCHAIN="$(
     cd "$WORKTREE_DIR"
     rustup show active-toolchain | awk '{print $1}'
   )"
-  [[ -n "$toolchain" ]] || die "Unable to determine active Rust toolchain."
+  [[ -n "$RUST_TOOLCHAIN" ]] || die "Unable to determine active Rust toolchain."
 
-  if rustup target list --toolchain "$toolchain" --installed | grep -Fxq "$target"; then
+  RUST_HOST_TARGET="$(
+    rustup run "$RUST_TOOLCHAIN" rustc -vV | awk -F': ' '/^host: / {print $2; exit}'
+  )"
+  [[ -n "$RUST_HOST_TARGET" ]] || die "Unable to determine Rust host target for toolchain '$RUST_TOOLCHAIN'."
+
+  log "Using Rust toolchain: $RUST_TOOLCHAIN"
+  log "Using rustup cargo: $(rustup which --toolchain "$RUST_TOOLCHAIN" cargo)"
+  log "Using rustup rustc: $(rustup which --toolchain "$RUST_TOOLCHAIN" rustc)"
+  log "Rust host target: $RUST_HOST_TARGET"
+  if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
+    log "Ignoring CARGO_BUILD_TARGET override from environment: $CARGO_BUILD_TARGET"
+  fi
+}
+
+ensure_rust_target_installed() {
+  local target="$1"
+  [[ -n "$RUST_TOOLCHAIN" ]] || die "Rust toolchain is not resolved."
+
+  if rustup target list --toolchain "$RUST_TOOLCHAIN" --installed | grep -Fxq "$target"; then
     return 0
   fi
 
-  log "Installing missing Rust target '$target' for toolchain '$toolchain'..."
-  rustup target add "$target" --toolchain "$toolchain" \
-    || die "Failed to install Rust target '$target' for toolchain '$toolchain'."
+  log "Installing missing Rust target '$target' for toolchain '$RUST_TOOLCHAIN'..."
+  rustup target add "$target" --toolchain "$RUST_TOOLCHAIN" \
+    || die "Failed to install Rust target '$target' for toolchain '$RUST_TOOLCHAIN'."
+}
+
+repair_rust_target() {
+  local target="$1"
+  [[ -n "$RUST_TOOLCHAIN" ]] || die "Rust toolchain is not resolved."
+
+  log "Repairing Rust target '$target' for toolchain '$RUST_TOOLCHAIN'..."
+  rustup target remove "$target" --toolchain "$RUST_TOOLCHAIN" >/dev/null 2>&1 || true
+  rustup target add "$target" --toolchain "$RUST_TOOLCHAIN" \
+    || die "Failed to repair Rust target '$target' for toolchain '$RUST_TOOLCHAIN'."
+}
+
+ensure_rust_target_usable() {
+  local target="$1"
+  local target_libdir=""
+
+  target_libdir="$(
+    rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
+  )"
+
+  if [[ -z "$target_libdir" || ! -d "$target_libdir" ]]; then
+    repair_rust_target "$target"
+    target_libdir="$(
+      rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
+    )"
+  fi
+
+  if [[ -z "$target_libdir" || ! -d "$target_libdir" ]]; then
+    die "Rust target '$target' still unusable after repair (missing target libdir)."
+  fi
+
+  if ! find "$target_libdir" -maxdepth 1 -name 'libcore-*.rlib' | grep -q .; then
+    repair_rust_target "$target"
+    target_libdir="$(
+      rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
+    )"
+  fi
+
+  if [[ -z "$target_libdir" || ! -d "$target_libdir" ]]; then
+    die "Rust target '$target' still unusable after repair (missing target libdir)."
+  fi
+  if ! find "$target_libdir" -maxdepth 1 -name 'libcore-*.rlib' | grep -q .; then
+    die "Rust target '$target' appears broken for toolchain '$RUST_TOOLCHAIN' (libcore not found in $target_libdir)."
+  fi
 }
 
 resolve_bun_version() {
@@ -193,13 +254,17 @@ ensure_tag_matches_workspace_version() {
 }
 
 build_binaries() {
+  resolve_rust_toolchain
+  ensure_rust_target_installed "$RUST_HOST_TARGET"
+  ensure_rust_target_usable "$RUST_HOST_TARGET"
   ensure_rust_target_installed "x86_64-apple-darwin"
+  ensure_rust_target_usable "x86_64-apple-darwin"
 
   log "Building release binaries for $RELEASE_TAG..."
   (
     cd "$WORKTREE_DIR"
-    cargo build --release -p oored -p oore
-    cargo build --release --target x86_64-apple-darwin -p oored -p oore
+    env -u CARGO_BUILD_TARGET rustup run "$RUST_TOOLCHAIN" cargo build --release --target "$RUST_HOST_TARGET" -p oored -p oore
+    env -u CARGO_BUILD_TARGET rustup run "$RUST_TOOLCHAIN" cargo build --release --target x86_64-apple-darwin -p oored -p oore
   )
 }
 
