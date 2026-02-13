@@ -30,7 +30,8 @@
     "react-dom": "^19.2.0",
     "shadcn": "^3.8.3",
     "tailwind-merge": "^3.4.0",
-    "tailwindcss": "^4.0.6"
+    "tailwindcss": "^4.0.6",
+    "vitepress-openapi": "^0.1.14"
   },
   "devDependencies": {
     "@tanstack/devtools-vite": "^0.3.11",

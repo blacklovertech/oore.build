@@ -34,6 +34,7 @@ All common commands have `make` targets. Use `make <target>` from the repo root.
 | `make run-cli` | Run oore setup token --ttl 15m |
 | `make docs-check` | Validate feature docs against template |
 | `make ui-init` | Re-initialize shadcn from shared preset |
+| `make gen-openapi` | Regenerate OpenAPI spec into docs site |
 | `make build` | build-web + build-docs + cargo-check |
 | `make check` | lint-web + cargo-check |
 | `make validate` | Full pre-handoff validation (docs-check + builds + cargo-check) |
@@ -107,6 +108,7 @@ When adding new build scripts, test commands, or tooling workflows, add a corres
 - shadcn uses Base UI primitives (not Radix)
 - Every user-facing feature requires a doc in `docs/features/` following `docs/templates/feature-doc-template.md`
 - Changing a finalized decision requires: ADR + contract update + feature doc update
+- **Any endpoint change (create/update/remove) in `crates/oored` must include an update to the OpenAPI spec** — update `crates/oored/src/bin/openapi_export.rs`, run `make gen-openapi`, and commit the regenerated `apps/docs-site/docs/public/openapi.json`
 
 ## V1 Roadmap
 

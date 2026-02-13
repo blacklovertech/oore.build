@@ -1,4 +1,11 @@
 import { defineConfig } from "vitepress";
+import { useSidebar } from "vitepress-openapi";
+import spec from "../public/openapi.json";
+
+const openApiSidebar = useSidebar({
+  spec,
+  linkPrefix: "/openapi/operations/",
+}).generateSidebarGroups();
 
 export default defineConfig({
   title: "Oore CI Docs",
@@ -104,6 +111,7 @@ export default defineConfig({
       { text: "Getting Started", link: "/getting-started/" },
       { text: "Guides", link: "/guides/oidc/" },
       { text: "Reference", link: "/reference/api/" },
+      { text: "OpenAPI", link: "/openapi/" },
       { text: "Concepts", link: "/concepts/architecture" },
       { text: "Operations", link: "/operations/deployment" },
       {
@@ -301,6 +309,15 @@ export default defineConfig({
             { text: "Build States", link: "/reference/build-states" },
             { text: "Roles & Permissions", link: "/reference/rbac" },
             { text: "Error Codes", link: "/reference/error-codes" },
+          ],
+        },
+      ],
+      "/openapi/": [
+        {
+          text: "OpenAPI Spec",
+          items: [
+            { text: "Overview", link: "/openapi/" },
+            ...openApiSidebar,
           ],
         },
       ],
