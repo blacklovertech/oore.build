@@ -21,8 +21,8 @@ RUST_HOST_TARGET=""
 CLEAN_CARGO_HOME=""
 
 # release-local is often launched by launchd/non-login shells that do not load
-# user profile PATH entries. Prepend common Rust/Bun locations for reliability.
-export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"
+# user profile PATH entries. Prepend common Rust/Bun/Homebrew locations.
+export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 log() {
   printf '[release-local] %s\n' "$*"
