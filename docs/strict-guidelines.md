@@ -44,6 +44,13 @@ These rules are mandatory unless explicitly superseded by an ADR and contract up
 - `radius: none`
 - `font: inter`
 
+## API and OpenAPI Spec
+
+- Every API endpoint must have a corresponding entry in the OpenAPI spec.
+- When creating, updating, or removing endpoints in `crates/oored`, the OpenAPI export binary (`crates/oored/src/bin/openapi_export.rs`) must be updated in the same change.
+- After updating the export binary, regenerate the spec with `make gen-openapi` and commit the updated `apps/docs-site/docs/public/openapi.json`.
+- Request/response types in `crates/oore-contract/src/lib.rs` must derive `ToSchema`. New types require `#[derive(ToSchema)]`; fields using `serde_json::Value` require `#[schema(value_type = Object)]`.
+
 ## Documentation and Governance
 
 - Every user-facing feature requires a doc in `docs/features/`.
