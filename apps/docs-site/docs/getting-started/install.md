@@ -107,3 +107,21 @@ Then run diagnostics:
 ```bash
 ~/.oore/bin/oore doctor
 ```
+
+### Permission denied under `~/.oore`
+
+If installer output shows `Permission denied` creating `~/.oore/bin` or `~/.oore/logs`,
+the install root is likely owned by `root` from a prior system-level setup.
+
+Fix ownership and rerun installer:
+
+```bash
+sudo chown -R "$USER":staff ~/.oore
+curl -fsSL https://oore.build/install | bash
+```
+
+Or install to a different user-owned root:
+
+```bash
+OORE_INSTALL_ROOT="$HOME/.oore-user" curl -fsSL https://oore.build/install | bash
+```

@@ -18,6 +18,7 @@ USER_ENV_FILE="$BUILD_HOME/.oore/release-runner/webhook.env"
 LOG_DIR="$BUILD_HOME/Library/Logs"
 LOG_FILE="$LOG_DIR/oore-release-webhook.log"
 STATE_DIR="$BUILD_HOME/.oore/release-runner"
+OORE_HOME_DIR="$BUILD_HOME/.oore"
 BUILD_PATH="$BUILD_HOME/.cargo/bin:$BUILD_HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 log() {
@@ -53,7 +54,8 @@ require_build_user_cmd python3
 require_build_user_cmd curl
 require_build_user_cmd unzip
 
-mkdir -p "$ETC_DIR" "$(dirname "$TARGET")" "$STATE_DIR" "$LOG_DIR"
+mkdir -p "$ETC_DIR" "$(dirname "$TARGET")" "$OORE_HOME_DIR" "$STATE_DIR" "$LOG_DIR"
+chown "$BUILD_USER":staff "$OORE_HOME_DIR"
 chown "$BUILD_USER":staff "$STATE_DIR"
 chown "$BUILD_USER":staff "$LOG_DIR"
 

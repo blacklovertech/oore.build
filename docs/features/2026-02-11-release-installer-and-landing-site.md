@@ -52,8 +52,13 @@ Release/distribution contract additions:
 - LaunchDaemon mode runs under the build user and writes webhook logs to the user log directory for reliable startup (`~/Library/Logs/oore-release-webhook.log`).
 - launchd templates for webhook/poller now include `$HOME/.cargo/bin` and `$HOME/.bun/bin` so automated tag publishes can run Rust and Bun-based release steps.
 - `scripts/release-local.sh` now auto-installs missing Rust cross-target `x86_64-apple-darwin` for the active toolchain to avoid release failures after toolchain updates.
+- `scripts/release-local.sh` now runs Rust builds with a sanitized environment and explicit target selection to prevent host-specific `CARGO_TARGET_*`/`RUSTFLAGS` overrides from breaking cross-arch release builds.
+- `scripts/release-local.sh` now resolves host binary package paths from `target/<host-target>/release` (with compatibility fallback) so packaged archives always include the newly built binaries.
+- `scripts/release-local.sh` now prepends common Bun/Cargo/Homebrew paths for non-login launchd shells.
 - Release automation now enforces tag/version parity (`vX.Y.Z` must match `workspace.package.version = X.Y.Z`) before build/upload.
 - Added `make release-cut VERSION=X.Y.Z` helper to bump workspace version, push the commit, and push matching tag `vX.Y.Z`.
+- `scripts/install-launchd-release-webhook-daemon.sh` now creates and assigns ownership for `$HOME/.oore` itself (not only `$HOME/.oore/release-runner`) to avoid blocking user-level installer writes.
+- `scripts/install.sh` now fails fast with explicit remediation if `OORE_INSTALL_ROOT` exists but is not writable by the current user.
 - Added site build/deploy plumbing (`dev-site`, `build-site`, `deploy-site`) and root scripts (`dev:site`, `build:site`).
 
 ## Acceptance Criteria

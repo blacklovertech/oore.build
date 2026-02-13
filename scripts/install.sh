@@ -52,6 +52,20 @@ have_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+ensure_install_root_writable() {
+  if [[ -e "$OORE_INSTALL_ROOT" ]]; then
+    [[ -d "$OORE_INSTALL_ROOT" ]] || die "Install root exists but is not a directory: $OORE_INSTALL_ROOT"
+    if [[ ! -w "$OORE_INSTALL_ROOT" ]]; then
+      local owner
+      owner="$(stat -f '%Su' "$OORE_INSTALL_ROOT" 2>/dev/null || echo unknown)"
+      die "Install root is not writable: $OORE_INSTALL_ROOT (owner: $owner). If this was created by sudo/system setup, run: sudo chown -R \"$USER\":staff \"$OORE_INSTALL_ROOT\" or set OORE_INSTALL_ROOT to a user-owned path."
+    fi
+  else
+    mkdir -p "$OORE_INSTALL_ROOT" \
+      || die "Failed to create install root: $OORE_INSTALL_ROOT"
+  fi
+}
+
 normalize_bool() {
   case "${1:-}" in
     1|true|TRUE|yes|YES|on|ON)
@@ -661,6 +675,8 @@ main() {
   ensure_dependency awk
   ensure_dependency uname
   ensure_dependency mktemp
+
+  ensure_install_root_writable
 
   # Step 1: Detect platform
   step "Detecting platform..."

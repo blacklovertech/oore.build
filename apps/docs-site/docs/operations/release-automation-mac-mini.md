@@ -41,6 +41,12 @@ sudo make install-release-webhook-daemon
 
 If you already installed this daemon before onboarding-hardening changes, rerun the same command once to refresh launchd PATH and dependency checks.
 
+If `~/.oore` was previously created as `root` on this machine, reset ownership so user-level installer flows can write `~/.oore/bin` and `~/.oore/logs`:
+
+```bash
+sudo chown -R "$USER":staff ~/.oore
+```
+
 ### 3) Expose listener publicly (Cloudflare Tunnel)
 
 Expose `http://127.0.0.1:8789` and map a hostname (for example `build-hook.oore.build`).
