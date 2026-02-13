@@ -67,16 +67,19 @@ All new users setting up an oore.build instance benefit. The changes reduce setu
 
 - Now accepts an `allowed_origins` parameter derived from CORS configuration.
 - Rules:
-  - `http://localhost` and `http://127.0.0.1` (any port) always allowed.
-  - Non-localhost origins must use `https`.
+  - Local-network callback hosts may use `http` or `https`:
+    - `localhost`, `127.0.0.1`
+    - `*.local`
+    - private/link-local IPs (RFC1918 and local-link equivalents)
+  - Public origins must use `https`.
   - Path must be `/auth/callback`.
-  - Origin must be in the CORS allowed origins list.
+  - Public origin must be in the CORS allowed origins list.
 
 ## Security Considerations
 
 1. **No `?token=` in URLs** — bootstrap tokens are not passed via URL parameters. They are copied from the terminal to prevent leaks via browser history, referrer headers, and CDN logs.
 2. **Redirect URI path validation** — not just origin-only matching. The path must be exactly `/auth/callback`.
-3. **HTTPS enforced for non-localhost** — prevents protocol downgrade attacks on OIDC callbacks.
+3. **HTTPS enforced for public callbacks** — prevents protocol downgrade attacks on internet-routable OIDC callbacks while preserving local-network setup ergonomics.
 4. **`?backend=` guarded** — only auto-adds an instance if the store is empty, preventing phishing via crafted links that silently switch to an attacker-controlled backend. URL parameter is scrubbed immediately.
 5. **CORS origins = redirect allowlist** — acceptable because the operator explicitly controls `OORE_CORS_ORIGINS`.
 6. **Install script token guard** — skips bootstrap token generation if the instance is already configured (handles reinstall/upgrade).
@@ -92,8 +95,9 @@ All new users setting up an oore.build instance benefit. The changes reduce setu
 - [x] `https://ci.oore.build/auth/callback` accepted as redirect URI when origin is in CORS config
 - [x] `https://evil.com/auth/callback` rejected (origin not in CORS config)
 - [x] `https://ci.oore.build/evil/path` rejected (path not `/auth/callback`)
-- [x] `http://ci.oore.build/auth/callback` rejected (non-localhost must be https)
+- [x] `http://ci.oore.build/auth/callback` rejected (public origin must be https)
 - [x] `http://localhost:3000/auth/callback` accepted
+- [x] `http://jarvis.local:4173/auth/callback` accepted for local-network setup
 - [x] Single `/auth/callback` handles both setup and regular auth flows
 - [x] OIDC provider combobox shows predefined providers with auto-fill
 - [x] Redirect URI displayed with copy button in setup wizard
@@ -108,4 +112,4 @@ Platform team
 
 ## Last Updated
 
-`2026-02-12`
+`2026-02-13`

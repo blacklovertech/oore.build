@@ -43,6 +43,17 @@ function getErrorMessage(error: Error | null): string | null {
         return 'Your session is no longer valid. Please restart setup.'
       case 'auth_expired':
         return 'The OIDC authorization request has expired. Please try again.'
+      case 'invalid_redirect_uri':
+        if (
+          error.message.includes('public redirect_uri must use https scheme') ||
+          error.message.includes('non-localhost redirect_uri must use https scheme')
+        ) {
+          return 'This frontend URL cannot be used for OIDC callback over HTTP. Use an HTTPS frontend URL or open setup from localhost/.local.'
+        }
+        if (error.message.includes('origin is not in the allowed origins list')) {
+          return 'This frontend origin is not allowed by the backend. Add it to OORE_CORS_ORIGINS, restart oored, and try again.'
+        }
+        return 'OIDC callback URL is invalid. Ensure the callback path is /auth/callback.'
       default:
         return error.message
     }

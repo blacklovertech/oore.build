@@ -26,6 +26,7 @@ pub mod users;
 pub mod util;
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::extract::{DefaultBodyLimit, State};
@@ -149,10 +150,30 @@ fn should_skip_oidc_discovery(state: &AppState) -> bool {
 ///
 /// Rules:
 /// 1. Must be a valid URL with no embedded credentials.
-/// 2. `http://localhost:{any}` and `http://127.0.0.1:{any}` are always allowed.
-/// 3. Non-localhost URIs must use `https` scheme.
+/// 2. Local-network callback hosts (localhost, .local, private/link-local IPs)
+///    may use `http` or `https`.
+/// 3. Public callback hosts must use `https` scheme.
 /// 4. Path must be exactly `/auth/callback` (the single unified callback route).
-/// 5. Origin must appear in `allowed_origins`.
+/// 5. Public callback origins must appear in `allowed_origins`.
+fn is_local_network_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    let host_lower = host.to_ascii_lowercase();
+    if host_lower.ends_with(".local") {
+        return true;
+    }
+
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Ok(IpAddr::V6(ip)) => {
+            ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local()
+        }
+        Err(_) => false,
+    }
+}
+
 pub fn validate_redirect_uri(
     uri: &str,
     allowed_origins: &[String],
@@ -174,38 +195,6 @@ pub fn validate_redirect_uri(
         ));
     }
 
-    let host = parsed.host_str().unwrap_or("");
-    let is_localhost = host == "localhost" || host == "127.0.0.1";
-
-    // Localhost always allowed with http
-    if is_localhost {
-        if parsed.scheme() != "http" {
-            return Err(api_err(
-                StatusCode::BAD_REQUEST,
-                "invalid_redirect_uri",
-                "localhost redirect_uri must use http scheme",
-            ));
-        }
-        // Validate path
-        if parsed.path() != "/auth/callback" {
-            return Err(api_err(
-                StatusCode::BAD_REQUEST,
-                "invalid_redirect_uri",
-                "redirect_uri path must be /auth/callback",
-            ));
-        }
-        return Ok(());
-    }
-
-    // Non-localhost: require https
-    if parsed.scheme() != "https" {
-        return Err(api_err(
-            StatusCode::BAD_REQUEST,
-            "invalid_redirect_uri",
-            "non-localhost redirect_uri must use https scheme",
-        ));
-    }
-
     // Validate path
     if parsed.path() != "/auth/callback" {
         return Err(api_err(
@@ -215,7 +204,28 @@ pub fn validate_redirect_uri(
         ));
     }
 
-    // Check origin against allowed list
+    let host = parsed.host_str().unwrap_or("");
+    if is_local_network_host(host) {
+        if parsed.scheme() != "http" && parsed.scheme() != "https" {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                "invalid_redirect_uri",
+                "local-network redirect_uri must use http or https scheme",
+            ));
+        }
+        return Ok(());
+    }
+
+    // Public host: require https
+    if parsed.scheme() != "https" {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_redirect_uri",
+            "public redirect_uri must use https scheme",
+        ));
+    }
+
+    // Public callback origins must be explicitly allowlisted.
     let origin = parsed.origin().ascii_serialization();
     if !allowed_origins.iter().any(|o| o == &origin) {
         return Err(api_err(

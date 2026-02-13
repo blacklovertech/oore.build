@@ -698,6 +698,117 @@ async fn test_configure_oidc_expired_session() {
     assert_eq!(body["code"], "session_expired");
 }
 
+#[tokio::test]
+async fn test_start_owner_oidc_accepts_http_local_network_redirect_uri() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let db_path = tmp.path().join("oore.db");
+    let app = create_test_app(&db_path).await;
+    let session_token = seed_session_token(&db_path).await;
+
+    // Move to idp_configured with a valid OIDC config.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/setup/oidc/configure")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", session_token))
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "issuer_url": "https://accounts.google.com",
+                        "client_id": "test-client-id"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/setup/owner/start-oidc")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", session_token))
+                .body(Body::from(
+                    serde_json::to_string(
+                        &json!({"redirect_uri": "http://jarvis.local:4173/auth/callback"}),
+                    )
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body = body_json(resp).await;
+    assert!(
+        body["authorization_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://")
+    );
+    assert!(!body["state"].as_str().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_start_owner_oidc_rejects_http_public_redirect_uri() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let db_path = tmp.path().join("oore.db");
+    let app = create_test_app(&db_path).await;
+    let session_token = seed_session_token(&db_path).await;
+
+    // Move to idp_configured with a valid OIDC config.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/setup/oidc/configure")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", session_token))
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "issuer_url": "https://accounts.google.com",
+                        "client_id": "test-client-id"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/setup/owner/start-oidc")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", session_token))
+                .body(Body::from(
+                    serde_json::to_string(
+                        &json!({"redirect_uri": "http://example.com/auth/callback"}),
+                    )
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 400);
+    let body = body_json(resp).await;
+    assert_eq!(body["code"], "invalid_redirect_uri");
+    assert_eq!(body["error"], "public redirect_uri must use https scheme");
+}
+
 // ── State machine enforcement ───────────────────────────────────
 
 #[tokio::test]
