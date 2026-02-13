@@ -35,7 +35,7 @@ Release/distribution contract additions:
   - `oore_<version>_darwin_arm64.tar.gz`
   - `oore_<version>_darwin_x86_64.tar.gz`
   - `oore_<version>_checksums.txt`
-- Tarballs contain `bin/oored`, `bin/oore`, `VERSION`, and `LICENSE`.
+- Tarballs contain `bin/oored`, `bin/oore`, `bin/oore-web`, `web-dist/`, `VERSION`, and `LICENSE`.
 
 ## Security Considerations
 
@@ -50,6 +50,7 @@ Release/distribution contract additions:
 - Added local macOS release automation scripts for semver tags (`v*.*.*`) that package both architectures and upload to Cloudflare R2.
 - Added webhook-based release automation service with launchd templates for both LaunchDaemon (system) and LaunchAgent (user) operation.
 - LaunchDaemon mode runs under the build user and writes webhook logs to the user log directory for reliable startup (`~/Library/Logs/oore-release-webhook.log`).
+- launchd templates for webhook/poller now include `$HOME/.cargo/bin` and `$HOME/.bun/bin` so automated tag publishes can run Rust and Bun-based release steps.
 - Release automation now enforces tag/version parity (`vX.Y.Z` must match `workspace.package.version = X.Y.Z`) before build/upload.
 - Added `make release-cut VERSION=X.Y.Z` helper to bump workspace version, push the commit, and push matching tag `vX.Y.Z`.
 - Added site build/deploy plumbing (`dev-site`, `build-site`, `deploy-site`) and root scripts (`dev:site`, `build:site`).
@@ -60,6 +61,7 @@ Release/distribution contract additions:
 - [x] Installer defaults to interactive prompts and supports non-interactive env-based mode.
 - [x] `apps/site` provides a neutral landing page and serves `/install`.
 - [x] Local release automation builds and publishes macOS arm64 + x86_64 artifacts plus checksums.
+- [x] Automated release pipelines (webhook + poller) can execute `release-local` with Bun-based web build steps in launchd context.
 - [x] Docs reflect release-based install flow and hosted UI onboarding.
 
 ## Owner
@@ -68,4 +70,4 @@ Core platform
 
 ## Last Updated
 
-`2026-02-11`
+`2026-02-13`

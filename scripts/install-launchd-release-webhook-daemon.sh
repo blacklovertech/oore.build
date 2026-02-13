@@ -18,6 +18,7 @@ USER_ENV_FILE="$BUILD_HOME/.oore/release-runner/webhook.env"
 LOG_DIR="$BUILD_HOME/Library/Logs"
 LOG_FILE="$LOG_DIR/oore-release-webhook.log"
 STATE_DIR="$BUILD_HOME/.oore/release-runner"
+BUILD_PATH="$BUILD_HOME/.cargo/bin:$BUILD_HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 log() {
   printf '[webhook-daemon-install] %s\n' "$*"
@@ -32,8 +33,25 @@ require_root() {
   [[ "$EUID" -eq 0 ]] || die "Run with sudo: sudo make install-release-webhook-daemon"
 }
 
+require_build_user_cmd() {
+  local cmd="$1"
+  if sudo -u "$BUILD_USER" env PATH="$BUILD_PATH" /bin/bash -c "command -v $cmd >/dev/null 2>&1"; then
+    return 0
+  fi
+  die "Required command '$cmd' not found for build user '$BUILD_USER' (checked PATH=$BUILD_PATH)."
+}
+
 require_root
 [[ -f "$TEMPLATE" ]] || die "Template not found: $TEMPLATE"
+
+# release-local.sh now builds/compiles frontend assets in addition to Rust binaries.
+require_build_user_cmd git
+require_build_user_cmd cargo
+require_build_user_cmd bun
+require_build_user_cmd wrangler
+require_build_user_cmd python3
+require_build_user_cmd curl
+require_build_user_cmd unzip
 
 mkdir -p "$ETC_DIR" "$(dirname "$TARGET")" "$STATE_DIR" "$LOG_DIR"
 chown "$BUILD_USER":staff "$STATE_DIR"

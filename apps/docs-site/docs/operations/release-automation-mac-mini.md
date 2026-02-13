@@ -10,6 +10,7 @@ Use this flow with a dedicated macOS host (for example, a Mac mini) that builds 
 
 - macOS host with Xcode command line tools
 - Rust toolchain installed
+- Bun installed (for web asset build + `oore-web` executable compile in release pipeline)
 - `wrangler` installed and authenticated (`wrangler whoami`)
 - R2 bucket and public domain already configured (example: `oore` and `dl.oore.build`)
 - Repo checked out on the macOS host
@@ -33,6 +34,8 @@ sudo chmod 600 /etc/oore/release-webhook.env
 ```bash
 sudo make install-release-webhook-daemon
 ```
+
+If you already installed this daemon before onboarding-hardening changes, rerun the same command once to refresh launchd PATH and dependency checks.
 
 ### 3) Expose listener publicly (Cloudflare Tunnel)
 
@@ -89,7 +92,7 @@ make install-release-poller
 This `launchd` job:
 
 - polls semver tags (`v*.*.*`) every 2 minutes
-- builds and packages both macOS release artifacts
+- builds and packages both macOS release artifacts, bundled local web launcher, and web assets
 - uploads artifacts and checksums to R2
 - updates `releases/latest.json` for `OORE_VERSION=latest`
 

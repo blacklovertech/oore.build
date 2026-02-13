@@ -17,7 +17,7 @@
     <key>EnvironmentVariables</key>
     <dict>
       <key>PATH</key>
-      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+      <string>__HOME__/.cargo/bin:__HOME__/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
       <key>OORE_WEBHOOK_ENV_FILE</key>
       <string>__HOME__/.oore/release-runner/webhook.env</string>
       <key>OORE_WEBHOOK_HOST</key>

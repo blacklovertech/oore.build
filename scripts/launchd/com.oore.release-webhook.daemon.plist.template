@@ -20,7 +20,7 @@
     <key>EnvironmentVariables</key>
     <dict>
       <key>PATH</key>
-      <string>/Users/__BUILD_USER__/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+      <string>__BUILD_HOME__/.cargo/bin:__BUILD_HOME__/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
       <key>HOME</key>
       <string>__BUILD_HOME__</string>
       <key>OORE_WEBHOOK_ENV_FILE</key>
