@@ -18,6 +18,7 @@ RELEASE_TAG=""
 RELEASE_VERSION=""
 RUST_TOOLCHAIN=""
 RUST_HOST_TARGET=""
+CLEAN_CARGO_HOME=""
 
 log() {
   printf '[release-local] %s\n' "$*"
@@ -30,6 +31,18 @@ die() {
 
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+run_with_clean_rust_env() {
+  env \
+    -u CARGO_BUILD_TARGET \
+    -u RUSTUP_TOOLCHAIN \
+    -u RUSTFLAGS \
+    -u CARGO_ENCODED_RUSTFLAGS \
+    -u RUSTC \
+    -u RUSTC_WRAPPER \
+    -u RUSTC_WORKSPACE_WRAPPER \
+    "$@"
 }
 
 normalize_bool() {
@@ -74,18 +87,27 @@ ensure_dependencies() {
 resolve_rust_toolchain() {
   RUST_TOOLCHAIN="$(
     cd "$WORKTREE_DIR"
-    rustup show active-toolchain | awk '{print $1}'
+    run_with_clean_rust_env rustup show active-toolchain | awk '{print $1}'
   )"
   [[ -n "$RUST_TOOLCHAIN" ]] || die "Unable to determine active Rust toolchain."
 
   RUST_HOST_TARGET="$(
-    rustup run "$RUST_TOOLCHAIN" rustc -vV | awk -F': ' '/^host: / {print $2}'
+    run_with_clean_rust_env rustup run "$RUST_TOOLCHAIN" rustc -vV | awk -F': ' '/^host: / {print $2}'
   )"
   [[ -n "$RUST_HOST_TARGET" ]] || die "Unable to determine Rust host target for toolchain '$RUST_TOOLCHAIN'."
 
+  if [[ -n "${RUSTFLAGS:-}" ]]; then
+    log "Ignoring RUSTFLAGS from environment for deterministic release builds."
+  fi
+  if [[ -n "${CARGO_ENCODED_RUSTFLAGS:-}" ]]; then
+    log "Ignoring CARGO_ENCODED_RUSTFLAGS from environment for deterministic release builds."
+  fi
+  if [[ -n "${RUSTC:-}" || -n "${RUSTC_WRAPPER:-}" || -n "${RUSTC_WORKSPACE_WRAPPER:-}" ]]; then
+    log "Ignoring custom RUSTC/RUSTC_WRAPPER environment overrides."
+  fi
   log "Using Rust toolchain: $RUST_TOOLCHAIN"
-  log "Using rustup cargo: $(rustup which --toolchain "$RUST_TOOLCHAIN" cargo)"
-  log "Using rustup rustc: $(rustup which --toolchain "$RUST_TOOLCHAIN" rustc)"
+  log "Using rustup cargo: $(run_with_clean_rust_env rustup which --toolchain "$RUST_TOOLCHAIN" cargo)"
+  log "Using rustup rustc: $(run_with_clean_rust_env rustup which --toolchain "$RUST_TOOLCHAIN" rustc)"
   log "Rust host target: $RUST_HOST_TARGET"
   if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
     log "Ignoring CARGO_BUILD_TARGET override from environment: $CARGO_BUILD_TARGET"
@@ -96,12 +118,12 @@ ensure_rust_target_installed() {
   local target="$1"
   [[ -n "$RUST_TOOLCHAIN" ]] || die "Rust toolchain is not resolved."
 
-  if rustup target list --toolchain "$RUST_TOOLCHAIN" --installed | grep -Fxq "$target"; then
+  if run_with_clean_rust_env rustup target list --toolchain "$RUST_TOOLCHAIN" --installed | grep -Fxq "$target"; then
     return 0
   fi
 
   log "Installing missing Rust target '$target' for toolchain '$RUST_TOOLCHAIN'..."
-  rustup target add "$target" --toolchain "$RUST_TOOLCHAIN" \
+  run_with_clean_rust_env rustup target add "$target" --toolchain "$RUST_TOOLCHAIN" \
     || die "Failed to install Rust target '$target' for toolchain '$RUST_TOOLCHAIN'."
 }
 
@@ -110,8 +132,8 @@ repair_rust_target() {
   [[ -n "$RUST_TOOLCHAIN" ]] || die "Rust toolchain is not resolved."
 
   log "Repairing Rust target '$target' for toolchain '$RUST_TOOLCHAIN'..."
-  rustup target remove "$target" --toolchain "$RUST_TOOLCHAIN" >/dev/null 2>&1 || true
-  rustup target add "$target" --toolchain "$RUST_TOOLCHAIN" \
+  run_with_clean_rust_env rustup target remove "$target" --toolchain "$RUST_TOOLCHAIN" >/dev/null 2>&1 || true
+  run_with_clean_rust_env rustup target add "$target" --toolchain "$RUST_TOOLCHAIN" \
     || die "Failed to repair Rust target '$target' for toolchain '$RUST_TOOLCHAIN'."
 }
 
@@ -121,13 +143,13 @@ ensure_rust_target_usable() {
   local core_rlib=""
 
   target_libdir="$(
-    rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
+    run_with_clean_rust_env rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
   )"
 
   if [[ -z "$target_libdir" || ! -d "$target_libdir" ]]; then
     repair_rust_target "$target"
     target_libdir="$(
-      rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
+      run_with_clean_rust_env rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
     )"
   fi
 
@@ -139,7 +161,7 @@ ensure_rust_target_usable() {
   if [[ -z "$core_rlib" ]]; then
     repair_rust_target "$target"
     target_libdir="$(
-      rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
+      run_with_clean_rust_env rustup run "$RUST_TOOLCHAIN" rustc --target "$target" --print target-libdir 2>/dev/null || true
     )"
   fi
 
@@ -150,6 +172,23 @@ ensure_rust_target_usable() {
   if [[ -z "$core_rlib" ]]; then
     die "Rust target '$target' appears broken for toolchain '$RUST_TOOLCHAIN' (libcore not found in $target_libdir)."
   fi
+}
+
+prepare_clean_cargo_home() {
+  local source_cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+  CLEAN_CARGO_HOME="$TMP_DIR/cargo-home"
+
+  mkdir -p "$CLEAN_CARGO_HOME"
+
+  # Keep caches for speed but intentionally omit config.toml to avoid machine-specific target/rustflags overrides.
+  if [[ -d "$source_cargo_home/registry" && ! -e "$CLEAN_CARGO_HOME/registry" ]]; then
+    ln -s "$source_cargo_home/registry" "$CLEAN_CARGO_HOME/registry" || true
+  fi
+  if [[ -d "$source_cargo_home/git" && ! -e "$CLEAN_CARGO_HOME/git" ]]; then
+    ln -s "$source_cargo_home/git" "$CLEAN_CARGO_HOME/git" || true
+  fi
+
+  log "Using clean CARGO_HOME for release build: $CLEAN_CARGO_HOME"
 }
 
 resolve_bun_version() {
@@ -258,6 +297,7 @@ ensure_tag_matches_workspace_version() {
 
 build_binaries() {
   resolve_rust_toolchain
+  prepare_clean_cargo_home
   ensure_rust_target_installed "$RUST_HOST_TARGET"
   ensure_rust_target_usable "$RUST_HOST_TARGET"
   ensure_rust_target_installed "x86_64-apple-darwin"
@@ -266,8 +306,8 @@ build_binaries() {
   log "Building release binaries for $RELEASE_TAG..."
   (
     cd "$WORKTREE_DIR"
-    env -u CARGO_BUILD_TARGET rustup run "$RUST_TOOLCHAIN" cargo build --release --target "$RUST_HOST_TARGET" -p oored -p oore
-    env -u CARGO_BUILD_TARGET rustup run "$RUST_TOOLCHAIN" cargo build --release --target x86_64-apple-darwin -p oored -p oore
+    run_with_clean_rust_env env CARGO_HOME="$CLEAN_CARGO_HOME" rustup run "$RUST_TOOLCHAIN" cargo build --release --target "$RUST_HOST_TARGET" -p oored -p oore
+    run_with_clean_rust_env env CARGO_HOME="$CLEAN_CARGO_HOME" rustup run "$RUST_TOOLCHAIN" cargo build --release --target x86_64-apple-darwin -p oored -p oore
   )
 }
 
