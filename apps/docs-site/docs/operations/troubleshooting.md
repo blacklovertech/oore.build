@@ -41,13 +41,16 @@ ls -la ~/Library/Application\ Support/oore/
 
 Ensure the current user has read/write access to the database and encryption key files.
 
-### macOS keychain prompt appears on startup
+### `encryption.key` permission errors
 
-On first startup, macOS may ask for access to keychain item `build.oore.oored`.
-This is expected and used to store/read a local encryption key for secrets at rest.
+`oored` uses file-based key storage in this release.
+If startup fails due encryption key file permissions, fix ownership on the data directory:
 
-- Click **Allow** (or **Always Allow** on trusted hosts)
-- If you click **Deny**, restart `oored` and allow access on the next prompt
+```bash
+chown -R "$USER":staff ~/Library/Application\ Support/oore
+chmod 700 ~/Library/Application\ Support/oore
+chmod 600 ~/Library/Application\ Support/oore/encryption.key 2>/dev/null || true
+```
 
 ## Builds stuck in "queued"
 

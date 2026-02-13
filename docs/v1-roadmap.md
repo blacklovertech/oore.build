@@ -220,7 +220,7 @@ Dependency: Phases 2-4 complete and stable.
 - [x] **5.7 [P1] Command-center UI redesign** - Reworked main authenticated app pages to table-first, operator-dense layouts with consistent `PageLayout`/`PageHeader` rhythm and settings-page visual alignment.
 - [x] **5.8 [P1] File-first pipeline config with UI fallback** - Added strict `.oore.yaml/.oore.yml` resolution, immutable fallback execution snapshot (`snapshot_version=2`), pipeline UI controls for platform toggles/staged commands, and Flutter version control via `.fvmrc` or fallback `flutter_version`.
 - [x] **5.9 [P1] Artifact storage settings UI + API** - Added owner/admin artifact storage management (`Settings -> Artifact Storage`) with encrypted credential persistence, runtime backend switching, local filesystem upload/download flow, and S3/R2 support without daemon restart.
-- [x] **5.10 [P1] Admin Preferences hub + key storage mode toggle** - Added `Settings -> Preferences` as the admin settings hub, moved artifact storage controls into Preferences, and added owner/admin key storage mode toggle (`keychain` vs `file`) with persisted startup preference and audit logging.
+- [x] **5.10 [P1] Admin Preferences hub + key storage controls** - Added `Settings -> Preferences` as the admin settings hub and moved artifact storage controls into Preferences. Keychain mode was later temporarily rolled back in `2026-02-13-temporary-file-only-encryption-key-storage.md` for onboarding reliability.
 
 Exit criteria (all met):
 - Developers can self-serve project/pipeline setup without direct DB/API intervention.

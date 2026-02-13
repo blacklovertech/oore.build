@@ -301,17 +301,6 @@ start_daemon() {
   return 1
 }
 
-print_keychain_note() {
-  cat <<'EOF'
-
-[oore-install] macOS may show a Keychain prompt on first daemon start.
-[oore-install] This allows `oored` to store and read a local encryption key
-[oore-install] used to protect secrets at rest on this machine.
-[oore-install] Recommended action: click "Allow" (or "Always Allow" on trusted hosts).
-
-EOF
-}
-
 is_already_configured() {
   local status_json
   status_json="$(curl -fsS "$DAEMON_URL/v1/public/setup-status" 2>/dev/null)" || return 1
@@ -713,7 +702,6 @@ main() {
     if [[ -n "$OORE_START_DAEMON" ]]; then
       if normalize_bool "$OORE_START_DAEMON"; then
         step "Starting daemon..."
-        print_keychain_note
         start_daemon || die "Daemon startup failed. Check logs: $DAEMON_LOG"
         if is_localhost_backend; then
           configure_local_web_noninteractive
@@ -733,7 +721,6 @@ main() {
   else
     # Step 5: Interactive — auto-start daemon
     step "Starting daemon..."
-    print_keychain_note
     if start_daemon; then
       step_done "$DAEMON_URL (healthy)"
 

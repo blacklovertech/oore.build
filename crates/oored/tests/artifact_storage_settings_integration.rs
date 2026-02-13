@@ -386,6 +386,38 @@ async fn test_owner_can_update_instance_preferences_key_storage_mode() {
 }
 
 #[tokio::test]
+async fn test_owner_cannot_set_keychain_mode_in_this_release() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let db_path = tmp.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+
+    let owner_id = seed_test_user(&pool).await;
+    let owner_session = create_session_token(&pool, &owner_id).await;
+
+    let req = Request::builder()
+        .uri("/v1/settings/preferences")
+        .method("PUT")
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {owner_session}"),
+        )
+        .body(Body::from(
+            serde_json::to_string(&serde_json::json!({
+                "key_storage_mode": "keychain"
+            }))
+            .unwrap(),
+        ))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(resp.into_body()).await;
+    assert_eq!(json["code"].as_str().unwrap(), "unsupported_key_storage_mode");
+}
+
+#[tokio::test]
 async fn test_developer_cannot_modify_instance_preferences() {
     let tmp = tempfile::TempDir::new().unwrap();
     let db_path = tmp.path().join("test.db");

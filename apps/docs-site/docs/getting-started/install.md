@@ -29,9 +29,8 @@ The installer:
 - Prompts for optional first-run actions (start daemon, generate setup token, open links)
 - For localhost backends, asks whether you plan to expose HTTPS publicly and can start/auto-start local web UI for you
 
-On first daemon start, macOS may show a Keychain permission prompt for `oored`.
-This is expected: `oored` stores a local encryption key in your login keychain to protect secrets at rest.
-Recommended action on trusted hosts: click **Allow** or **Always Allow**.
+`oored` stores its local encryption key in a file under the daemon data directory
+(for example `~/Library/Application Support/oore/encryption.key`) and applies `0600` permissions.
 
 ## Install a pinned version
 

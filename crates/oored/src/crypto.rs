@@ -8,24 +8,12 @@ use oore_contract::KeyStorageMode;
 use ring::aead::{self, AES_256_GCM, Aad, BoundKey, NONCE_LEN, Nonce, NonceSequence, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
 #[cfg(target_os = "macos")]
-use security_framework::passwords::{
-    delete_generic_password, get_generic_password, set_generic_password,
-};
-#[cfg(target_os = "macos")]
 use tracing::warn;
 
 use crate::util::resolve_oored_data_dir;
 
 /// Length of the AES-256 key in bytes.
 const KEY_LEN: usize = 32;
-#[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "build.oore.oored";
-#[cfg(target_os = "macos")]
-const KEYCHAIN_ACCOUNT: &str = "encryption-key-v1";
-#[cfg(target_os = "macos")]
-const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
-#[cfg(target_os = "macos")]
-const ERR_SEC_DUPLICATE_ITEM: i32 = -25299;
 
 /// A nonce sequence that uses a single pre-generated random nonce.
 /// This is used for one-shot encryption operations where each call
@@ -138,49 +126,6 @@ fn generate_random_key() -> anyhow::Result<Vec<u8>> {
     Ok(key)
 }
 
-#[cfg(target_os = "macos")]
-fn load_key_from_keychain() -> anyhow::Result<Option<Vec<u8>>> {
-    match get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-        Ok(key) => {
-            if key.len() != KEY_LEN {
-                bail!(
-                    "keychain encryption key has invalid length: expected {} bytes, got {}",
-                    KEY_LEN,
-                    key.len()
-                );
-            }
-            Ok(Some(key))
-        }
-        Err(err) if err.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
-        Err(err) => Err(anyhow::anyhow!(
-            "failed to read encryption key from macOS Keychain: {err}"
-        )),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn save_key_to_keychain(key: &[u8]) -> anyhow::Result<()> {
-    if key.len() != KEY_LEN {
-        bail!(
-            "cannot store encryption key in keychain: invalid key length {}",
-            key.len()
-        );
-    }
-
-    match set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, key) {
-        Ok(_) => Ok(()),
-        Err(err) if err.code() == ERR_SEC_DUPLICATE_ITEM => {
-            delete_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-                .context("failed to remove existing keychain encryption key item")?;
-            set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, key)
-                .context("failed to update keychain encryption key item")
-        }
-        Err(err) => Err(anyhow::anyhow!(
-            "failed to write encryption key to macOS Keychain: {err}"
-        )),
-    }
-}
-
 pub fn load_runtime_key() -> anyhow::Result<RuntimeKey> {
     load_runtime_key_with_mode(default_key_storage_mode())
 }
@@ -190,70 +135,16 @@ pub fn load_runtime_key_with_mode(mode: KeyStorageMode) -> anyhow::Result<Runtim
 
     #[cfg(target_os = "macos")]
     {
-        match mode {
-            KeyStorageMode::File => {
-                let key = load_or_generate_key(&legacy_file_path)?;
-                return Ok(RuntimeKey {
-                    key,
-                    source: KeySource::LegacyFile,
-                    legacy_file_path,
-                });
-            }
-            KeyStorageMode::Keychain => {
-                if let Some(key) = load_key_from_keychain()? {
-                    return Ok(RuntimeKey {
-                        key,
-                        source: KeySource::Keychain,
-                        legacy_file_path,
-                    });
-                }
-
-                if legacy_file_path.exists() {
-                    let key = load_or_generate_key(&legacy_file_path)?;
-                    match save_key_to_keychain(&key) {
-                        Ok(_) => {
-                            return Ok(RuntimeKey {
-                                key,
-                                source: KeySource::KeychainMigratedFromFile,
-                                legacy_file_path,
-                            });
-                        }
-                        Err(err) => {
-                            warn!(
-                                error = %err,
-                                "failed to migrate encryption key to keychain; continuing with legacy file key"
-                            );
-                            return Ok(RuntimeKey {
-                                key,
-                                source: KeySource::LegacyFileFallback,
-                                legacy_file_path,
-                            });
-                        }
-                    }
-                }
-
-                let generated = generate_random_key()?;
-                match save_key_to_keychain(&generated) {
-                    Ok(_) => Ok(RuntimeKey {
-                        key: generated,
-                        source: KeySource::KeychainGenerated,
-                        legacy_file_path,
-                    }),
-                    Err(err) => {
-                        warn!(
-                            error = %err,
-                            "failed to persist generated encryption key to keychain; falling back to legacy file storage"
-                        );
-                        let key = load_or_generate_key(&legacy_file_path)?;
-                        Ok(RuntimeKey {
-                            key,
-                            source: KeySource::LegacyFileFallback,
-                            legacy_file_path,
-                        })
-                    }
-                }
-            }
+        if mode == KeyStorageMode::Keychain {
+            warn!("keychain key storage is temporarily disabled; using file mode");
         }
+
+        let key = load_or_generate_key(&legacy_file_path)?;
+        return Ok(RuntimeKey {
+            key,
+            source: KeySource::LegacyFile,
+            legacy_file_path,
+        });
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -278,31 +169,12 @@ pub fn persist_current_key_for_mode(key: &[u8], mode: KeyStorageMode) -> anyhow:
             write_key_file(&legacy_file_path, key)?;
             Ok(KeySource::LegacyFile)
         }
-        KeyStorageMode::Keychain => {
-            #[cfg(target_os = "macos")]
-            {
-                save_key_to_keychain(key)?;
-                Ok(KeySource::Keychain)
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = key;
-                bail!("keychain mode is not supported on this platform")
-            }
-        }
+        KeyStorageMode::Keychain => bail!("keychain mode is disabled in this release"),
     }
 }
 
 pub fn default_key_storage_mode() -> KeyStorageMode {
-    #[cfg(target_os = "macos")]
-    {
-        KeyStorageMode::Keychain
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        KeyStorageMode::File
-    }
+    KeyStorageMode::File
 }
 
 /// Encrypt plaintext using AES-256-GCM.

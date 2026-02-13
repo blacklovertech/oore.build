@@ -14,9 +14,7 @@ import { PageMeta } from '@/lib/seo'
 import { useHasPermission } from '@/hooks/use-permissions'
 import {
   useArtifactStorageSettings,
-  useInstancePreferences,
   useUpdateArtifactStorageSettings,
-  useUpdateInstancePreferences,
 } from '@/hooks/use-artifact-storage'
 import PageLayout from '@/components/page-layout'
 import PageHeader from '@/components/page-header'
@@ -40,7 +38,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 
@@ -98,19 +95,12 @@ const storageSchema = z
     }
   })
 
-const keyModeSchema = z.object({
-  use_keychain: z.boolean(),
-})
-
 type StorageFormValues = z.infer<typeof storageSchema>
-type KeyModeFormValues = z.infer<typeof keyModeSchema>
 
 function PreferencesPage() {
   const canWrite = useHasPermission('instance_settings', 'write')
   const settingsQuery = useArtifactStorageSettings()
-  const preferencesQuery = useInstancePreferences()
   const updateStorageMutation = useUpdateArtifactStorageSettings()
-  const updatePreferencesMutation = useUpdateInstancePreferences()
 
   const storageForm = useForm<StorageFormValues>({
     resolver: zodResolver(storageSchema),
@@ -122,13 +112,6 @@ function PreferencesPage() {
       s3_endpoint: '',
       access_key_id: '',
       secret_access_key: '',
-    },
-  })
-
-  const keyModeForm = useForm<KeyModeFormValues>({
-    resolver: zodResolver(keyModeSchema),
-    defaultValues: {
-      use_keychain: true,
     },
   })
 
@@ -148,14 +131,6 @@ function PreferencesPage() {
       secret_access_key: '',
     })
   }, [settingsQuery.data, storageForm])
-
-  useEffect(() => {
-    const preferences = preferencesQuery.data?.preferences
-    if (!preferences) return
-    keyModeForm.reset({
-      use_keychain: preferences.key_storage_mode === 'keychain',
-    })
-  }, [preferencesQuery.data, keyModeForm])
 
   function onSubmitStorage(values: StorageFormValues) {
     const payload = {
@@ -200,40 +175,17 @@ function PreferencesPage() {
     })
   }
 
-  function onSubmitPreferences(values: KeyModeFormValues) {
-    updatePreferencesMutation.mutate(
-      {
-        key_storage_mode: values.use_keychain ? 'keychain' : 'file',
-      },
-      {
-        onSuccess: (res) => {
-          toast.success(
-            `Security preference updated (${res.preferences.key_storage_mode}). Restart daemon to apply startup mode.`,
-          )
-        },
-        onError: (error) => {
-          toast.error(
-            error instanceof Error
-              ? error.message
-              : 'Failed to update instance preferences',
-          )
-        },
-      },
-    )
-  }
-
   const settings = settingsQuery.data?.settings
-  const preferences = preferencesQuery.data?.preferences
 
   return (
     <PageLayout width="wide">
       <PageMeta title="Preferences" noindex />
       <PageHeader
         title="Preferences"
-        description="Manage artifact storage and security defaults for this instance."
+        description="Manage artifact storage defaults for this instance."
       />
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardContent>
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -260,22 +212,9 @@ function PreferencesPage() {
             </p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent>
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Key storage mode
-            </p>
-            <p className="mt-3 text-2xl font-bold tracking-tight">
-              {preferences?.key_storage_mode ?? 'keychain'}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Startup secret-key source for encryption-at-rest
-            </p>
-          </CardContent>
-        </Card>
       </section>
 
-      {settingsQuery.isLoading || preferencesQuery.isLoading ? (
+      {settingsQuery.isLoading ? (
         <Card>
           <CardContent className="space-y-3">
             <Skeleton className="h-10 w-full" />
@@ -289,15 +228,6 @@ function PreferencesPage() {
         <Alert variant="destructive">
           <AlertDescription>
             Failed to load artifact settings: {settingsQuery.error.message}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {preferencesQuery.error ? (
-        <Alert variant="destructive">
-          <AlertDescription>
-            Failed to load instance preferences:{' '}
-            {preferencesQuery.error.message}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -523,78 +453,6 @@ function PreferencesPage() {
                     disabled={!canWrite || updateStorageMutation.isPending}
                   >
                     {updateStorageMutation.isPending ? (
-                      <>
-                        <Spinner className="size-4" />
-                        Saving...
-                      </>
-                    ) : (
-                      'Save'
-                    )}
-                  </Button>
-                </div>
-              </form>
-            </Form>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {!preferencesQuery.isLoading && !preferencesQuery.error ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Security Preferences
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Form {...keyModeForm}>
-              <form
-                onSubmit={keyModeForm.handleSubmit(onSubmitPreferences)}
-                className="space-y-4"
-              >
-                <FormField
-                  control={keyModeForm.control}
-                  name="use_keychain"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Encryption key storage mode</FormLabel>
-                      <FormControl>
-                        <label className="flex items-center gap-3 rounded-md border p-3">
-                          <Checkbox
-                            checked={field.value}
-                            onCheckedChange={(checked) =>
-                              field.onChange(Boolean(checked))
-                            }
-                            disabled={
-                              !canWrite || updatePreferencesMutation.isPending
-                            }
-                          />
-                          <span className="text-sm">
-                            Use macOS Keychain for encryption key storage
-                            (recommended)
-                          </span>
-                        </label>
-                      </FormControl>
-                      <FormDescription>
-                        Turn off to use legacy file mode instead.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <Alert>
-                  <AlertDescription>
-                    Restart the daemon after saving to ensure startup uses the
-                    selected key storage mode.
-                  </AlertDescription>
-                </Alert>
-
-                <div className="flex justify-end">
-                  <Button
-                    type="submit"
-                    disabled={!canWrite || updatePreferencesMutation.isPending}
-                  >
-                    {updatePreferencesMutation.isPending ? (
                       <>
                         <Spinner className="size-4" />
                         Saving...

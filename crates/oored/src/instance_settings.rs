@@ -1,8 +1,6 @@
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::Context;
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -36,17 +34,8 @@ fn trim_opt(value: Option<String>) -> Option<String> {
 }
 
 pub async fn load_key_storage_mode(pool: &sqlx::SqlitePool) -> anyhow::Result<KeyStorageMode> {
-    let row = sqlx::query("SELECT key_storage_mode FROM instance_preferences WHERE id = 1")
-        .fetch_optional(pool)
-        .await
-        .context("failed to load instance preferences")?;
-
-    if let Some(row) = row {
-        let mode_str: String = row.get("key_storage_mode");
-        return KeyStorageMode::from_str(&mode_str).map_err(anyhow::Error::msg);
-    }
-
-    Ok(crypto::default_key_storage_mode())
+    let _ = pool;
+    Ok(KeyStorageMode::File)
 }
 
 fn preferences_response(
@@ -315,7 +304,7 @@ pub async fn get_instance_preferences(
     };
 
     let row =
-        sqlx::query("SELECT key_storage_mode, updated_at FROM instance_preferences WHERE id = 1")
+        sqlx::query("SELECT updated_at FROM instance_preferences WHERE id = 1")
             .fetch_optional(&pool)
             .await
             .map_err(|e| {
@@ -328,23 +317,11 @@ pub async fn get_instance_preferences(
             })?;
 
     if let Some(row) = row {
-        let mode_str: String = row.get("key_storage_mode");
-        let mode = KeyStorageMode::from_str(&mode_str).map_err(|e| {
-            error!(error = %e, "invalid key storage mode in database");
-            api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "store_error",
-                "Invalid instance preferences",
-            )
-        })?;
         let updated_at: Option<i64> = row.get("updated_at");
-        return Ok(Json(preferences_response(mode, updated_at)));
+        return Ok(Json(preferences_response(KeyStorageMode::File, updated_at)));
     }
 
-    Ok(Json(preferences_response(
-        crypto::default_key_storage_mode(),
-        None,
-    )))
+    Ok(Json(preferences_response(KeyStorageMode::File, None)))
 }
 
 pub async fn update_instance_preferences(
@@ -360,10 +337,18 @@ pub async fn update_instance_preferences(
     };
     let now = now_unix();
 
+    if req.key_storage_mode != KeyStorageMode::File {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "unsupported_key_storage_mode",
+            "Keychain mode is disabled in this release. Use file mode.",
+        ));
+    }
+
     let active_source =
-        crypto::persist_current_key_for_mode(state.encryption_key.as_ref(), req.key_storage_mode)
+        crypto::persist_current_key_for_mode(state.encryption_key.as_ref(), KeyStorageMode::File)
             .map_err(|e| {
-            error!(error = %e, mode = %req.key_storage_mode, "failed to persist key storage mode");
+            error!(error = %e, mode = %KeyStorageMode::File, "failed to persist key storage mode");
             api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "key_storage_error",
@@ -379,7 +364,7 @@ pub async fn update_instance_preferences(
             updated_by = excluded.updated_by,
             updated_at = excluded.updated_at",
     )
-    .bind(req.key_storage_mode.to_string())
+    .bind(KeyStorageMode::File.to_string())
     .bind(&auth.0.user_id)
     .bind(now)
     .execute(&pool)
@@ -394,7 +379,7 @@ pub async fn update_instance_preferences(
     })?;
 
     let details = serde_json::json!({
-        "key_storage_mode": req.key_storage_mode.to_string(),
+        "key_storage_mode": KeyStorageMode::File.to_string(),
         "active_key_source": active_source.as_str(),
     })
     .to_string();
@@ -409,11 +394,11 @@ pub async fn update_instance_preferences(
     .await;
 
     info!(
-        mode = %req.key_storage_mode,
+        mode = %KeyStorageMode::File,
         source = %active_source.as_str(),
         user_id = %auth.0.user_id,
         "instance preferences updated"
     );
 
-    Ok(Json(preferences_response(req.key_storage_mode, Some(now))))
+    Ok(Json(preferences_response(KeyStorageMode::File, Some(now))))
 }
