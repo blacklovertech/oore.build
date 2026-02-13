@@ -1,4 +1,4 @@
-.PHONY: dev-web dev-docs dev-site build-web build-demo deploy-demo deploy-web deploy-ci build-site deploy-site build-docs build check \
+.PHONY: dev-web dev-docs dev-site build-web build-demo deploy-demo deploy-web build-site deploy-site build-docs deploy-docs build check \
 	       test-web lint-web fix-web \
 	       test-docs lint-docs fix-docs test-rust \
 	       cargo-check run-daemon run-daemon-debug run-daemon-release \
