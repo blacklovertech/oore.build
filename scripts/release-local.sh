@@ -34,15 +34,26 @@ have_cmd() {
 }
 
 run_with_clean_rust_env() {
-  env \
-    -u CARGO_BUILD_TARGET \
-    -u RUSTUP_TOOLCHAIN \
-    -u RUSTFLAGS \
-    -u CARGO_ENCODED_RUSTFLAGS \
-    -u RUSTC \
-    -u RUSTC_WRAPPER \
-    -u RUSTC_WORKSPACE_WRAPPER \
-    "$@"
+  local -a env_args
+  local var
+
+  env_args=(
+    "PATH=$PATH"
+    "HOME=$HOME"
+    "USER=${USER:-}"
+    "LOGNAME=${LOGNAME:-${USER:-}}"
+    "SHELL=${SHELL:-/bin/bash}"
+  )
+
+  for var in TMPDIR RUSTUP_HOME CARGO_HOME TERM LANG LC_ALL LC_CTYPE SSL_CERT_FILE SSL_CERT_DIR HTTPS_PROXY https_proxy HTTP_PROXY http_proxy ALL_PROXY all_proxy NO_PROXY no_proxy; do
+    if [[ -n "${!var:-}" ]]; then
+      env_args+=("$var=${!var}")
+    fi
+  done
+
+  # Run Rust/Cargo commands in a minimal environment so hidden per-target
+  # overrides cannot poison sysroot/target resolution in launchd contexts.
+  env -i "${env_args[@]}" "$@"
 }
 
 normalize_bool() {
@@ -111,6 +122,9 @@ resolve_rust_toolchain() {
   log "Rust host target: $RUST_HOST_TARGET"
   if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
     log "Ignoring CARGO_BUILD_TARGET override from environment: $CARGO_BUILD_TARGET"
+  fi
+  if env | grep -Eq '^CARGO_TARGET_.*_(RUSTFLAGS|RUSTC|RUSTC_WRAPPER|LINKER|AR)='; then
+    log "Ignoring CARGO_TARGET_* toolchain overrides from environment."
   fi
 }
 
@@ -306,8 +320,8 @@ build_binaries() {
   log "Building release binaries for $RELEASE_TAG..."
   (
     cd "$WORKTREE_DIR"
-    run_with_clean_rust_env env CARGO_HOME="$CLEAN_CARGO_HOME" rustup run "$RUST_TOOLCHAIN" cargo build --release --target "$RUST_HOST_TARGET" -p oored -p oore
-    run_with_clean_rust_env env CARGO_HOME="$CLEAN_CARGO_HOME" rustup run "$RUST_TOOLCHAIN" cargo build --release --target x86_64-apple-darwin -p oored -p oore
+    CARGO_HOME="$CLEAN_CARGO_HOME" run_with_clean_rust_env rustup run "$RUST_TOOLCHAIN" cargo build --release --target "$RUST_HOST_TARGET" -p oored -p oore
+    CARGO_HOME="$CLEAN_CARGO_HOME" run_with_clean_rust_env rustup run "$RUST_TOOLCHAIN" cargo build --release --target x86_64-apple-darwin -p oored -p oore
   )
 }
 
