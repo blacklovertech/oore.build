@@ -3,7 +3,7 @@
 	       test-docs lint-docs fix-docs test-rust \
 	       cargo-check run-daemon run-daemon-debug run-daemon-release \
 	       run-runner register-runner run-cli doctor clean-dev-state dev-fresh-setup \
-	       docs-check ui-init install-local validate \
+	       docs-check ui-init install-local validate gen-openapi \
 	       release-local release-poll-tags release-webhook-server install-release-poller install-release-webhook install-release-webhook-daemon release-cut
 
 RUNNER_DAEMON_URL ?= http://127.0.0.1:8787
@@ -131,6 +131,11 @@ install-release-webhook:
 
 install-release-webhook-daemon:
 	bash scripts/install-launchd-release-webhook-daemon.sh
+
+# ── OpenAPI Spec Generation ───────────────────────────────────────
+gen-openapi:
+	cargo run -p oored --bin openapi-export > apps/docs-site/docs/public/openapi.json
+	@echo "OpenAPI spec generated → apps/docs-site/docs/public/openapi.json"
 
 # ── Documentation & Validation ────────────────────────────────────
 docs-check:

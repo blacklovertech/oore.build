@@ -2,10 +2,11 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 // ── Setup state machine ─────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum SetupState {
@@ -57,7 +58,7 @@ impl SetupState {
 
 // ── Public setup status (non-sensitive) ─────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct SetupStatus {
     pub instance_id: String,
     pub state: SetupState,
@@ -81,25 +82,25 @@ impl SetupStatus {
 
 // ── API request/response types ──────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BootstrapTokenVerifyRequest {
     pub token: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BootstrapTokenVerifyResponse {
     pub session_token: String,
     pub expires_at: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OidcConfigureRequest {
     pub issuer_url: String,
     pub client_id: String,
     pub client_secret: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OidcConfigureResponse {
     pub state: SetupState,
     pub discovered_issuer: String,
@@ -107,24 +108,24 @@ pub struct OidcConfigureResponse {
     pub session_expires_at: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SetupOidcStartRequest {
     pub redirect_uri: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SetupOidcStartResponse {
     pub authorization_url: String,
     pub state: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SetupOidcVerifyRequest {
     pub code: String,
     pub state: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SetupOidcVerifyResponse {
     pub state: SetupState,
     pub owner_email: String,
@@ -133,13 +134,13 @@ pub struct SetupOidcVerifyResponse {
     pub session_expires_at: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SetupCompleteResponse {
     pub state: SetupState,
     pub instance_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SetupSummaryResponse {
     pub instance_id: String,
     pub state: SetupState,
@@ -151,7 +152,7 @@ pub struct SetupSummaryResponse {
 
 // ── Structured API error ────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ApiError {
     pub error: String,
     pub code: String,
@@ -176,7 +177,7 @@ impl ApiError {
 
 // ── State file model (shared between CLI and daemon) ────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SetupStateFile {
     pub schema_version: u32,
     pub instance_id: String,
@@ -199,7 +200,7 @@ impl SetupStateFile {
     pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BootstrapTokenRecord {
     pub hash: String,
     pub expires_at: i64,
@@ -207,13 +208,13 @@ pub struct BootstrapTokenRecord {
     pub consumed_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SetupSessionRecord {
     pub hash: String,
     pub expires_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OidcConfigRecord {
     pub issuer_url: String,
     pub client_id: String,
@@ -225,13 +226,13 @@ pub struct OidcConfigRecord {
     pub configured_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OidcSecretRecord {
     pub encrypted_client_secret: String,
     pub stored_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OwnerRecord {
     pub email: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -241,20 +242,20 @@ pub struct OwnerRecord {
 
 // ── Auth response types ─────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OidcStartResponse {
     pub authorization_url: String,
     pub state: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OidcCallbackResponse {
     pub session_token: String,
     pub expires_at: i64,
     pub user: AuthenticatedUser,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AuthenticatedUser {
     pub email: String,
     pub oidc_subject: String,
@@ -266,14 +267,14 @@ pub struct AuthenticatedUser {
     pub avatar_url: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct LogoutResponse {
     pub ok: bool,
 }
 
 // ── User management types ───────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
     Owner,
@@ -308,7 +309,7 @@ impl std::str::FromStr for UserRole {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UserStatus {
     Active,
@@ -327,7 +328,7 @@ impl std::fmt::Display for UserStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct User {
     pub id: String,
     pub email: String,
@@ -341,45 +342,45 @@ pub struct User {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct InviteUserRequest {
     pub email: String,
     pub role: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct InviteUserResponse {
     pub user: User,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateUserRoleRequest {
     pub role: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateUserRoleResponse {
     pub user: User,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ReEnableUserResponse {
     pub user: User,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListUsersResponse {
     pub users: Vec<User>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UserProfileResponse {
     pub user: User,
 }
 
 // ── SCM Integration types ──────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ScmProvider {
     Github,
@@ -406,7 +407,7 @@ impl FromStr for ScmProvider {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IntegrationAuthMode {
     GithubApp,
@@ -436,7 +437,7 @@ impl FromStr for IntegrationAuthMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IntegrationStatus {
     Active,
@@ -466,7 +467,7 @@ impl FromStr for IntegrationStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Integration {
     pub id: String,
     pub provider: String,
@@ -483,7 +484,7 @@ pub struct Integration {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IntegrationInstallation {
     pub id: String,
     pub integration_id: String,
@@ -493,7 +494,7 @@ pub struct IntegrationInstallation {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IntegrationRepository {
     pub id: String,
     pub installation_id: String,
@@ -507,40 +508,40 @@ pub struct IntegrationRepository {
 
 // ── SCM Integration API types ──────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitHubAppStartRequest {
     pub webhook_url: String,
     /// Frontend URL to redirect to after GitHub App creation completes.
     pub redirect_url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitHubAppStartResponse {
     /// URL to navigate the browser to — serves an auto-submitting form that POSTs the manifest to GitHub.
     pub create_url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitHubAppCompleteRequest {
     pub code: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitHubAppCompleteResponse {
     pub integration: Integration,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SyncInstallationsRequest {
     pub installation_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SyncInstallationsResponse {
     pub installations: Vec<IntegrationInstallation>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitLabStartRequest {
     pub host_url: String,
     pub auth_mode: String,
@@ -553,29 +554,29 @@ pub struct GitLabStartRequest {
     pub access_token: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitLabCompleteResponse {
     pub integration: Integration,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitLabAuthorizeRequest {
     pub integration_id: String,
     pub redirect_url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitLabAuthorizeResponse {
     pub authorize_url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListIntegrationsResponse {
     pub integrations: Vec<Integration>,
     pub total: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IntegrationDetailResponse {
     pub integration: Integration,
     pub installation_count: i64,
@@ -584,19 +585,19 @@ pub struct IntegrationDetailResponse {
     pub last_webhook_at: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListInstallationsResponse {
     pub installations: Vec<IntegrationInstallation>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListRepositoriesResponse {
     pub repositories: Vec<IntegrationRepository>,
 }
 
 // ── Build domain types ─────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BuildStatus {
     Queued,
@@ -677,7 +678,7 @@ impl FromStr for BuildStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerType {
     Manual,
@@ -710,7 +711,7 @@ impl FromStr for TriggerType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ConcurrencyPolicy {
     #[serde(default)]
     pub cancel_previous: bool,
@@ -729,7 +730,7 @@ impl Default for ConcurrencyPolicy {
 
 // ── Trigger config ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TriggerConfig {
     #[serde(default)]
     pub events: Vec<String>,
@@ -826,7 +827,7 @@ impl TriggerConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Build {
     pub id: String,
     pub project_id: String,
@@ -844,6 +845,7 @@ pub struct Build {
     pub commit_sha: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    #[schema(value_type = Object)]
     pub config_snapshot: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_id: Option<String>,
@@ -860,7 +862,7 @@ pub struct Build {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BuildEvent {
     pub id: String,
     pub build_id: String,
@@ -876,7 +878,7 @@ pub struct BuildEvent {
 
 // ── Build API types ────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateBuildRequest {
     pub pipeline_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -887,31 +889,31 @@ pub struct CreateBuildRequest {
     pub trigger_ref: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateBuildResponse {
     pub build: Build,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BuildDetailResponse {
     pub build: Build,
     pub events: Vec<BuildEvent>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListBuildsResponse {
     pub builds: Vec<Build>,
     pub total: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CancelBuildResponse {
     pub build: Build,
 }
 
 // ── Runner domain types ─────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunnerStatus {
     Online,
@@ -945,11 +947,12 @@ impl FromStr for RunnerStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Runner {
     pub id: String,
     pub name: String,
     pub status: String,
+    #[schema(value_type = Object)]
     pub capabilities: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_heartbeat_at: Option<i64>,
@@ -961,49 +964,52 @@ pub struct Runner {
 
 // ── Runner API types ────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RegisterRunnerRequest {
     pub name: String,
     #[serde(default)]
+    #[schema(value_type = Object)]
     pub capabilities: serde_json::Value,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RegisterRunnerResponse {
     pub runner: Runner,
     pub token: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RunnerHeartbeatRequest {
     pub status: String,
     #[serde(default)]
+    #[schema(value_type = Object)]
     pub capabilities: serde_json::Value,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateRunnerRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateRunnerResponse {
     pub runner: Runner,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ClaimJobResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job: Option<ClaimedJob>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ClaimedJob {
     pub build_id: String,
     pub project_id: String,
     pub pipeline_id: String,
     pub build_number: i64,
+    #[schema(value_type = Object)]
     pub config_snapshot: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit_sha: Option<String>,
@@ -1012,7 +1018,7 @@ pub struct ClaimedJob {
     pub lease_expires_at: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateJobStatusRequest {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1023,7 +1029,7 @@ pub struct UpdateJobStatusRequest {
     pub steps: Vec<StepResult>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StepResult {
     pub name: String,
     pub status: String,
@@ -1034,19 +1040,19 @@ pub struct StepResult {
     pub duration_ms: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListRunnersResponse {
     pub runners: Vec<Runner>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct JobStatusResponse {
     pub status: String,
 }
 
 // ── Artifact domain types ────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Artifact {
     pub id: String,
     pub build_id: String,
@@ -1055,11 +1061,12 @@ pub struct Artifact {
     pub file_path: String,
     pub file_size: Option<i64>,
     pub checksum: Option<String>,
+    #[schema(value_type = Object)]
     pub metadata: serde_json::Value,
     pub created_at: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateArtifactRequest {
     pub name: String,
     pub artifact_type: String,
@@ -1068,21 +1075,22 @@ pub struct CreateArtifactRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checksum: Option<String>,
     #[serde(default)]
+    #[schema(value_type = Object)]
     pub metadata: serde_json::Value,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateArtifactResponse {
     pub artifact: Artifact,
     pub upload_url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListArtifactsResponse {
     pub artifacts: Vec<Artifact>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ArtifactDownloadLinkResponse {
     pub download_url: String,
     pub expires_at: i64,
@@ -1090,7 +1098,7 @@ pub struct ArtifactDownloadLinkResponse {
 
 // ── Artifact storage settings types ─────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactStorageProvider {
     Disabled,
@@ -1124,7 +1132,7 @@ impl FromStr for ArtifactStorageProvider {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactStorageSource {
     Database,
@@ -1132,7 +1140,7 @@ pub enum ArtifactStorageSource {
     Default,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ArtifactStorageSettings {
     pub provider: ArtifactStorageProvider,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1150,12 +1158,12 @@ pub struct ArtifactStorageSettings {
     pub updated_at: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ArtifactStorageSettingsResponse {
     pub settings: ArtifactStorageSettings,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateArtifactStorageSettingsRequest {
     pub provider: ArtifactStorageProvider,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1172,7 +1180,7 @@ pub struct UpdateArtifactStorageSettingsRequest {
     pub secret_access_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyStorageMode {
     Keychain,
@@ -1200,7 +1208,7 @@ impl FromStr for KeyStorageMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InstancePreferences {
     pub key_storage_mode: KeyStorageMode,
     pub restart_required: bool,
@@ -1208,19 +1216,19 @@ pub struct InstancePreferences {
     pub updated_at: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct InstancePreferencesResponse {
     pub preferences: InstancePreferences,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateInstancePreferencesRequest {
     pub key_storage_mode: KeyStorageMode,
 }
 
 // ── Project API types ───────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Project {
     pub id: String,
     pub name: String,
@@ -1228,6 +1236,7 @@ pub struct Project {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository_id: Option<String>,
+    #[schema(value_type = Object)]
     pub settings: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_branch: Option<String>,
@@ -1236,7 +1245,7 @@ pub struct Project {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateProjectRequest {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1247,7 +1256,7 @@ pub struct CreateProjectRequest {
     pub default_branch: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateProjectRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -1258,22 +1267,23 @@ pub struct UpdateProjectRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
     pub settings: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateProjectResponse {
     pub project: Project,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ProjectDetailResponse {
     pub project: Project,
     pub pipeline_count: i64,
     pub build_count: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListProjectsResponse {
     pub projects: Vec<Project>,
     pub total: i64,
@@ -1281,7 +1291,7 @@ pub struct ListProjectsResponse {
 
 // ── Pipeline API types ──────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BuildPlatform {
     #[default]
@@ -1290,7 +1300,7 @@ pub enum BuildPlatform {
     Macos,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct PipelineCommandStages {
     #[serde(default)]
     pub pre_build: Vec<String>,
@@ -1300,7 +1310,7 @@ pub struct PipelineCommandStages {
     pub post_build: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct PlatformBuildArgs {
     #[serde(default)]
     pub android: Vec<String>,
@@ -1310,7 +1320,7 @@ pub struct PlatformBuildArgs {
     pub macos: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct PlatformBuildCommands {
     #[serde(default)]
     pub android: Option<String>,
@@ -1320,13 +1330,13 @@ pub struct PlatformBuildCommands {
     pub macos: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PipelineEnvVar {
     pub key: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PipelineExecutionConfig {
     #[serde(default = "default_platforms")]
     pub platforms: Vec<BuildPlatform>,
@@ -1366,7 +1376,7 @@ impl Default for PipelineExecutionConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Pipeline {
     pub id: String,
     pub project_id: String,
@@ -1383,7 +1393,7 @@ pub struct Pipeline {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreatePipelineRequest {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1398,7 +1408,7 @@ pub struct CreatePipelineRequest {
     pub concurrency: Option<ConcurrencyPolicy>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdatePipelineRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -1416,24 +1426,24 @@ pub struct UpdatePipelineRequest {
     pub enabled: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreatePipelineResponse {
     pub pipeline: Pipeline,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct PipelineDetailResponse {
     pub pipeline: Pipeline,
     pub build_count: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ListPipelinesResponse {
     pub pipelines: Vec<Pipeline>,
     pub total: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ValidatePipelineRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_path: Option<String>,
@@ -1447,7 +1457,7 @@ pub struct ValidatePipelineRequest {
     pub concurrency: Option<ConcurrencyPolicy>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ValidatePipelineResponse {
     pub valid: bool,
     pub errors: Vec<String>,
@@ -1455,14 +1465,14 @@ pub struct ValidatePipelineResponse {
 
 // ── Pipeline Android signing types ──────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AndroidSigningBuildType {
     Debug,
     Release,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct AndroidSigningProfileInput {
     #[serde(default)]
     pub enabled: bool,
@@ -1478,7 +1488,7 @@ pub struct AndroidSigningProfileInput {
     pub key_password: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct UpdatePipelineAndroidSigningRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debug: Option<AndroidSigningProfileInput>,
@@ -1486,7 +1496,7 @@ pub struct UpdatePipelineAndroidSigningRequest {
     pub release: Option<AndroidSigningProfileInput>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AndroidSigningProfile {
     pub build_type: AndroidSigningBuildType,
     pub enabled: bool,
@@ -1503,14 +1513,14 @@ pub struct AndroidSigningProfile {
     pub updated_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PipelineAndroidSigningResponse {
     pub pipeline_id: String,
     pub debug: AndroidSigningProfile,
     pub release: AndroidSigningProfile,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RunnerAndroidSigningProfile {
     pub build_type: AndroidSigningBuildType,
     pub enabled: bool,
@@ -1521,7 +1531,7 @@ pub struct RunnerAndroidSigningProfile {
     pub key_password: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RunnerAndroidSigningResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debug: Option<RunnerAndroidSigningProfile>,
@@ -1531,7 +1541,7 @@ pub struct RunnerAndroidSigningResponse {
 
 // ── Pipeline iOS signing types ──────────────────────────────────
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IosSigningMode {
     #[default]
@@ -1540,7 +1550,7 @@ pub enum IosSigningMode {
     Hybrid,
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct IosCertificateInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub p12_filename: Option<String>,
@@ -1560,7 +1570,7 @@ impl fmt::Debug for IosCertificateInput {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct IosProvisioningProfileInput {
     pub bundle_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1579,7 +1589,7 @@ impl fmt::Debug for IosProvisioningProfileInput {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct IosApiCredentialInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_id: Option<String>,
@@ -1599,14 +1609,14 @@ impl fmt::Debug for IosApiCredentialInput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct IosBundleProfileMappingInput {
     pub bundle_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_filename: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct UpdatePipelineIosSigningRequest {
     #[serde(default)]
     pub enabled: bool,
@@ -1623,7 +1633,7 @@ pub struct UpdatePipelineIosSigningRequest {
     pub api_credentials: Option<IosApiCredentialInput>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IosProvisioningProfileSummary {
     pub bundle_id: String,
     pub has_profile: bool,
@@ -1641,7 +1651,7 @@ pub struct IosProvisioningProfileSummary {
     pub checksum: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PipelineIosSigningResponse {
     pub pipeline_id: String,
     pub enabled: bool,
@@ -1670,7 +1680,7 @@ pub struct PipelineIosSigningResponse {
     pub updated_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RunnerIosProvisioningProfile {
     pub bundle_id: String,
     pub profile_filename: String,
@@ -1681,7 +1691,7 @@ pub struct RunnerIosProvisioningProfile {
     pub profile_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RunnerIosSigningBundle {
     pub enabled: bool,
     pub mode: IosSigningMode,
@@ -1694,13 +1704,13 @@ pub struct RunnerIosSigningBundle {
     pub provisioning_profiles: Vec<RunnerIosProvisioningProfile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RunnerIosSigningResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle: Option<RunnerIosSigningBundle>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RegisteredIosDevice {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1714,14 +1724,14 @@ pub struct RegisteredIosDevice {
     pub last_synced_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ListPipelineIosDevicesResponse {
     pub pipeline_id: String,
     #[serde(default)]
     pub devices: Vec<RegisteredIosDevice>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RegisterIosDeviceRequest {
     pub udid: String,
     pub name: String,
@@ -1729,14 +1739,14 @@ pub struct RegisterIosDeviceRequest {
     pub platform: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RegisterIosDeviceResponse {
     pub pipeline_id: String,
     pub device: RegisteredIosDevice,
     pub profile_sync_triggered: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SyncPipelineIosSigningResponse {
     pub pipeline_id: String,
     pub ok: bool,
@@ -1749,24 +1759,24 @@ pub struct SyncPipelineIosSigningResponse {
 
 // ── Build log types ─────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BuildLogChunk {
     pub sequence: i64,
     pub content: String,
     pub stream: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct AppendBuildLogsRequest {
     pub chunks: Vec<BuildLogChunk>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct AppendBuildLogsResponse {
     pub appended: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BuildLogsResponse {
     pub logs: Vec<BuildLogChunk>,
     pub total: i64,
