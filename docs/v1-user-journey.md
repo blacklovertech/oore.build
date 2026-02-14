@@ -1,7 +1,7 @@
 # V1 User Journey (Execution-First)
 
 Status: Active guidance for product, API, and UI completion checks.
-Last updated: 2026-02-10
+Last updated: 2026-02-13
 
 ## Purpose
 
@@ -12,14 +12,16 @@ No build-related UI task is complete unless the relevant journey checkpoint here
 
 - Applies to self-hosted customer backend on macOS (V1 contract).
 - Hosted `ci.oore.build` is UI-only and does not run customer builds.
-- Auth is OIDC-only.
+- Runtime modes are `local` (default) and `remote` (opt-in).
+- Local mode does not require OIDC.
+- Remote mode requires OIDC.
 - Frontend and backend remain strictly separated.
 
 ## Canonical User Journey
 
 1. Instance bootstrap and access
-2. Git provider connection
-3. Project creation from connected repository
+2. Source connection (local_git or provider)
+3. Project creation from connected source
 4. Pipeline configuration
 5. Trigger policy configuration
 6. Build trigger and planning
@@ -35,7 +37,8 @@ No build-related UI task is complete unless the relevant journey checkpoint here
 Actor: Owner/Admin operator
 
 User action:
-- Complete setup flow and sign in via OIDC.
+- Local mode: complete setup flow and sign in via local auth.
+- Remote mode: complete setup flow and sign in via OIDC.
 
 System outcome:
 - Instance reaches `ready`.
@@ -44,35 +47,36 @@ System outcome:
 Done when:
 - `GET /v1/public/setup-status` is non-sensitive and accurate.
 - Setup mutating endpoints are disabled after `ready`.
+- Mode-specific auth behavior is enforced consistently.
 
-### 2) Git provider connection
+### 2) Source connection (local_git or provider)
 
-Actor: Owner/Admin
+Actor: Owner/Admin/Developer
 
 User action:
-- Open Integrations, select provider, authorize app/OAuth installation, pick repos/org scope.
+- Local mode: register local git repository path(s).
+- Remote mode: open Integrations, connect GitHub/GitLab, and select repo scope.
 
 System outcome:
-- Provider installation linkage is stored for the instance.
-- Webhook signature secret and provider tokens are stored encrypted.
-- Provider webhooks are delivered directly to the customer backend.
+- Local mode: local repository linkage is stored and validated.
+- Remote mode: provider linkage is stored with encrypted credentials and webhook settings.
 
 Done when:
-- UI shows provider connection status.
+- UI shows source connection status and mode constraints.
 - Disconnect/reconnect path is available and audited.
+- Local mode hides/disables GitHub/GitLab integration actions.
 - Provider auth data never appears in public endpoints or logs.
-- Hosted `ci.oore.build` mode: the browser flow starts in hosted UI, but OAuth/app callbacks and webhook ingestion terminate on the customer backend.
-- Fully self-hosted UI mode: browser flow, callbacks, and webhook ingestion all terminate on the same self-hosted backend.
+- Remote mode keeps backend-owned callback/webhook endpoints.
 
-### 3) Project creation from repository
+### 3) Project creation from source
 
 Actor: Developer/Admin
 
 User action:
-- Create project from a connected repository and choose default branch.
+- Create project from a connected source and choose default branch.
 
 System outcome:
-- Project is linked to provider/repository identity.
+- Project is linked to source identity (`local_git` repo or provider repo).
 - RBAC and audit trail are enforced.
 
 Done when:

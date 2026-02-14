@@ -1,129 +1,117 @@
-# SCM Integration Blueprint (V1)
+# SCM Integration Blueprint (V1, Mode-Aware)
 
-Status: Active implementation guidance  
-Last updated: 2026-02-07
+Status: Active implementation guidance
+Last updated: 2026-02-13
 
 ## Why this exists
 
-This is the execution guide for connecting GitHub and GitLab in V1 without breaking platform constraints:
+This guide defines source integration strategy after the local-first reset:
 
-- Hosted `ci.oore.build` is UI-only.
-- Customer backend is the control plane and webhook receiver.
-- Integrations must support multiple connections with no hard product-imposed cap.
+- default onboarding is local-only and low-friction
+- remote exposure is explicit operator opt-in
+- source connection strategy must match runtime mode
+
+## Runtime Modes
+
+### Local mode (default)
+
+- intended for localhost/private-network operation
+- no hosted-provider webhook dependency
+- source integration is `local_git`
+- GitHub/GitLab integration setup is disabled
+
+### Remote mode (opt-in)
+
+- intended for internet-reachable backend operation
+- OIDC is required for interactive sign-in
+- GitHub/GitLab integration setup is enabled
+- webhook ingestion endpoints are enabled
 
 ## Core Decision
 
-Use **backend-owned integration endpoints** in all deployment modes.
+Use **mode-gated integration providers**:
 
-- Hosted UI mode: `ci.oore.build` starts the flow, but callback and webhook endpoints are on the customer backend.
-- Fully self-hosted mode: UI + backend are customer-hosted, and callbacks/webhooks terminate there.
+- `local_git` for local mode
+- `github` and `gitlab` for remote mode
 
-Do **not** rely on a single oore-managed global GitHub App in V1, because GitHub App webhook config is app-level (single webhook endpoint per app), while V1 requires direct delivery to each customer backend and no hosted webhook control plane.
+This removes first-run dependency on inbound webhooks and public callback reachability.
 
-## GitHub (V1 Standard)
+## Local Git (V1 Alpha Standard)
 
-### Recommended auth model
+### Integration model
 
-- Use **GitHub Apps**, not OAuth apps, for repo-scoped automation.
-- Per backend instance, use one or more instance-owned apps ("BYO app"), installed on target orgs/repos.
+- A local integration stores:
+- repository path (absolute path on host)
+- display name
+- default branch (optional)
+- active state
 
-### Onboarding flow
+### Trigger model
 
-1. Owner/Admin clicks `Connect GitHub`.
-2. Backend provides either:
-- GitHub App manifest registration flow, or
-- Pre-filled app registration URL parameters.
-3. User creates/owns the app (personal/org-owned).
-4. User installs app to org/account and selects repos.
-5. Backend stores app metadata, installation IDs, and encrypted secrets.
-6. GitHub sends webhook events directly to customer backend webhook endpoint.
+- Initial alpha: manual/API triggers only.
+- Poll-based auto-triggering for GitHub/GitLab is deferred.
 
-### Why this is reliable
+### Validation requirements
 
-- Installation model is first-class and supports multiple installs across accounts/orgs.
-- Webhook signature verification and delivery IDs allow secure idempotent handling.
-- Missed deliveries can be redelivered explicitly via GitHub tooling/API.
+- Path must exist and be a git repository.
+- Path must resolve to an operator-approved filesystem location.
+- Symlink traversal outside allowed roots must be rejected.
+- Build snapshot must include a resolvable local source URL/path.
 
-## GitLab (V1 Standard)
+## GitHub and GitLab (Remote-Only in V1)
 
-### Recommended auth model
+### Availability
 
-- Support `gitlab.com` and self-managed GitLab by storing provider base URL per integration.
-- Primary mode: OAuth application per GitLab host + project/group webhooks.
-- Fallback mode (if OAuth app creation is blocked): scoped token + webhooks (documented as lower-security convenience mode).
+- Disabled in local mode.
+- Enabled only after remote mode is explicitly activated.
 
-### Onboarding flow
+### Delivery model
 
-1. Owner/Admin clicks `Connect GitLab`.
-2. User selects host:
-- `https://gitlab.com`, or
-- `https://<self-managed-host>`.
-3. User registers OAuth app on that host (or provides token in fallback mode).
-4. User configures project/group webhook URL + secret token to customer backend.
-5. Backend verifies webhook secret/token and stores integration metadata.
+- Backend-owned callback and webhook endpoints.
+- Hosted UI remains UI-only (`ci.oore.build`); backend receives provider traffic.
+- Existing webhook security and idempotency constraints remain mandatory.
 
-### Why this is reliable
+### Deferred item
 
-- Same endpoint model for GitLab.com and self-managed; only base URL changes.
-- GitLab webhook history + resend supports operational recovery.
-- Group webhooks can reduce per-project setup where plan/tier permits.
+- Provider polling (webhookless GitHub/GitLab automation) is explicitly out of current alpha scope.
 
-## Multi-Integration Model (No Hard Limit)
+## Data Model Direction
 
-V1 should allow unlimited integrations from product perspective.  
-Enforce only practical safeguards (rate limits, UI pagination, queue pressure), not arbitrary count caps.
+Minimum provider set becomes:
 
-Minimum model:
+- `local_git`
+- `github`
+- `gitlab`
 
-- `integrations`: one row per provider connection (provider, host, display name, auth mode, status)
-- `integration_credentials`: encrypted secrets/token material with rotation metadata
-- `integration_installations`: provider installation/group/project linkage
-- `integration_repositories`: mapped repos/projects for trigger scope
-- `integration_webhooks`: endpoint status, last delivery timestamp, last failure reason
+Integration metadata must include mode compatibility so backend enforcement is deterministic.
 
-Rules:
+## Security Requirements
 
-- One backend instance can have many integrations across GitHub and GitLab.
-- One integration can map to many installations/repos/projects.
-- Build triggers must resolve the exact integration + installation context per project.
+- Local mode must not silently expose backend to internet paths.
+- Local mode must not require webhook secrets or external callback registration.
+- Remote mode keeps current webhook verification requirements:
+- GitHub HMAC verification
+- GitLab token verification
+- replay/idempotency controls
+- Local repository path handling must guard against path traversal and unsafe root targeting.
 
-## Webhook Reliability Requirements (Mandatory)
+## UX Rules
 
-- Verify provider signature/token on every webhook.
-- Reject stale or replayed deliveries using event IDs + replay window.
-- ACK fast (`2xx`), enqueue async processing.
-- Store raw payload + normalized event metadata for audit/debug (with secret scrubbing).
-- Idempotent processing by provider delivery ID.
-- Provide operator tools:
-- last delivery status
-- failure reason
-- resend/reconcile guidance
+- Installer and first-run setup must default to local mode with local web UI.
+- Integrations UI in local mode shows `local_git` flows only.
+- GitHub/GitLab cards are hidden or disabled with clear “Enable Remote Mode first” guidance.
+- Remote mode enable action is explicit and reversible only via operator-level flow.
 
-## Hosted UI vs Self-Hosted UI Summary
+## Rollout Order
 
-- **Same backend contract in both modes.**  
-Only the frontend origin changes.
-- Hosted UI does not act as webhook relay/proxy in V1.
-- CORS and allowed origins must include the selected UI origin(s), but SCM callbacks/webhooks remain backend endpoints.
-
-## Priority in Roadmap
-
-This architecture is reflected in `docs/v1-roadmap.md`:
-
-- Phase 2 (`P0`) includes SCM integration schema, GitHub flow, GitLab flow, and webhook hardening before trigger reliability is considered complete.
+1. Mode primitive and backend enforcement.
+2. Local auth + local-first installer/setup flow.
+3. `local_git` integration API + UI.
+4. Build source resolution for local repositories.
+5. Remote mode enable flow and provider integration re-enable.
 
 ## References
 
-- GitHub Apps and webhooks:
-- https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps
-- https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
-- https://docs.github.com/webhooks/using-webhooks/best-practices-for-using-webhooks
-- https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries
-- https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks
-
-- GitLab webhooks and OAuth:
-- https://docs.gitlab.com/user/project/integrations/webhooks/
-- https://docs.gitlab.com/api/project_webhooks/
-- https://docs.gitlab.com/api/group_webhooks/
-- https://docs.gitlab.com/api/oauth2/
-- https://docs.gitlab.com/integration/gitlab/
+- `docs/platform-contract.md`
+- `docs/strict-guidelines.md`
+- `docs/v1-roadmap.md`

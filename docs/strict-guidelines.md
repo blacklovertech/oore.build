@@ -5,7 +5,10 @@ These rules are mandatory unless explicitly superseded by an ADR and contract up
 ## Product and Scope
 
 - V1 is Flutter-first with build targets: Android, iOS, macOS.
-- V1 auth model is OIDC-only.
+- V1 default runtime mode is `local`.
+- V1 supports `local` and `remote` modes.
+- `local` mode does not require OIDC.
+- `remote` mode requires OIDC.
 - Self-hosted backend is primary. Hosted offering at `ci.oore.build` is UI-only.
 - Backend runtime support in V1 is macOS only.
 
@@ -15,12 +18,21 @@ These rules are mandatory unless explicitly superseded by an ADR and contract up
 - Public setup endpoint must expose non-sensitive state only.
 - Setup mutating endpoints must be disabled after `ready`.
 - Break-glass recovery is opt-in runtime activation only.
+- Remote exposure/enablement must be explicit operator action.
+- Local mode must prioritize loopback/local access over internet exposure.
 
 ## Commands and Runtime
 
 - `oored` and `oore` command names are stable contract interfaces.
 - `oored` is daemon/runtime surface.
 - `oore` is operator setup/admin surface.
+- Installer default path must keep first-run onboarding local-first.
+
+## Integrations and Triggers
+
+- Local mode must support `local_git` integration for source connection.
+- Local mode must disable hosted-provider integrations (GitHub/GitLab) until remote mode is enabled.
+- Remote mode enables GitHub/GitLab integration flows and webhook ingestion paths.
 
 ## Frontend Architecture
 

@@ -263,6 +263,11 @@ pub async fn github_start(
     Json(req): Json<GitHubAppStartRequest>,
 ) -> ApiResult<GitHubAppStartResponse> {
     check_permission(&state.enforcer, &auth.0.role, "integrations", "write").await?;
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+    require_remote_mode(&pool).await?;
 
     if req.webhook_url.is_empty() {
         return Err(api_err(
@@ -328,6 +333,18 @@ pub async fn github_create_page(
     State(state): State<Arc<AppState>>,
     Query(params): Query<CreatePageQuery>,
 ) -> Response {
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+    if require_remote_mode(&pool).await.is_err() {
+        return Html(error_page(
+            "Remote mode required",
+            "GitHub integration setup is available only when remote mode is enabled.",
+        ))
+        .into_response();
+    }
+
     let oauth_state = match open_state(&params.state, &state.encryption_key) {
         Ok(s) => s,
         Err(e) => {
@@ -407,6 +424,18 @@ pub async fn github_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<CallbackQuery>,
 ) -> Response {
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+    if require_remote_mode(&pool).await.is_err() {
+        return Html(error_page(
+            "Remote mode required",
+            "GitHub integration setup is available only when remote mode is enabled.",
+        ))
+        .into_response();
+    }
+
     let code = match params.code {
         Some(c) if !c.is_empty() => c,
         _ => {
@@ -575,6 +604,14 @@ pub async fn github_installed(
         let resolved = integration_id.or(install_state_integration_id);
         (pool, resolved)
     };
+
+    if require_remote_mode(&pool).await.is_err() {
+        return Html(error_page(
+            "Remote mode required",
+            "GitHub integration setup is available only when remote mode is enabled.",
+        ))
+        .into_response();
+    }
 
     // Auto-sync installations and repos so the detail page shows fresh data
     if let Some(ref id) = integration_id {
@@ -824,6 +861,11 @@ pub async fn github_complete(
     Json(req): Json<GitHubAppCompleteRequest>,
 ) -> ApiResult<GitHubAppCompleteResponse> {
     check_permission(&state.enforcer, &auth.0.role, "integrations", "write").await?;
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+    require_remote_mode(&pool).await?;
 
     if req.code.is_empty() {
         return Err(api_err(
@@ -1073,6 +1115,7 @@ pub async fn sync_installations(
         let store = state.store.lock().await;
         store.pool().clone()
     };
+    require_remote_mode(&pool).await?;
 
     let installations = perform_sync(&pool, &state.encryption_key, &integration_id)
         .await
@@ -1254,7 +1297,7 @@ async fn sync_installation_repos(
 }
 
 // ── HTML helpers (re-exported from parent module) ─────────────────
-use super::{error_page, favicon_data_uri, html_escape};
+use super::{error_page, favicon_data_uri, html_escape, require_remote_mode};
 
 #[cfg(test)]
 mod tests {

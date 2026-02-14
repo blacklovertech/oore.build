@@ -1,7 +1,7 @@
 # V1 Implementation Roadmap
 
 Status: Active - execution-first sequencing for V1 CI completion.
-Last assessed: 2026-02-10
+Last assessed: 2026-02-13
 
 ## Why This Revision
 
@@ -33,6 +33,24 @@ Last assessed: 2026-02-10
 - Use `docs/v1-user-journey.md` as the release gate for build-related product work.
 - A task is not complete until its corresponding journey checkpoint is satisfied (including failure-path behavior).
 - If roadmap ordering conflicts with the journey, update roadmap sequencing before implementation continues.
+
+## Alpha Reset: Local-First Mode (`P0`, Active)
+
+Dependency: Foundation complete.
+
+- [x] **R0.1 [P0] Installer local-first default** - `scripts/install.sh` now defaults to loopback daemon + local-first onboarding copy and keeps hosted/remote setup as an explicit optional path.
+- [x] **R0.2 [P0] Mode primitive (`local`/`remote`)** - Runtime mode is persisted in instance preferences, defaults to `local`, and is enforced server-side for provider integration/webhook paths.
+- [x] **R0.3 [P0] Local auth path** - In local mode, support frictionless local sign-in (no OIDC requirement). Keep remote mode OIDC-required.
+- [x] **R0.4 [P0] Local source integration (`local_git`)** - Add local repository integration API/UI and validation for path-based git repositories.
+- [x] **R0.5 [P0] Mode-gated provider integrations** - GitHub/GitLab setup and webhook paths are remote-mode-gated server-side, and local-mode UI now blocks provider connect actions.
+- [x] **R0.6 [P0] Build source correctness gate** - Build creation now blocks source-missing/unresolvable projects, enforces checkout target presence (branch/commit/default branch), and UI build-trigger flows block source-less projects.
+- [ ] **R0.7 [P0] Remote mode enable flow** - Add explicit operator-controlled remote enable action with preflight checks and guidance.
+
+Exit criteria:
+- First-run setup succeeds fully on localhost with no public internet exposure.
+- Local mode can create and run builds from `local_git` sources.
+- GitHub/GitLab flows are hidden or blocked in local mode.
+- Remote mode remains available as explicit opt-in with OIDC and webhook paths.
 
 ## Foundation (Complete)
 

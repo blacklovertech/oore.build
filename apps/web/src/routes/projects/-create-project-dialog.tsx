@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -92,6 +92,7 @@ export default function CreateProjectDialog({
     () => Object.fromEntries((repos ?? []).map((r) => [r.id, r.full_name])),
     [repos],
   )
+  const hasRepos = (repos?.length ?? 0) > 0
 
   const form = useForm<CreateProjectForm>({
     resolver: zodResolver(createProjectSchema),
@@ -99,12 +100,24 @@ export default function CreateProjectDialog({
     mode: 'onBlur',
   })
 
+  useEffect(() => {
+    if (!open) return
+    if (!hasRepos) return
+    if (selectedRepoId) return
+    setSelectedRepoId(repos![0].id)
+  }, [open, hasRepos, repos, selectedRepoId])
+
   function onSubmit(data: CreateProjectForm) {
+    if (!selectedRepoId) {
+      toast.error('Select a repository before creating a project.')
+      return
+    }
+
     createMutation.mutate(
       {
         name: data.name.trim(),
         description: data.description?.trim() || undefined,
-        repository_id: selectedRepoId || undefined,
+        repository_id: selectedRepoId,
         default_branch: data.default_branch?.trim() || undefined,
       },
       {
@@ -139,7 +152,7 @@ export default function CreateProjectDialog({
         <DialogHeader>
           <DialogTitle>Create Project</DialogTitle>
           <DialogDescription>
-            Create a new CI project. Optionally link it to a repository.
+            Create a new CI project linked to a repository source.
           </DialogDescription>
         </DialogHeader>
 
@@ -182,12 +195,7 @@ export default function CreateProjectDialog({
             />
 
             <div className="space-y-2">
-              <FormLabel>
-                Repository{' '}
-                <span className="text-muted-foreground font-normal">
-                  (optional)
-                </span>
-              </FormLabel>
+              <FormLabel>Repository</FormLabel>
               {reposLoading ? (
                 <div className="flex items-center gap-2 py-2">
                   <Spinner className="size-4" />
@@ -195,7 +203,7 @@ export default function CreateProjectDialog({
                     Loading repositories...
                   </span>
                 </div>
-              ) : repos && repos.length > 0 ? (
+              ) : hasRepos ? (
                 <Select
                   value={selectedRepoId}
                   onValueChange={(v) => setSelectedRepoId(v ?? '')}
@@ -205,7 +213,7 @@ export default function CreateProjectDialog({
                     <SelectValue placeholder="Select a repository..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {repos.map((repo) => (
+                    {(repos ?? []).map((repo) => (
                       <SelectItem key={repo.id} value={repo.id}>
                         {repo.full_name}
                       </SelectItem>
@@ -214,7 +222,8 @@ export default function CreateProjectDialog({
                 </Select>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  No repositories available. Add an integration first.
+                  No repositories available. Add an integration and sync
+                  repositories first.
                 </p>
               )}
             </div>
@@ -246,7 +255,10 @@ export default function CreateProjectDialog({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
+              <Button
+                type="submit"
+                disabled={createMutation.isPending || reposLoading || !hasRepos}
+              >
                 {createMutation.isPending ? (
                   <>
                     <Spinner className="size-4" />

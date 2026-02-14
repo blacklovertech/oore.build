@@ -8,6 +8,8 @@ import type {
   CancelBuildResponse,
   CreateBuildRequest,
   CreateBuildResponse,
+  CreateLocalGitIntegrationRequest,
+  CreateLocalGitIntegrationResponse,
   CreatePipelineRequest,
   CreatePipelineResponse,
   CreateProjectRequest,
@@ -34,6 +36,8 @@ import type {
   ListRepositoriesResponse,
   ListRunnersResponse,
   ListUsersResponse,
+  LocalLoginRequest,
+  LocalLoginResponse,
   LogoutResponse,
   OidcConfigureRequest,
   OidcConfigureResponse,
@@ -43,6 +47,7 @@ import type {
   ProjectDetailResponse,
   ReEnableUserResponse,
   SetupCompleteResponse,
+  SetupLocalOwnerCreateResponse,
   SetupOidcStartResponse,
   SetupOidcVerifyResponse,
   SetupStatus,
@@ -204,6 +209,22 @@ export function setupOidcVerify(
   )
 }
 
+export function setupLocalOwnerCreate(
+  baseUrl: string,
+  sessionToken: string,
+  email: string,
+): Promise<SetupLocalOwnerCreateResponse> {
+  return request<SetupLocalOwnerCreateResponse>(
+    baseUrl,
+    '/v1/setup/local-owner/create',
+    {
+      method: 'POST',
+      headers: authHeaders(sessionToken),
+      body: JSON.stringify({ email }),
+    },
+  )
+}
+
 export function completeSetup(
   baseUrl: string,
   sessionToken: string,
@@ -297,6 +318,16 @@ export function logout(
   return request<LogoutResponse>(baseUrl, '/v1/auth/logout', {
     method: 'POST',
     headers: authHeaders(token),
+  })
+}
+
+export function localLogin(
+  baseUrl: string,
+  data: LocalLoginRequest,
+): Promise<LocalLoginResponse> {
+  return request<LocalLoginResponse>(baseUrl, '/v1/auth/local/login', {
+    method: 'POST',
+    body: JSON.stringify(data),
   })
 }
 
@@ -440,6 +471,46 @@ export function gitlabAuthorize(
       method: 'POST',
       headers: authHeaders(token),
       body: JSON.stringify(data),
+    },
+  )
+}
+
+export function createLocalGitIntegration(
+  baseUrl: string,
+  token: string,
+  data: CreateLocalGitIntegrationRequest,
+): Promise<CreateLocalGitIntegrationResponse> {
+  return request<CreateLocalGitIntegrationResponse>(
+    baseUrl,
+    '/v1/integrations/local-git',
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function listLocalGitIntegrations(
+  baseUrl: string,
+  token: string,
+): Promise<ListIntegrationsResponse> {
+  return request<ListIntegrationsResponse>(baseUrl, '/v1/integrations/local-git', {
+    headers: authHeaders(token),
+  })
+}
+
+export function deleteLocalGitIntegration(
+  baseUrl: string,
+  token: string,
+  id: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    baseUrl,
+    `/v1/integrations/local-git/${id}`,
+    {
+      method: 'DELETE',
+      headers: authHeaders(token),
     },
   )
 }

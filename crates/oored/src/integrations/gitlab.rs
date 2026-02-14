@@ -14,7 +14,7 @@ use sqlx::Row;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use super::error_page;
+use super::{error_page, require_remote_mode};
 use crate::AppState;
 use crate::crypto;
 use crate::extractors::AuthUser;
@@ -79,6 +79,11 @@ pub async fn gitlab_start(
     Json(req): Json<GitLabStartRequest>,
 ) -> ApiResult<GitLabCompleteResponse> {
     check_permission(&state.enforcer, &auth.0.role, "integrations", "write").await?;
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+    require_remote_mode(&pool).await?;
 
     // Validate host URL
     let host_url = req.host_url.trim_end_matches('/').to_string();
@@ -253,11 +258,6 @@ pub async fn gitlab_start(
         "inactive"
     } else {
         "active"
-    };
-
-    let pool = {
-        let store = state.store.lock().await;
-        store.pool().clone()
     };
 
     // Insert integration
@@ -626,6 +626,7 @@ pub async fn gitlab_authorize(
         let store = state.store.lock().await;
         store.pool().clone()
     };
+    require_remote_mode(&pool).await?;
 
     // Load the integration
     let row = sqlx::query("SELECT * FROM integrations WHERE id = ?1")
@@ -750,6 +751,18 @@ pub async fn gitlab_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<GitLabCallbackQuery>,
 ) -> Response {
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+    if require_remote_mode(&pool).await.is_err() {
+        return Html(error_page(
+            "Remote mode required",
+            "GitLab integration setup is available only when remote mode is enabled.",
+        ))
+        .into_response();
+    }
+
     // Handle GitLab error response
     if let Some(ref err) = params.error {
         let desc = params

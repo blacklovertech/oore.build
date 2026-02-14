@@ -54,4 +54,18 @@ export const authHandlers = [
       },
     })
   }),
+
+  http.post('/v1/auth/local/login', async () => {
+    await delay(150)
+    return HttpResponse.json({
+      session_token: DEMO_AUTH_TOKEN,
+      expires_at: DEMO_AUTH_EXPIRES_AT,
+      user: {
+        email: DEMO_USER_EMAIL,
+        oidc_subject: DEMO_OIDC_SUBJECT,
+        user_id: DEMO_USER_ID,
+        role: DEMO_USER_ROLE,
+      },
+    })
+  }),
 ]

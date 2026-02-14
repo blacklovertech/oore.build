@@ -5,6 +5,7 @@ import {
   configureOidc,
   getSetupStatus,
   getSetupSummary,
+  setupLocalOwnerCreate,
   setupOidcStart,
   setupOidcVerify,
   verifyBootstrapToken,
@@ -100,6 +101,28 @@ export function useSetupOidcVerify() {
       code: string
       state: string
     }) => setupOidcVerify(requireInstance(instance), sessionToken, code, state),
+    onSuccess: (data) => {
+      if (data.session_expires_at) {
+        useSetupStore.getState().setSessionExpiresAt(data.session_expires_at)
+      }
+      void queryClient.invalidateQueries({ queryKey })
+    },
+  })
+}
+
+export function useSetupLocalOwnerCreate() {
+  const queryClient = useQueryClient()
+  const instance = useActiveInstance()
+  const queryKey = useSetupStatusKey()
+
+  return useMutation({
+    mutationFn: ({
+      sessionToken,
+      email,
+    }: {
+      sessionToken: string
+      email: string
+    }) => setupLocalOwnerCreate(requireInstance(instance), sessionToken, email),
     onSuccess: (data) => {
       if (data.session_expires_at) {
         useSetupStore.getState().setSessionExpiresAt(data.session_expires_at)

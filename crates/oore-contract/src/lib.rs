@@ -62,18 +62,24 @@ impl SetupState {
 pub struct SetupStatus {
     pub instance_id: String,
     pub state: SetupState,
+    pub runtime_mode: RuntimeMode,
     pub setup_mode: bool,
     pub is_configured: bool,
 }
 
 impl SetupStatus {
-    pub fn from_state(instance_id: impl Into<String>, state: SetupState) -> Self {
+    pub fn from_state(
+        instance_id: impl Into<String>,
+        state: SetupState,
+        runtime_mode: RuntimeMode,
+    ) -> Self {
         let is_configured = state == SetupState::Ready;
         let setup_mode = !is_configured;
 
         Self {
             instance_id: instance_id.into(),
             state,
+            runtime_mode,
             setup_mode,
             is_configured,
         }
@@ -130,6 +136,19 @@ pub struct SetupOidcVerifyResponse {
     pub state: SetupState,
     pub owner_email: String,
     pub oidc_subject: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_expires_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SetupLocalOwnerCreateRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SetupLocalOwnerCreateResponse {
+    pub state: SetupState,
+    pub owner_email: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_expires_at: Option<i64>,
 }
@@ -250,6 +269,19 @@ pub struct OidcStartResponse {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OidcCallbackResponse {
+    pub session_token: String,
+    pub expires_at: i64,
+    pub user: AuthenticatedUser,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalLoginRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalLoginResponse {
     pub session_token: String,
     pub expires_at: i64,
     pub user: AuthenticatedUser,
@@ -385,6 +417,7 @@ pub struct UserProfileResponse {
 pub enum ScmProvider {
     Github,
     Gitlab,
+    LocalGit,
 }
 
 impl fmt::Display for ScmProvider {
@@ -392,6 +425,7 @@ impl fmt::Display for ScmProvider {
         match self {
             Self::Github => f.write_str("github"),
             Self::Gitlab => f.write_str("gitlab"),
+            Self::LocalGit => f.write_str("local_git"),
         }
     }
 }
@@ -402,6 +436,7 @@ impl FromStr for ScmProvider {
         match s {
             "github" => Ok(Self::Github),
             "gitlab" => Ok(Self::Gitlab),
+            "local_git" => Ok(Self::LocalGit),
             other => Err(format!("unknown SCM provider: {other}")),
         }
     }
@@ -413,6 +448,7 @@ pub enum IntegrationAuthMode {
     GithubApp,
     OauthApp,
     PersonalToken,
+    LocalPath,
 }
 
 impl fmt::Display for IntegrationAuthMode {
@@ -421,6 +457,7 @@ impl fmt::Display for IntegrationAuthMode {
             Self::GithubApp => f.write_str("github_app"),
             Self::OauthApp => f.write_str("oauth_app"),
             Self::PersonalToken => f.write_str("personal_token"),
+            Self::LocalPath => f.write_str("local_path"),
         }
     }
 }
@@ -432,6 +469,7 @@ impl FromStr for IntegrationAuthMode {
             "github_app" => Ok(Self::GithubApp),
             "oauth_app" => Ok(Self::OauthApp),
             "personal_token" => Ok(Self::PersonalToken),
+            "local_path" => Ok(Self::LocalPath),
             other => Err(format!("unknown integration auth mode: {other}")),
         }
     }
@@ -568,6 +606,19 @@ pub struct GitLabAuthorizeRequest {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitLabAuthorizeResponse {
     pub authorize_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CreateLocalGitIntegrationRequest {
+    pub repository_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CreateLocalGitIntegrationResponse {
+    pub integration: Integration,
+    pub repository: IntegrationRepository,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1208,9 +1259,38 @@ impl FromStr for KeyStorageMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeMode {
+    Local,
+    Remote,
+}
+
+impl fmt::Display for RuntimeMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+        };
+        f.write_str(s)
+    }
+}
+
+impl FromStr for RuntimeMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "local" => Ok(Self::Local),
+            "remote" => Ok(Self::Remote),
+            other => Err(format!("unknown runtime mode: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InstancePreferences {
     pub key_storage_mode: KeyStorageMode,
+    pub runtime_mode: RuntimeMode,
     pub restart_required: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
@@ -1224,6 +1304,8 @@ pub struct InstancePreferencesResponse {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UpdateInstancePreferencesRequest {
     pub key_storage_mode: KeyStorageMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_mode: Option<RuntimeMode>,
 }
 
 // ── Project API types ───────────────────────────────────────────
@@ -1939,6 +2021,14 @@ mod tests {
         assert_eq!(json, "\"keychain\"");
         let parsed: KeyStorageMode = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed, KeyStorageMode::Keychain);
+    }
+
+    #[test]
+    fn runtime_mode_round_trip_json() {
+        let json = serde_json::to_string(&RuntimeMode::Local).expect("serialize");
+        assert_eq!(json, "\"local\"");
+        let parsed: RuntimeMode = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, RuntimeMode::Local);
     }
 
     #[test]

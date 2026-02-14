@@ -22,6 +22,7 @@ export type SetupState =
 export interface SetupStatus {
   instance_id: string
   state: SetupState
+  runtime_mode: RuntimeMode
   setup_mode: boolean
   is_configured: boolean
 }
@@ -66,6 +67,16 @@ export interface SetupOidcVerifyResponse {
   session_expires_at?: number
 }
 
+export interface SetupLocalOwnerCreateRequest {
+  email: string
+}
+
+export interface SetupLocalOwnerCreateResponse {
+  state: SetupState
+  owner_email: string
+  session_expires_at?: number
+}
+
 export interface SetupCompleteResponse {
   state: SetupState
   instance_id: string
@@ -89,6 +100,16 @@ export interface AuthenticatedUser {
 }
 
 export interface OidcCallbackResponse {
+  session_token: string
+  expires_at: number
+  user: AuthenticatedUser
+}
+
+export interface LocalLoginRequest {
+  email?: string
+}
+
+export interface LocalLoginResponse {
   session_token: string
   expires_at: number
   user: AuthenticatedUser
@@ -154,9 +175,13 @@ export interface ApiError {
 
 // ── SCM Integration types ──────────────────────────────────────
 
-export type ScmProvider = 'github' | 'gitlab'
+export type ScmProvider = 'github' | 'gitlab' | 'local_git'
 
-export type IntegrationAuthMode = 'github_app' | 'oauth_app' | 'personal_token'
+export type IntegrationAuthMode =
+  | 'github_app'
+  | 'oauth_app'
+  | 'personal_token'
+  | 'local_path'
 
 export type IntegrationStatus = 'active' | 'inactive' | 'error'
 
@@ -235,6 +260,16 @@ export interface GitLabAuthorizeRequest {
 
 export interface GitLabAuthorizeResponse {
   authorize_url: string
+}
+
+export interface CreateLocalGitIntegrationRequest {
+  repository_path: string
+  display_name?: string
+}
+
+export interface CreateLocalGitIntegrationResponse {
+  integration: Integration
+  repository: IntegrationRepository
 }
 
 export interface ListIntegrationsResponse {
@@ -438,9 +473,11 @@ export interface UpdateArtifactStorageSettingsRequest {
 }
 
 export type KeyStorageMode = 'keychain' | 'file'
+export type RuntimeMode = 'local' | 'remote'
 
 export interface InstancePreferences {
   key_storage_mode: KeyStorageMode
+  runtime_mode: RuntimeMode
   restart_required: boolean
   updated_at?: number
 }
@@ -451,6 +488,7 @@ export interface InstancePreferencesResponse {
 
 export interface UpdateInstancePreferencesRequest {
   key_storage_mode: KeyStorageMode
+  runtime_mode?: RuntimeMode
 }
 
 // ── Project domain types ────────────────────────────────────────

@@ -172,6 +172,7 @@ function PipelineDetailPage() {
 
   const { pipeline } = data
   const builds = buildsData?.builds ?? []
+  const projectHasSource = !!projectData?.project.repository_id
 
   function handleToggleEnabled() {
     updateMutation.mutate(
@@ -222,7 +223,10 @@ function PipelineDetailPage() {
           canWrite || canDelete || canTriggerBuild ? (
             <>
               {canTriggerBuild ? (
-                <Button onClick={() => setTriggerBuildOpen(true)}>
+                <Button
+                  onClick={() => setTriggerBuildOpen(true)}
+                  disabled={!projectHasSource}
+                >
                   <HugeiconsIcon icon={PlayIcon} size={16} />
                   Run Build
                 </Button>
@@ -263,6 +267,15 @@ function PipelineDetailPage() {
           ) : undefined
         }
       />
+      {!projectHasSource ? (
+        <Alert variant="destructive">
+          <HugeiconsIcon icon={InformationCircleIcon} size={16} />
+          <AlertDescription>
+            This project has no linked source repository. Link a repository
+            before triggering builds.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {/* Collapsible config sections */}
       <Card>
@@ -523,7 +536,7 @@ function PipelineDetailPage() {
           {builds.length === 0 ? (
             <div className="space-y-2 py-3">
               <p className="text-sm text-muted-foreground">No builds yet.</p>
-              {canTriggerBuild ? (
+              {canTriggerBuild && projectHasSource ? (
                 <Button size="sm" onClick={() => setTriggerBuildOpen(true)}>
                   <HugeiconsIcon icon={PlayIcon} size={14} />
                   Trigger first build

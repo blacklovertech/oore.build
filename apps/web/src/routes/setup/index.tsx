@@ -39,7 +39,24 @@ function BootstrapTokenError({ error }: { error: Error }) {
 }
 
 /** Map backend state to the wizard step index. */
-function stateToStep(state: string): number {
+function stateToStep(
+  state: string,
+  runtimeMode: 'local' | 'remote' | undefined,
+): number {
+  if (runtimeMode === 'local') {
+    switch (state) {
+      case 'bootstrap_pending':
+      case 'uninitialized':
+        return 0
+      case 'idp_configured':
+        return 1
+      case 'owner_created':
+        return 2
+      default:
+        return 0
+    }
+  }
+
   switch (state) {
     case 'bootstrap_pending':
     case 'uninitialized':
@@ -78,7 +95,16 @@ function BootstrapTokenStep() {
       return
     }
 
-    const backendStep = stateToStep(status.state)
+    if (
+      status.runtime_mode === 'local' &&
+      status.state === 'bootstrap_pending'
+    ) {
+      setCurrentStep(1)
+      void navigate({ to: '/setup/owner' })
+      return
+    }
+
+    const backendStep = stateToStep(status.state, status.runtime_mode)
     if (backendStep >= 1) {
       setCurrentStep(backendStep)
       if (status.state === 'idp_configured') {
@@ -108,6 +134,10 @@ function BootstrapTokenStep() {
         setSessionToken(res.session_token)
         setSessionExpiresAt(res.expires_at)
         setCurrentStep(1)
+        if (status?.runtime_mode === 'local') {
+          void navigate({ to: '/setup/owner' })
+          return
+        }
         void navigate({ to: '/setup/oidc' })
       },
     })

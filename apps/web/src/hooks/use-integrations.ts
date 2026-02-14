@@ -1,16 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
+  CreateLocalGitIntegrationRequest,
   GitHubAppStartRequest,
   GitLabAuthorizeRequest,
   GitLabStartRequest,
 } from '@/lib/types'
 import {
+  createLocalGitIntegration,
+  deleteLocalGitIntegration,
   deleteIntegration,
   getIntegration,
   githubAppComplete,
   githubAppStart,
   gitlabAuthorize,
   gitlabStart,
+  listLocalGitIntegrations,
   listInstallations,
   listIntegrationRepos,
   listIntegrations,
@@ -194,6 +198,64 @@ export function useDeleteIntegration() {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: [instance?.id ?? '__none__', 'integrations'],
+      })
+    },
+  })
+}
+
+export function useLocalGitIntegrations(enabled = true) {
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useQuery({
+    queryKey: [instance?.id ?? '__none__', 'integrations', 'local-git'],
+    queryFn: () => listLocalGitIntegrations(baseUrl!, token!),
+    enabled: enabled && !!baseUrl && !!token,
+  })
+}
+
+export function useCreateLocalGitIntegration() {
+  const queryClient = useQueryClient()
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useMutation({
+    mutationFn: (data: CreateLocalGitIntegrationRequest) => {
+      if (!baseUrl || !token)
+        return Promise.reject(new Error('Not authenticated'))
+      return createLocalGitIntegration(baseUrl, token, data)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'integrations'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'integrations', 'local-git'],
+      })
+    },
+  })
+}
+
+export function useDeleteLocalGitIntegration() {
+  const queryClient = useQueryClient()
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useMutation({
+    mutationFn: (id: string) => {
+      if (!baseUrl || !token)
+        return Promise.reject(new Error('Not authenticated'))
+      return deleteLocalGitIntegration(baseUrl, token, id)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'integrations'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'integrations', 'local-git'],
       })
     },
   })

@@ -6,7 +6,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use oore_contract::{
     ApiError, ArtifactStorageProvider, ArtifactStorageSettingsResponse, InstancePreferences,
-    InstancePreferencesResponse, KeyStorageMode, UpdateArtifactStorageSettingsRequest,
+    InstancePreferencesResponse, KeyStorageMode, RuntimeMode, UpdateArtifactStorageSettingsRequest,
     UpdateInstancePreferencesRequest,
 };
 use sqlx::Row;
@@ -38,13 +38,32 @@ pub async fn load_key_storage_mode(pool: &sqlx::SqlitePool) -> anyhow::Result<Ke
     Ok(KeyStorageMode::File)
 }
 
+pub async fn load_runtime_mode(pool: &sqlx::SqlitePool) -> anyhow::Result<RuntimeMode> {
+    let row = sqlx::query("SELECT runtime_mode FROM instance_preferences WHERE id = 1")
+        .fetch_optional(pool)
+        .await?;
+
+    let mode = match row {
+        Some(row) => {
+            let raw: Option<String> = row.try_get("runtime_mode").ok();
+            raw.and_then(|value| value.parse::<RuntimeMode>().ok())
+                .unwrap_or(RuntimeMode::Local)
+        }
+        None => RuntimeMode::Local,
+    };
+
+    Ok(mode)
+}
+
 fn preferences_response(
     mode: KeyStorageMode,
+    runtime_mode: RuntimeMode,
     updated_at: Option<i64>,
 ) -> InstancePreferencesResponse {
     InstancePreferencesResponse {
         preferences: InstancePreferences {
             key_storage_mode: mode,
+            runtime_mode,
             restart_required: true,
             updated_at,
         },
@@ -303,7 +322,7 @@ pub async fn get_instance_preferences(
         store.pool().clone()
     };
 
-    let row = sqlx::query("SELECT updated_at FROM instance_preferences WHERE id = 1")
+    let row = sqlx::query("SELECT runtime_mode, updated_at FROM instance_preferences WHERE id = 1")
         .fetch_optional(&pool)
         .await
         .map_err(|e| {
@@ -316,11 +335,25 @@ pub async fn get_instance_preferences(
         })?;
 
     if let Some(row) = row {
+        let runtime_mode = row
+            .try_get::<Option<String>, _>("runtime_mode")
+            .ok()
+            .flatten()
+            .and_then(|raw| raw.parse::<RuntimeMode>().ok())
+            .unwrap_or(RuntimeMode::Local);
         let updated_at: Option<i64> = row.get("updated_at");
-        return Ok(Json(preferences_response(KeyStorageMode::File, updated_at)));
+        return Ok(Json(preferences_response(
+            KeyStorageMode::File,
+            runtime_mode,
+            updated_at,
+        )));
     }
 
-    Ok(Json(preferences_response(KeyStorageMode::File, None)))
+    Ok(Json(preferences_response(
+        KeyStorageMode::File,
+        RuntimeMode::Local,
+        None,
+    )))
 }
 
 pub async fn update_instance_preferences(
@@ -344,6 +377,16 @@ pub async fn update_instance_preferences(
         ));
     }
 
+    let existing_mode = load_runtime_mode(&pool).await.map_err(|e| {
+        error!(error = %e, "failed to load existing runtime mode");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to update instance preferences",
+        )
+    })?;
+    let runtime_mode = req.runtime_mode.unwrap_or(existing_mode);
+
     let active_source =
         crypto::persist_current_key_for_mode(state.encryption_key.as_ref(), KeyStorageMode::File)
             .map_err(|e| {
@@ -356,14 +399,16 @@ pub async fn update_instance_preferences(
         })?;
 
     sqlx::query(
-        "INSERT INTO instance_preferences (id, key_storage_mode, updated_by, created_at, updated_at)
-         VALUES (1, ?1, ?2, ?3, ?3)
+        "INSERT INTO instance_preferences (id, key_storage_mode, runtime_mode, updated_by, created_at, updated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, ?4)
          ON CONFLICT(id) DO UPDATE SET
             key_storage_mode = excluded.key_storage_mode,
+            runtime_mode = excluded.runtime_mode,
             updated_by = excluded.updated_by,
             updated_at = excluded.updated_at",
     )
     .bind(KeyStorageMode::File.to_string())
+    .bind(runtime_mode.to_string())
     .bind(&auth.0.user_id)
     .bind(now)
     .execute(&pool)
@@ -379,6 +424,7 @@ pub async fn update_instance_preferences(
 
     let details = serde_json::json!({
         "key_storage_mode": KeyStorageMode::File.to_string(),
+        "runtime_mode": runtime_mode.to_string(),
         "active_key_source": active_source.as_str(),
     })
     .to_string();
@@ -394,10 +440,15 @@ pub async fn update_instance_preferences(
 
     info!(
         mode = %KeyStorageMode::File,
+        runtime_mode = %runtime_mode,
         source = %active_source.as_str(),
         user_id = %auth.0.user_id,
         "instance preferences updated"
     );
 
-    Ok(Json(preferences_response(KeyStorageMode::File, Some(now))))
+    Ok(Json(preferences_response(
+        KeyStorageMode::File,
+        runtime_mode,
+        Some(now),
+    )))
 }

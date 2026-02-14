@@ -1,7 +1,7 @@
 # oore.build Platform Contract
 
 Status: Active contract with locked V1 decisions.
-Last updated: 2026-02-06
+Last updated: 2026-02-13
 
 ## 0) Contract Discipline
 
@@ -72,14 +72,18 @@ Command stability rules:
 
 ### Auth policy (locked)
 
-- V1 is `OIDC-only`.
-- No regular local username/password auth in V1.
+- V1 supports explicit runtime modes: `local` and `remote`.
+- Default mode is `local`.
+- `local` mode does not require OIDC for operator sign-in.
+- `remote` mode requires OIDC for interactive sign-in.
+- Local username/password auth remains out of scope in V1.
 
 ### Bootstrap policy (locked)
 
 - Setup is enabled through a temporary setup window.
 - Setup token is one-time and time-bound (TTL).
 - Setup endpoints are disabled automatically after instance reaches `ready`.
+- Enabling `remote` mode is an explicit operator action.
 
 ### Recovery policy (locked)
 
@@ -105,6 +109,7 @@ Read-only public setup status may expose only non-sensitive progress:
 - `ready`
 
 No secrets or credentials are returned from public status endpoints.
+`idp_configured` and `owner_created` are required only for `remote` mode completion.
 
 ## 10) Backend Technology Contract (locked direction)
 
@@ -120,7 +125,9 @@ Core backend stack:
 - Database: `SQLite` with `sqlx` (see [ADR-0001](../adr/0001-sqlite-over-postgresql-for-v1.md))
 - Queue/event bus: in-process (`tokio` channels) (see [ADR-0003](../adr/0003-in-process-queuing-over-nats-for-v1.md))
 - Artifact storage: S3-compatible using `aws-sdk-s3`
-- Auth: OIDC via `openidconnect`
+- Auth:
+- local-mode token/session auth for loopback/local UI usage
+- OIDC via `openidconnect` for remote-mode auth
 - RBAC policy layer: `casbin-rs`
 - Observability: `tracing`, OpenTelemetry, Prometheus metrics
 
@@ -182,7 +189,8 @@ Server data must not be duplicated in Zustand.
 ## 13) API Boundary Contract
 
 - Frontend and backend are cleanly separated.
-- Hosted UI communicates with customer backend over HTTPS APIs.
+- Local mode supports local frontend-to-backend access on loopback/private network paths.
+- Hosted UI communicates with customer backend over HTTPS APIs in remote mode.
 - Public endpoint(s) may expose setup progress only.
 - Mutating setup endpoints require setup token and are disabled after `ready`.
 - Live build output should start with SSE for simplicity and operability.
@@ -196,6 +204,7 @@ Server data must not be duplicated in Zustand.
 - One-time bootstrap tokens with TTL.
 - No sensitive configuration on public status endpoints.
 - CORS and origin policy restricted to approved frontend origins.
+- Remote-mode exposure is explicit, never assumed during first-run onboarding.
 
 ## 15) Extensibility Direction
 
@@ -255,14 +264,21 @@ Additional documentation rules:
 - `GET /v1/public/setup-status`
 - Setup/mutating (setup mode only, token required):
 - `POST /v1/setup/bootstrap-token/verify`
-- `POST /v1/setup/oidc/configure`
-- `POST /v1/setup/owner/start-oidc`
-- `POST /v1/setup/owner/verify-oidc`
+- `POST /v1/setup/local-owner/create` (local mode)
+- `POST /v1/setup/oidc/configure` (remote mode)
+- `POST /v1/setup/owner/start-oidc` (remote mode)
+- `POST /v1/setup/owner/verify-oidc` (remote mode)
 - `POST /v1/setup/complete`
+- `POST /v1/mode/enable-remote`
 - Auth:
+- `POST /v1/auth/local/login`
 - `GET /v1/auth/oidc/start`
 - `GET /v1/auth/oidc/callback`
 - `POST /v1/auth/logout`
+- Integrations:
+- `POST /v1/integrations/local-git`
+- `GET /v1/integrations/local-git`
+- `DELETE /v1/integrations/local-git/{id}`
 - Projects/pipelines/builds:
 - `GET|POST /v1/projects`
 - `GET|PATCH|DELETE /v1/projects/{project_id}`

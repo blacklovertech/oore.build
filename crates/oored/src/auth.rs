@@ -5,8 +5,8 @@ use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use oore_contract::{
-    ApiError, AuthenticatedUser, LogoutResponse, OidcCallbackResponse, OidcStartResponse,
-    SetupState,
+    ApiError, AuthenticatedUser, LocalLoginRequest, LocalLoginResponse, LogoutResponse,
+    OidcCallbackResponse, OidcStartResponse, RuntimeMode, SetupState,
 };
 use openidconnect::core::CoreProviderMetadata;
 use openidconnect::{
@@ -607,4 +607,169 @@ pub async fn logout(
     })?;
 
     Ok(Json(LogoutResponse { ok: true }))
+}
+
+/// `POST /v1/auth/local/login`
+///
+/// Creates a local-mode session without OIDC.
+/// - Requires `setup_state == Ready`
+/// - Requires runtime mode `local`
+/// - If `email` is omitted, auto-selects the single active user.
+pub async fn local_login(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<LocalLoginRequest>,
+) -> Result<Json<LocalLoginResponse>, (StatusCode, Json<ApiError>)> {
+    let store = state.store.lock().await;
+    let sf = store.load().await.map_err(|e| {
+        error!(error = %e, "failed to load setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to load setup state",
+        )
+    })?;
+    if sf.setup_state != SetupState::Ready {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "setup_incomplete",
+            "Auth endpoints are only available after setup is complete",
+        ));
+    }
+
+    let pool = store.pool().clone();
+    let mode = crate::instance_settings::load_runtime_mode(&pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load runtime mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine runtime mode",
+            )
+        })?;
+    if mode != RuntimeMode::Local {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "mode_restricted",
+            "Local login is only available in local mode",
+        ));
+    }
+    drop(store);
+
+    let email = req
+        .email
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
+
+    let row = if let Some(email) = email {
+        sqlx::query(
+            "SELECT id, email, role, oidc_subject, avatar_url \
+             FROM users WHERE lower(email) = ?1 AND status = 'active' LIMIT 1",
+        )
+        .bind(&email)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to look up local user");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to look up user",
+            )
+        })?
+    } else {
+        let active_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE status = 'active'")
+                .fetch_one(&pool)
+                .await
+                .map_err(|e| {
+                    error!(error = %e, "failed to count active users");
+                    api_err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "store_error",
+                        "Failed to look up users",
+                    )
+                })?;
+
+        if active_count != 1 {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                "email_required",
+                "Specify email when multiple active users exist",
+            ));
+        }
+
+        sqlx::query(
+            "SELECT id, email, role, oidc_subject, avatar_url \
+             FROM users WHERE status = 'active' LIMIT 1",
+        )
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to select local user");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to look up user",
+            )
+        })?
+    };
+    let row = row.ok_or_else(|| {
+        api_err(
+            StatusCode::FORBIDDEN,
+            "user_not_found",
+            "No active local user found for login",
+        )
+    })?;
+
+    let user_id: String = row.get("id");
+    let user_email: String = row.get("email");
+    let user_role: String = row.get("role");
+    let oidc_subject: String = row.get("oidc_subject");
+    let avatar_url: Option<String> = row.get("avatar_url");
+
+    let session_token = state
+        .sessions
+        .create_session(&user_id, DEFAULT_SESSION_TTL)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to create session");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                "Failed to create session",
+            )
+        })?;
+
+    let session_info = state
+        .sessions
+        .validate_session(&session_token)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to validate session");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                "Failed to validate session",
+            )
+        })?
+        .ok_or_else(|| {
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                "Session created but could not be validated",
+            )
+        })?;
+
+    Ok(Json(LocalLoginResponse {
+        session_token,
+        expires_at: session_info.expires_at,
+        user: AuthenticatedUser {
+            email: user_email,
+            oidc_subject,
+            user_id: Some(user_id),
+            role: Some(user_role),
+            avatar_url,
+        },
+    }))
 }

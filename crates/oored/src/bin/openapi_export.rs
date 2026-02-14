@@ -17,7 +17,7 @@ use utoipa::OpenApi;
     info(
         title = "oore.build API",
         version = "1.0.0",
-        description = "REST API for oore.build — a self-hosted, Flutter-first mobile CI and internal app distribution platform.\n\nThe backend daemon (`oored`) exposes this API on the configured listen address. All endpoints under `/v1/` use JSON request/response bodies unless noted otherwise.\n\n## Authentication\n\n- **Setup endpoints** (`/v1/setup/*`) are token-gated by a bootstrap session token and auto-disabled after setup completes.\n- **Auth endpoints** (`/v1/auth/*`) handle OIDC login/logout flows.\n- **All other endpoints** require a valid session token via `Authorization: Bearer <token>` header.\n- **Runner endpoints** use a separate runner token for authentication.\n\n## Base URL\n\nSince oore.build is self-hosted, the base URL is your daemon's listen address (e.g. `http://localhost:8787`).",
+        description = "REST API for oore.build — a self-hosted, Flutter-first mobile CI and internal app distribution platform.\n\nThe backend daemon (`oored`) exposes this API on the configured listen address. All endpoints under `/v1/` use JSON request/response bodies unless noted otherwise.\n\n## Authentication\n\n- **Setup endpoints** (`/v1/setup/*`) are token-gated by a bootstrap session token and auto-disabled after setup completes.\n- **Auth endpoints** (`/v1/auth/*`) support local-mode login and OIDC login/logout flows.\n- **All other endpoints** require a valid session token via `Authorization: Bearer <token>` header.\n- **Runner endpoints** use a separate runner token for authentication.\n\n## Base URL\n\nSince oore.build is self-hosted, the base URL is your daemon's listen address (e.g. `http://localhost:8787`).",
         license(name = "MIT", url = "https://github.com/devaryakjha/oore.build/blob/master/LICENSE"),
         contact(name = "oore.build", url = "https://oore.build"),
     ),
@@ -34,11 +34,13 @@ use utoipa::OpenApi;
         paths::configure_oidc,
         paths::setup_oidc_start,
         paths::setup_oidc_verify,
+        paths::setup_local_owner_create,
         paths::complete_setup,
         paths::get_setup_summary,
         // ── Auth ──
         paths::oidc_start,
         paths::oidc_callback,
+        paths::local_login,
         paths::logout,
         // ── Users ──
         paths::get_me,
@@ -63,6 +65,9 @@ use utoipa::OpenApi;
         paths::github_complete,
         paths::gitlab_start,
         paths::gitlab_authorize,
+        paths::create_local_git_integration,
+        paths::list_local_git_integrations,
+        paths::delete_local_git_integration,
         // ── Projects ──
         paths::create_project,
         paths::list_projects,
@@ -123,12 +128,16 @@ use utoipa::OpenApi;
         oore_contract::SetupOidcStartResponse,
         oore_contract::SetupOidcVerifyRequest,
         oore_contract::SetupOidcVerifyResponse,
+        oore_contract::SetupLocalOwnerCreateRequest,
+        oore_contract::SetupLocalOwnerCreateResponse,
         oore_contract::SetupCompleteResponse,
         oore_contract::SetupSummaryResponse,
         oore_contract::ApiError,
         // Auth
         oore_contract::OidcStartResponse,
         oore_contract::OidcCallbackResponse,
+        oore_contract::LocalLoginRequest,
+        oore_contract::LocalLoginResponse,
         oore_contract::AuthenticatedUser,
         oore_contract::LogoutResponse,
         // Users
@@ -159,6 +168,8 @@ use utoipa::OpenApi;
         oore_contract::GitLabCompleteResponse,
         oore_contract::GitLabAuthorizeRequest,
         oore_contract::GitLabAuthorizeResponse,
+        oore_contract::CreateLocalGitIntegrationRequest,
+        oore_contract::CreateLocalGitIntegrationResponse,
         oore_contract::ListIntegrationsResponse,
         oore_contract::IntegrationDetailResponse,
         oore_contract::ListInstallationsResponse,
@@ -243,6 +254,7 @@ use utoipa::OpenApi;
         oore_contract::UpdateArtifactStorageSettingsRequest,
         // Instance Settings
         oore_contract::KeyStorageMode,
+        oore_contract::RuntimeMode,
         oore_contract::InstancePreferences,
         oore_contract::InstancePreferencesResponse,
         oore_contract::UpdateInstancePreferencesRequest,
@@ -254,11 +266,11 @@ use utoipa::OpenApi;
     )),
     tags(
         (name = "Health", description = "Health check endpoint"),
-        (name = "Setup", description = "Initial instance setup flow (bootstrap token → OIDC → owner creation). Auto-disabled after setup completes."),
-        (name = "Auth", description = "OIDC authentication and session management. Enabled only after setup is complete."),
+        (name = "Setup", description = "Initial instance setup flow (bootstrap token → mode-aware owner creation). Auto-disabled after setup completes."),
+        (name = "Auth", description = "Mode-aware authentication and session management. Enabled only after setup is complete."),
         (name = "Users", description = "User management — invite, list, update roles, disable/re-enable."),
         (name = "Instance Settings", description = "Instance-wide configuration — artifact storage, key storage preferences."),
-        (name = "Integrations", description = "SCM integrations — GitHub App and GitLab OAuth."),
+        (name = "Integrations", description = "SCM integrations — local git, GitHub App, and GitLab."),
         (name = "Projects", description = "Project CRUD — each project groups one or more pipelines."),
         (name = "Pipelines", description = "Pipeline configuration — build platforms, commands, triggers, concurrency."),
         (name = "Pipeline Signing", description = "Code signing configuration — Android keystores, iOS certificates/profiles."),
@@ -379,6 +391,22 @@ mod paths {
     )]
     pub(super) async fn setup_oidc_verify() {}
 
+    /// Create local owner (local mode)
+    ///
+    /// Creates the setup owner without OIDC when runtime mode is `local`.
+    #[utoipa::path(post, path = "/v1/setup/local-owner/create", tag = "Setup",
+        request_body = SetupLocalOwnerCreateRequest,
+        security(("bearer_auth" = [])),
+        responses(
+            (status = 200, description = "Owner created", body = SetupLocalOwnerCreateResponse),
+            (status = 400, description = "Invalid owner email", body = ApiError),
+            (status = 401, description = "Invalid setup session", body = ApiError),
+            (status = 403, description = "Remote mode enabled", body = ApiError),
+            (status = 409, description = "Invalid setup state", body = ApiError),
+        )
+    )]
+    pub(super) async fn setup_local_owner_create() {}
+
     /// Complete setup
     ///
     /// Finalises the setup flow, transitions state to `ready`, inserts the
@@ -442,6 +470,20 @@ mod paths {
         pub code: String,
         pub state: String,
     }
+
+    /// Local login
+    ///
+    /// Creates a local-mode session without OIDC.
+    #[utoipa::path(post, path = "/v1/auth/local/login", tag = "Auth",
+        request_body = LocalLoginRequest,
+        responses(
+            (status = 200, description = "Session created", body = LocalLoginResponse),
+            (status = 400, description = "Email required or invalid input", body = ApiError),
+            (status = 403, description = "Local mode required", body = ApiError),
+            (status = 409, description = "Setup not complete", body = ApiError),
+        )
+    )]
+    pub(super) async fn local_login() {}
 
     /// Logout
     ///
@@ -656,6 +698,7 @@ mod paths {
         security(("bearer_auth" = [])),
         responses(
             (status = 200, description = "Installations synced", body = SyncInstallationsResponse),
+            (status = 403, description = "Remote mode required", body = ApiError),
         )
     )]
     pub(super) async fn sync_installations() {}
@@ -668,6 +711,7 @@ mod paths {
         security(("bearer_auth" = [])),
         responses(
             (status = 200, description = "GitHub App creation URL", body = GitHubAppStartResponse),
+            (status = 403, description = "Remote mode required", body = ApiError),
         )
     )]
     pub(super) async fn github_start() {}
@@ -680,6 +724,7 @@ mod paths {
         security(("bearer_auth" = [])),
         responses(
             (status = 200, description = "GitHub App created", body = GitHubAppCompleteResponse),
+            (status = 403, description = "Remote mode required", body = ApiError),
         )
     )]
     pub(super) async fn github_complete() {}
@@ -692,6 +737,7 @@ mod paths {
         security(("bearer_auth" = [])),
         responses(
             (status = 200, description = "GitLab integration created", body = GitLabCompleteResponse),
+            (status = 403, description = "Remote mode required", body = ApiError),
         )
     )]
     pub(super) async fn gitlab_start() {}
@@ -702,9 +748,45 @@ mod paths {
         security(("bearer_auth" = [])),
         responses(
             (status = 200, description = "Authorization URL", body = GitLabAuthorizeResponse),
+            (status = 403, description = "Remote mode required", body = ApiError),
         )
     )]
     pub(super) async fn gitlab_authorize() {}
+
+    /// Create local git integration
+    #[utoipa::path(post, path = "/v1/integrations/local-git", tag = "Integrations",
+        request_body = CreateLocalGitIntegrationRequest,
+        security(("bearer_auth" = [])),
+        responses(
+            (status = 200, description = "Local git integration created", body = CreateLocalGitIntegrationResponse),
+            (status = 400, description = "Invalid repository path", body = ApiError),
+            (status = 403, description = "Local mode required", body = ApiError),
+            (status = 409, description = "Repository already connected", body = ApiError),
+        )
+    )]
+    pub(super) async fn create_local_git_integration() {}
+
+    /// List local git integrations
+    #[utoipa::path(get, path = "/v1/integrations/local-git", tag = "Integrations",
+        security(("bearer_auth" = [])),
+        responses(
+            (status = 200, description = "Local git integration list", body = ListIntegrationsResponse),
+            (status = 403, description = "Local mode required", body = ApiError),
+        )
+    )]
+    pub(super) async fn list_local_git_integrations() {}
+
+    /// Delete local git integration
+    #[utoipa::path(delete, path = "/v1/integrations/local-git/{id}", tag = "Integrations",
+        params(("id" = String, Path, description = "Integration ID")),
+        security(("bearer_auth" = [])),
+        responses(
+            (status = 200, description = "Deleted", body = inline(serde_json::Value)),
+            (status = 403, description = "Local mode required", body = ApiError),
+            (status = 404, description = "Integration not found", body = ApiError),
+        )
+    )]
+    pub(super) async fn delete_local_git_integration() {}
 
     // ── Projects ──
 
@@ -940,6 +1022,8 @@ mod paths {
         responses(
             (status = 201, description = "Build queued", body = CreateBuildResponse),
             (status = 400, description = "Invalid input", body = ApiError),
+            (status = 404, description = "Project or pipeline not found", body = ApiError),
+            (status = 409, description = "Project source is not configured or resolvable", body = ApiError),
         )
     )]
     pub(super) async fn create_build() {}
@@ -1192,6 +1276,7 @@ mod paths {
         responses(
             (status = 200, description = "Webhook processed"),
             (status = 401, description = "Invalid signature"),
+            (status = 403, description = "Remote mode required", body = ApiError),
         )
     )]
     pub(super) async fn github_webhook() {}
@@ -1204,6 +1289,7 @@ mod paths {
         responses(
             (status = 200, description = "Webhook processed"),
             (status = 401, description = "Invalid token"),
+            (status = 403, description = "Remote mode required", body = ApiError),
         )
     )]
     pub(super) async fn gitlab_webhook() {}

@@ -171,6 +171,8 @@ function IntegrationDetailPage() {
   const { integration } = detail
   const installations = installationsData?.installations ?? []
   const repositories = reposData?.repositories ?? []
+  const canSyncInstallations =
+    integration.provider === 'github' || integration.provider === 'gitlab'
 
   return (
     <PageLayout width="wide">
@@ -319,14 +321,16 @@ function IntegrationDetailPage() {
             </Button>
           ) : null}
 
-          <Button
-            variant="outline"
-            onClick={handleSync}
-            disabled={syncMutation.isPending}
-          >
-            <HugeiconsIcon icon={Refresh01Icon} size={16} />
-            {syncMutation.isPending ? 'Syncing...' : 'Sync Installations'}
-          </Button>
+          {canSyncInstallations ? (
+            <Button
+              variant="outline"
+              onClick={handleSync}
+              disabled={syncMutation.isPending}
+            >
+              <HugeiconsIcon icon={Refresh01Icon} size={16} />
+              {syncMutation.isPending ? 'Syncing...' : 'Sync Installations'}
+            </Button>
+          ) : null}
 
           <AlertDialog>
             <AlertDialogTrigger

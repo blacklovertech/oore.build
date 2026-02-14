@@ -37,10 +37,10 @@ use axum::{Json, Router};
 use metrics_exporter_prometheus::PrometheusHandle;
 use oore_contract::{
     ApiError, BootstrapTokenVerifyRequest, BootstrapTokenVerifyResponse, OidcConfigRecord,
-    OidcConfigureRequest, OidcConfigureResponse, OidcSecretRecord, OwnerRecord,
-    SetupCompleteResponse, SetupOidcStartRequest, SetupOidcStartResponse, SetupOidcVerifyRequest,
-    SetupOidcVerifyResponse, SetupSessionRecord, SetupState, SetupStateFile, SetupStatus,
-    SetupSummaryResponse,
+    OidcConfigureRequest, OidcConfigureResponse, OidcSecretRecord, OwnerRecord, RuntimeMode,
+    SetupCompleteResponse, SetupLocalOwnerCreateRequest, SetupLocalOwnerCreateResponse,
+    SetupOidcStartRequest, SetupOidcStartResponse, SetupOidcVerifyRequest, SetupOidcVerifyResponse,
+    SetupSessionRecord, SetupState, SetupStateFile, SetupStatus, SetupSummaryResponse,
 };
 use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
@@ -94,6 +94,10 @@ pub struct AppState {
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiError>)>;
 
 const SETUP_SESSION_TTL_SECS: i64 = 30 * 60;
+
+fn local_subject_for_email(email: &str) -> String {
+    format!("local::{}", email.trim().to_lowercase())
+}
 
 fn resolve_cors_origins() -> Vec<HeaderValue> {
     let raw_origins = std::env::var("OORE_CORS_ORIGINS")
@@ -306,9 +310,21 @@ async fn setup_status(State(state): State<Arc<AppState>>) -> ApiResult<SetupStat
         )
     })?;
 
+    let runtime_mode = crate::instance_settings::load_runtime_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load runtime mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to load runtime mode",
+            )
+        })?;
+
     Ok(Json(SetupStatus::from_state(
         sf.instance_id,
         sf.setup_state,
+        runtime_mode,
     )))
 }
 
@@ -1019,6 +1035,101 @@ async fn setup_oidc_verify(
     }))
 }
 
+/// `POST /v1/setup/local-owner/create`
+///
+/// Creates the owner record without OIDC in local mode.
+/// Requires a valid setup session and local runtime mode.
+async fn setup_local_owner_create(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<SetupLocalOwnerCreateRequest>,
+) -> ApiResult<SetupLocalOwnerCreateResponse> {
+    let store = state.store.lock().await;
+    let mut sf = store.load().await.map_err(|e| {
+        error!(error = %e, "failed to load setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to load setup state",
+        )
+    })?;
+
+    if sf.setup_state == SetupState::Ready {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "already_configured",
+            "Setup is already complete",
+        ));
+    }
+
+    let runtime_mode = crate::instance_settings::load_runtime_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load runtime mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine runtime mode",
+            )
+        })?;
+    if runtime_mode != RuntimeMode::Local {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "mode_restricted",
+            "Local owner setup is only available in local mode",
+        ));
+    }
+
+    if !matches!(
+        sf.setup_state,
+        SetupState::BootstrapPending | SetupState::IdpConfigured
+    ) {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "invalid_state",
+            format!(
+                "Local owner creation requires bootstrap_pending or idp_configured state, current: {}",
+                sf.setup_state
+            ),
+        ));
+    }
+
+    validate_session(&mut sf, &headers)?;
+
+    let email = req.email.trim().to_lowercase();
+    if email.is_empty() || !email.contains('@') {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_input",
+            "A valid owner email is required",
+        ));
+    }
+
+    let now = now_unix();
+    sf.owner = Some(OwnerRecord {
+        email: email.clone(),
+        oidc_subject: Some(local_subject_for_email(&email)),
+        created_at: now,
+    });
+    sf.setup_state = SetupState::OwnerCreated;
+    sf.updated_at = now;
+
+    store.save(&sf).await.map_err(|e| {
+        error!(error = %e, "failed to save setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save setup state",
+        )
+    })?;
+
+    Ok(Json(SetupLocalOwnerCreateResponse {
+        state: SetupState::OwnerCreated,
+        owner_email: email,
+        session_expires_at: sf.setup_session.as_ref().map(|s| s.expires_at),
+    }))
+}
+
 async fn complete_setup(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1056,6 +1167,11 @@ async fn complete_setup(
     validate_session(&mut sf, &headers)?;
 
     let now = now_unix();
+    if let Some(ref mut owner) = sf.owner {
+        if owner.oidc_subject.is_none() {
+            owner.oidc_subject = Some(local_subject_for_email(&owner.email));
+        }
+    }
     sf.setup_state = SetupState::Ready;
     sf.setup_session = None; // Clear session on completion
     sf.updated_at = now;
@@ -1073,38 +1189,40 @@ async fn complete_setup(
 
     // Insert owner into users table
     if let Some(ref owner) = sf.owner {
-        if let Some(ref oidc_subject) = owner.oidc_subject {
-            let user_id = uuid::Uuid::new_v4().to_string();
-            let pool = store.pool();
+        let oidc_subject = owner
+            .oidc_subject
+            .clone()
+            .unwrap_or_else(|| local_subject_for_email(&owner.email));
+        let user_id = uuid::Uuid::new_v4().to_string();
+        let pool = store.pool();
 
-            sqlx::query(
-                "INSERT OR IGNORE INTO users (id, email, oidc_subject, display_name, role, status, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, 'owner', 'active', ?5, ?5)",
-            )
-            .bind(&user_id)
-            .bind(&owner.email)
-            .bind(oidc_subject)
-            .bind(&owner.email)
-            .bind(now)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                error!(error = %e, "failed to insert owner user");
-                api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to create owner user")
-            })?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO users (id, email, oidc_subject, display_name, role, status, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'owner', 'active', ?5, ?5)",
+        )
+        .bind(&user_id)
+        .bind(&owner.email)
+        .bind(&oidc_subject)
+        .bind(&owner.email)
+        .bind(now)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to insert owner user");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "store_error", "Failed to create owner user")
+        })?;
 
-            let _ = write_audit_log(
-                pool,
-                Some(&user_id),
-                "owner_created",
-                "user",
-                Some(&user_id),
-                None,
-            )
-            .await;
+        let _ = write_audit_log(
+            pool,
+            Some(&user_id),
+            "owner_created",
+            "user",
+            Some(&user_id),
+            None,
+        )
+        .await;
 
-            info!(email = %owner.email, "owner user created in users table");
-        }
+        info!(email = %owner.email, "owner user created in users table");
     }
 
     Ok(Json(SetupCompleteResponse {
@@ -1298,11 +1416,16 @@ async fn build_router_inner(
         .route("/v1/setup/oidc/configure", post(configure_oidc))
         .route("/v1/setup/owner/start-oidc", post(setup_oidc_start))
         .route("/v1/setup/owner/verify-oidc", post(setup_oidc_verify))
+        .route(
+            "/v1/setup/local-owner/create",
+            post(setup_local_owner_create),
+        )
         .route("/v1/setup/complete", post(complete_setup))
         .route("/v1/setup/summary", get(setup_summary))
         // Auth endpoints (only functional when setup_state == Ready)
         .route("/v1/auth/oidc/start", get(auth::oidc_start))
         .route("/v1/auth/oidc/callback", post(auth::oidc_callback))
+        .route("/v1/auth/local/login", post(auth::local_login))
         .route("/v1/auth/logout", post(auth::logout))
         // User management endpoints
         .route("/v1/users/me", get(users::get_me))
@@ -1358,6 +1481,15 @@ async fn build_router_inner(
         .route(
             "/v1/integrations/gitlab/authorize",
             post(integrations::gitlab::gitlab_authorize),
+        )
+        .route(
+            "/v1/integrations/local-git",
+            get(integrations::local_git::list_local_git_integrations)
+                .post(integrations::local_git::create_local_git_integration),
+        )
+        .route(
+            "/v1/integrations/local-git/{id}",
+            axum::routing::delete(integrations::local_git::delete_local_git_integration),
         )
         // Project endpoints
         .route(

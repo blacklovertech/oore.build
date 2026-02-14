@@ -7,6 +7,7 @@ export const setupHandlers = [
     return HttpResponse.json({
       instance_id: DEMO_INSTANCE_ID,
       state: 'ready',
+      runtime_mode: 'local',
       setup_mode: false,
       is_configured: true,
     })
@@ -44,6 +45,16 @@ export const setupHandlers = [
       state: 'owner_created',
       owner_email: 'alex@oore.build',
       oidc_subject: 'demo-oidc-subject-001',
+      session_expires_at: 4102444800,
+    })
+  }),
+
+  http.post('/v1/setup/local-owner/create', async ({ request }) => {
+    await delay(200)
+    const body = (await request.json()) as { email?: string }
+    return HttpResponse.json({
+      state: 'owner_created',
+      owner_email: body.email ?? 'owner@local',
       session_expires_at: 4102444800,
     })
   }),

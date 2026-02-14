@@ -1,5 +1,6 @@
 pub mod github;
 pub mod gitlab;
+pub mod local_git;
 pub mod webhooks;
 
 use std::sync::Arc;
@@ -63,7 +64,7 @@ use axum::http::StatusCode;
 use oore_contract::{
     ApiError, Integration, IntegrationDetailResponse, IntegrationInstallation,
     IntegrationRepository, ListInstallationsResponse, ListIntegrationsResponse,
-    ListRepositoriesResponse,
+    ListRepositoriesResponse, RuntimeMode,
 };
 use serde::Deserialize;
 use sqlx::Row;
@@ -76,6 +77,56 @@ use crate::store::write_audit_log;
 use crate::util::api_err;
 
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiError>)>;
+
+pub(crate) async fn require_remote_mode(
+    pool: &sqlx::SqlitePool,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    let mode = crate::instance_settings::load_runtime_mode(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load runtime mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine runtime mode",
+            )
+        })?;
+
+    if mode != RuntimeMode::Remote {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "mode_restricted",
+            "Remote mode is required for GitHub/GitLab integrations",
+        ));
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn require_local_mode(
+    pool: &sqlx::SqlitePool,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    let mode = crate::instance_settings::load_runtime_mode(pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load runtime mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine runtime mode",
+            )
+        })?;
+
+    if mode != RuntimeMode::Local {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "mode_restricted",
+            "Local mode is required for this operation",
+        ));
+    }
+
+    Ok(())
+}
 
 // ── Row conversion helpers ──────────────────────────────────────
 

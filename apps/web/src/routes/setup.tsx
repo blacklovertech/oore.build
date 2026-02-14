@@ -12,6 +12,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { useSetupStatus } from '@/hooks/use-setup'
 import { useSetupStore } from '@/stores/setup-store'
 import { useSessionCountdown } from '@/hooks/use-session-countdown'
 import { getSetupStatus } from '@/lib/api'
@@ -73,12 +74,16 @@ export const Route = createFileRoute('/setup')({
   errorComponent: SetupError,
 })
 
-const STEPS = ['Token', 'OIDC', 'Owner', 'Complete'] as const
-
-function StepIndicator({ currentStep }: { currentStep: number }) {
+function StepIndicator({
+  currentStep,
+  steps,
+}: {
+  currentStep: number
+  steps: Array<string>
+}) {
   return (
     <div className="flex items-center justify-center gap-1">
-      {STEPS.map((label, index) => {
+      {steps.map((label, index) => {
         const isActive = index === currentStep
         const isCompleted = index < currentStep
 
@@ -117,8 +122,13 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
 
 function SetupLayout() {
   const currentStep = useSetupStore((s) => s.currentStep)
+  const { data: status } = useSetupStatus()
   const { formatted, isWarning, isExpired } = useSessionCountdown()
   const navigate = useNavigate()
+  const steps =
+    status?.runtime_mode === 'local'
+      ? ['Token', 'Owner', 'Complete']
+      : ['Token', 'OIDC', 'Owner', 'Complete']
 
   useEffect(() => {
     if (isExpired) {
@@ -145,7 +155,7 @@ function SetupLayout() {
           </div>
         </div>
 
-        <StepIndicator currentStep={currentStep} />
+        <StepIndicator currentStep={currentStep} steps={steps} />
 
         {formatted && !isExpired ? (
           <div className="text-center">

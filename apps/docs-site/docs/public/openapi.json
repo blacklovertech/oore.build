@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "oore.build API",
-    "description": "REST API for oore.build — a self-hosted, Flutter-first mobile CI and internal app distribution platform.\n\nThe backend daemon (`oored`) exposes this API on the configured listen address. All endpoints under `/v1/` use JSON request/response bodies unless noted otherwise.\n\n## Authentication\n\n- **Setup endpoints** (`/v1/setup/*`) are token-gated by a bootstrap session token and auto-disabled after setup completes.\n- **Auth endpoints** (`/v1/auth/*`) handle OIDC login/logout flows.\n- **All other endpoints** require a valid session token via `Authorization: Bearer <token>` header.\n- **Runner endpoints** use a separate runner token for authentication.\n\n## Base URL\n\nSince oore.build is self-hosted, the base URL is your daemon's listen address (e.g. `http://localhost:8787`).",
+    "description": "REST API for oore.build — a self-hosted, Flutter-first mobile CI and internal app distribution platform.\n\nThe backend daemon (`oored`) exposes this API on the configured listen address. All endpoints under `/v1/` use JSON request/response bodies unless noted otherwise.\n\n## Authentication\n\n- **Setup endpoints** (`/v1/setup/*`) are token-gated by a bootstrap session token and auto-disabled after setup completes.\n- **Auth endpoints** (`/v1/auth/*`) support local-mode login and OIDC login/logout flows.\n- **All other endpoints** require a valid session token via `Authorization: Bearer <token>` header.\n- **Runner endpoints** use a separate runner token for authentication.\n\n## Base URL\n\nSince oore.build is self-hosted, the base URL is your daemon's listen address (e.g. `http://localhost:8787`).",
     "contact": {
       "name": "oore.build",
       "url": "https://oore.build"
@@ -85,6 +85,68 @@
             "bearer_auth": []
           }
         ]
+      }
+    },
+    "/v1/auth/local/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Local login",
+        "description": "Creates a local-mode session without OIDC.",
+        "operationId": "local_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Email required or invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Local mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Setup not complete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/auth/logout": {
@@ -670,6 +732,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Remote mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -704,6 +776,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GitHubAppStartResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Remote mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -743,6 +825,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Remote mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -777,6 +869,171 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GitLabCompleteResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Remote mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/integrations/local-git": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "List local git integrations",
+        "operationId": "list_local_git_integrations",
+        "responses": {
+          "200": {
+            "description": "Local git integration list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListIntegrationsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Local mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Create local git integration",
+        "operationId": "create_local_git_integration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLocalGitIntegrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Local git integration created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateLocalGitIntegrationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid repository path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Local mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Repository already connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/integrations/local-git/{id}": {
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "summary": "Delete local git integration",
+        "operationId": "delete_local_git_integration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Local mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Integration not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -945,6 +1202,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SyncInstallationsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Remote mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -1766,6 +2033,26 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Project or pipeline not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Project source is not configured or resolvable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2580,6 +2867,83 @@
         ]
       }
     },
+    "/v1/setup/local-owner/create": {
+      "post": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Create local owner (local mode)",
+        "description": "Creates the setup owner without OIDC when runtime mode is `local`.",
+        "operationId": "setup_local_owner_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupLocalOwnerCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Owner created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupLocalOwnerCreateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid owner email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid setup session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Remote mode enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid setup state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/setup/oidc/configure": {
       "post": {
         "tags": [
@@ -3160,6 +3524,16 @@
           },
           "401": {
             "description": "Invalid signature"
+          },
+          "403": {
+            "description": "Remote mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -3178,6 +3552,16 @@
           },
           "401": {
             "description": "Invalid token"
+          },
+          "403": {
+            "description": "Remote mode required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -3947,6 +4331,38 @@
           }
         }
       },
+      "CreateLocalGitIntegrationRequest": {
+        "type": "object",
+        "required": [
+          "repository_path"
+        ],
+        "properties": {
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repository_path": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateLocalGitIntegrationResponse": {
+        "type": "object",
+        "required": [
+          "integration",
+          "repository"
+        ],
+        "properties": {
+          "integration": {
+            "$ref": "#/components/schemas/Integration"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/IntegrationRepository"
+          }
+        }
+      },
       "CreatePipelineRequest": {
         "type": "object",
         "required": [
@@ -4179,6 +4595,7 @@
         "type": "object",
         "required": [
           "key_storage_mode",
+          "runtime_mode",
           "restart_required"
         ],
         "properties": {
@@ -4187,6 +4604,9 @@
           },
           "restart_required": {
             "type": "boolean"
+          },
+          "runtime_mode": {
+            "$ref": "#/components/schemas/RuntimeMode"
           },
           "updated_at": {
             "type": [
@@ -4272,7 +4692,8 @@
         "enum": [
           "github_app",
           "oauth_app",
-          "personal_token"
+          "personal_token",
+          "local_path"
         ]
       },
       "IntegrationDetailResponse": {
@@ -4721,6 +5142,37 @@
             "items": {
               "$ref": "#/components/schemas/User"
             }
+          }
+        }
+      },
+      "LocalLoginRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "LocalLoginResponse": {
+        "type": "object",
+        "required": [
+          "session_token",
+          "expires_at",
+          "user"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "session_token": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthenticatedUser"
           }
         }
       },
@@ -5378,11 +5830,19 @@
           "draining"
         ]
       },
+      "RuntimeMode": {
+        "type": "string",
+        "enum": [
+          "local",
+          "remote"
+        ]
+      },
       "ScmProvider": {
         "type": "string",
         "enum": [
           "github",
-          "gitlab"
+          "gitlab",
+          "local_git"
         ]
       },
       "SetupCompleteResponse": {
@@ -5394,6 +5854,39 @@
         "properties": {
           "instance_id": {
             "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SetupState"
+          }
+        }
+      },
+      "SetupLocalOwnerCreateRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupLocalOwnerCreateResponse": {
+        "type": "object",
+        "required": [
+          "state",
+          "owner_email"
+        ],
+        "properties": {
+          "owner_email": {
+            "type": "string"
+          },
+          "session_expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           },
           "state": {
             "$ref": "#/components/schemas/SetupState"
@@ -5482,6 +5975,7 @@
         "required": [
           "instance_id",
           "state",
+          "runtime_mode",
           "setup_mode",
           "is_configured"
         ],
@@ -5491,6 +5985,9 @@
           },
           "is_configured": {
             "type": "boolean"
+          },
+          "runtime_mode": {
+            "$ref": "#/components/schemas/RuntimeMode"
           },
           "setup_mode": {
             "type": "boolean"
@@ -5702,6 +6199,16 @@
         "properties": {
           "key_storage_mode": {
             "$ref": "#/components/schemas/KeyStorageMode"
+          },
+          "runtime_mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuntimeMode"
+              }
+            ]
           }
         }
       },
@@ -6102,11 +6609,11 @@
     },
     {
       "name": "Setup",
-      "description": "Initial instance setup flow (bootstrap token → OIDC → owner creation). Auto-disabled after setup completes."
+      "description": "Initial instance setup flow (bootstrap token → mode-aware owner creation). Auto-disabled after setup completes."
     },
     {
       "name": "Auth",
-      "description": "OIDC authentication and session management. Enabled only after setup is complete."
+      "description": "Mode-aware authentication and session management. Enabled only after setup is complete."
     },
     {
       "name": "Users",
@@ -6118,7 +6625,7 @@
     },
     {
       "name": "Integrations",
-      "description": "SCM integrations — GitHub App and GitLab OAuth."
+      "description": "SCM integrations — local git, GitHub App, and GitLab."
     },
     {
       "name": "Projects",

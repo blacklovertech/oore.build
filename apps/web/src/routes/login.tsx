@@ -7,6 +7,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import AddInstanceDialog from '@/components/AddInstanceDialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { getSetupStatus, localLogin } from '@/lib/api'
 import {
   getConnectivityIssue,
   isHostedUiOrigin,
@@ -37,18 +39,25 @@ function formatLastAuthTime(epochSeconds: number): string {
   }).format(epochSeconds * 1000)
 }
 
+function formatAuthMethodLabel(method: 'oidc' | 'local'): string {
+  return method === 'local' ? 'Local Mode' : 'OIDC'
+}
+
 function LoginPage() {
   const instance = useActiveInstance()
   const instances = useInstanceStore((s) => s.instances)
   const activeInstanceId = useInstanceStore((s) => s.activeInstanceId)
   const setActiveInstance = useInstanceStore((s) => s.setActiveInstance)
   const navigate = useNavigate()
+  const setAuth = useAuthStore((s) => s.setAuth)
   const token = useAuthStore((s) => s.token)
   const expiresAt = useAuthStore((s) => s.expiresAt)
   const hasValidToken =
     !!token && expiresAt != null && expiresAt > Math.floor(Date.now() / 1000)
   const [showAddInstance, setShowAddInstance] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [runtimeMode, setRuntimeMode] = useState<'local' | 'remote' | null>(null)
+  const [localEmail, setLocalEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [connectivityIssue, setConnectivityIssue] =
     useState<ConnectivityIssue | null>(null)
@@ -75,6 +84,32 @@ function LoginPage() {
     setConnectivityIssue(null)
   }, [instance?.id])
 
+  useEffect(() => {
+    let canceled = false
+    if (!instance) {
+      setRuntimeMode(null)
+      return () => {
+        canceled = true
+      }
+    }
+
+    getSetupStatus(instance.url)
+      .then((status) => {
+        if (!canceled) {
+          setRuntimeMode(status.runtime_mode)
+        }
+      })
+      .catch(() => {
+        if (!canceled) {
+          setRuntimeMode(null)
+        }
+      })
+
+    return () => {
+      canceled = true
+    }
+  }, [instance?.id, instance?.url])
+
   const handleLogin = async () => {
     if (!instance) return
     setLoading(true)
@@ -95,6 +130,38 @@ function LoginPage() {
     }
 
     try {
+      const status = await getSetupStatus(instance.url)
+      if (status.setup_mode) {
+        setError('Setup is not complete yet. Finish setup before signing in.')
+        setLoading(false)
+        return
+      }
+      setRuntimeMode(status.runtime_mode)
+
+      if (status.runtime_mode === 'local') {
+        const response = await localLogin(instance.url, {
+          email: localEmail.trim() || undefined,
+        })
+        if (!response.user.user_id || !response.user.role) {
+          throw new Error('Incomplete user profile received from server')
+        }
+        setAuth(
+          response.session_token,
+          response.expires_at,
+          {
+            email: response.user.email,
+            oidc_subject: response.user.oidc_subject,
+            user_id: response.user.user_id,
+            role: response.user.role,
+            avatar_url: response.user.avatar_url,
+          },
+          'local',
+        )
+        setLoading(false)
+        void navigate({ to: '/' })
+        return
+      }
+
       const callbackUrl = `${window.location.origin}/auth/callback`
       const res = await fetch(
         `${instance.url}/v1/auth/oidc/start?redirect_uri=${encodeURIComponent(callbackUrl)}`,
@@ -141,7 +208,7 @@ function LoginPage() {
           <div className="space-y-1">
             <h1 className="text-3xl font-bold tracking-tight">Sign in</h1>
             <p className="text-muted-foreground text-sm">
-              Authenticate with your identity provider to continue.
+              Authenticate to the active instance to continue.
             </p>
           </div>
         </div>
@@ -160,13 +227,30 @@ function LoginPage() {
               <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Sign-in method
               </p>
-              <p className="mt-1 text-sm font-medium">OIDC</p>
+              <p className="mt-1 text-sm font-medium">
+                {runtimeMode === 'local' ? 'Local Mode' : 'OIDC'}
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {lastAuthMeta
-                  ? `Last successful sign-in: ${formatLastAuthTime(lastAuthMeta.at)}`
+                  ? `Last successful sign-in: ${formatLastAuthTime(lastAuthMeta.at)} via ${formatAuthMethodLabel(lastAuthMeta.method)}`
                   : 'No previous successful sign-in stored on this device.'}
               </p>
             </div>
+
+            {runtimeMode === 'local' ? (
+              <div className="space-y-2">
+                <Input
+                  placeholder="Email (optional for single-user instances)"
+                  value={localEmail}
+                  onChange={(event) => setLocalEmail(event.target.value)}
+                  disabled={loading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Leave email blank to auto-sign-in when only one active user
+                  exists.
+                </p>
+              </div>
+            ) : null}
 
             {error ? (
               <Alert variant="destructive">
@@ -212,10 +296,10 @@ function LoginPage() {
               {loading ? (
                 <>
                   <Spinner className="size-4" />
-                  Redirecting...
+                  {runtimeMode === 'local' ? 'Signing in...' : 'Redirecting...'}
                 </>
               ) : (
-                'Sign in with OIDC'
+                runtimeMode === 'local' ? 'Sign in locally' : 'Sign in with OIDC'
               )}
             </Button>
           </CardContent>
@@ -257,7 +341,7 @@ function LoginPage() {
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {meta
-                            ? `Last sign-in: ${formatLastAuthTime(meta.at)} via OIDC`
+                            ? `Last sign-in: ${formatLastAuthTime(meta.at)} via ${formatAuthMethodLabel(meta.method)}`
                             : 'No successful sign-in stored for this instance'}
                         </p>
                       </div>

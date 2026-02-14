@@ -1351,10 +1351,11 @@ async fn test_runner_fetches_pipeline_ios_signing_for_assigned_job() {
     .await
     .unwrap();
 
-    let p12_encrypted =
-        oored::crypto::encrypt("ZmFrZS1wMTItYnl0ZXM=", &common::TEST_ENCRYPTION_KEY).unwrap();
+    let p12_password = "p12-pass";
+    let p12_base64 = generate_test_p12_base64(p12_password);
+    let p12_encrypted = oored::crypto::encrypt(&p12_base64, &common::TEST_ENCRYPTION_KEY).unwrap();
     let p12_password_encrypted =
-        oored::crypto::encrypt("p12-pass", &common::TEST_ENCRYPTION_KEY).unwrap();
+        oored::crypto::encrypt(p12_password, &common::TEST_ENCRYPTION_KEY).unwrap();
     sqlx::query(
         "INSERT INTO pipeline_ios_signing_settings (
             id, pipeline_id, enabled, mode, team_id, export_method, bundle_ids_json,

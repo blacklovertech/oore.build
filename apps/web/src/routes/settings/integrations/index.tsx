@@ -12,6 +12,7 @@ import {
   getActiveInstanceOrRedirect,
   requireAuthOrRedirect,
 } from '@/lib/instance-context'
+import { useInstancePreferences } from '@/hooks/use-artifact-storage'
 import { useDeleteIntegration, useIntegrations } from '@/hooks/use-integrations'
 import { getIntegrationStatusVariant } from '@/lib/status-variants'
 import { PageMeta } from '@/lib/seo'
@@ -60,7 +61,10 @@ export const Route = createFileRoute('/settings/integrations/')({
 function IntegrationsPage() {
   const search = useSearch({ from: '/settings/integrations/' })
   const { data, isLoading, error } = useIntegrations()
+  const { data: preferences } = useInstancePreferences()
   const deleteMutation = useDeleteIntegration()
+  const runtimeMode = preferences?.preferences.runtime_mode ?? 'local'
+  const remoteEnabled = runtimeMode === 'remote'
 
   useEffect(() => {
     if (search.github === 'success') {
@@ -90,7 +94,28 @@ function IntegrationsPage() {
         description="Provider connections for repository access and webhook triggers."
       />
 
-      <section className="grid gap-4 md:grid-cols-2">
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Local Git
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Register local filesystem git repositories for local-first build
+              workflows.
+            </p>
+            <Button
+              variant="outline"
+              render={<Link to="/settings/integrations/local-git" />}
+            >
+              <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
+              Connect Local Git
+            </Button>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
@@ -102,10 +127,17 @@ function IntegrationsPage() {
               Create and install a GitHub App to enable repository discovery and
               webhook events.
             </p>
-            <Button render={<Link to="/settings/integrations/github" />}>
-              <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
-              Connect GitHub
-            </Button>
+            {remoteEnabled ? (
+              <Button render={<Link to="/settings/integrations/github" />}>
+                <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
+                Connect GitHub
+              </Button>
+            ) : (
+              <Button disabled>
+                <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
+                Remote Mode Required
+              </Button>
+            )}
           </CardContent>
         </Card>
 
@@ -120,16 +152,33 @@ function IntegrationsPage() {
               Connect gitlab.com or self-managed GitLab through OAuth or
               personal access token.
             </p>
-            <Button
-              variant="outline"
-              render={<Link to="/settings/integrations/gitlab" />}
-            >
-              <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
-              Connect GitLab
-            </Button>
+            {remoteEnabled ? (
+              <Button
+                variant="outline"
+                render={<Link to="/settings/integrations/gitlab" />}
+              >
+                <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
+                Connect GitLab
+              </Button>
+            ) : (
+              <Button variant="outline" disabled>
+                <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
+                Remote Mode Required
+              </Button>
+            )}
           </CardContent>
         </Card>
       </section>
+
+      {!remoteEnabled ? (
+        <Alert>
+          <HugeiconsIcon icon={InformationCircleIcon} size={16} />
+          <AlertDescription>
+            Runtime mode is <code>local</code>. GitHub/GitLab integrations are
+            disabled until remote mode is enabled from Preferences.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {isLoading ? (
         <Card>
