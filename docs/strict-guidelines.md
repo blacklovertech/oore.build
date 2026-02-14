@@ -14,7 +14,9 @@ These rules are mandatory unless explicitly superseded by an ADR and contract up
 
 ## Bootstrap and Security
 
-- Bootstrap setup token must be one-time and TTL-bound.
+- Bootstrap setup token (when used) must be one-time and TTL-bound.
+- Setup-token verification is mandatory for remote/manual setup flows.
+- Local mode may auto-finalize bootstrap on first successful local login.
 - Public setup endpoint must expose non-sensitive state only.
 - Setup mutating endpoints must be disabled after `ready`.
 - Break-glass recovery is opt-in runtime activation only.
@@ -46,6 +48,7 @@ These rules are mandatory unless explicitly superseded by an ADR and contract up
 ## UI System
 
 - shadcn must use Base UI primitives.
+- For Base UI components with button semantics (`Trigger`, `Close`, `Button`, etc.), when `render` is used with a non-native `<button>` element (for example `Link`, `a`, `div`, custom components), `nativeButton={false}` must be set explicitly.
 - Shared preset constraints must remain aligned between `apps/web` and `apps/docs-site`:
 - `style: base-vega`
 - `iconLibrary: hugeicons`

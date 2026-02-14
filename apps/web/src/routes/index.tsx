@@ -1,5 +1,5 @@
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
   Add01Icon,
@@ -31,15 +31,22 @@ import { Spinner } from '@/components/ui/spinner'
 import { useBuilds } from '@/hooks/use-builds'
 import { useProjects } from '@/hooks/use-projects'
 import { useSetupStatus } from '@/hooks/use-setup'
+import { localLogin, getSetupStatus } from '@/lib/api'
 import { getStatusVariant } from '@/lib/status-variants'
 import { PageMeta } from '@/lib/seo'
 import { useAuthStore } from '@/stores/auth-store'
-import { useActiveInstance } from '@/stores/instance-store'
+import { useActiveInstance, useInstanceStore } from '@/stores/instance-store'
 
 export const Route = createFileRoute('/')({
   staticData: { breadcrumbLabel: 'Dashboard' },
   component: IndexPage,
 })
+
+const KNOWN_LOCAL_DAEMON_URLS = [
+  'http://127.0.0.1:8787',
+  'http://127.0.0.1:8788',
+  'http://127.0.0.1:8790',
+]
 
 function relativeTime(epochSeconds: number): string {
   const diff = Math.floor(Date.now() / 1000) - epochSeconds
@@ -49,32 +56,171 @@ function relativeTime(epochSeconds: number): string {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
+function normalizeUrl(value: string): string {
+  return value.replace(/\/+$/, '')
+}
+
+function isLocalUiOrigin(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname.endsWith('.local')
+  )
+}
+
+async function getSetupStatusWithTimeout(baseUrl: string, timeoutMs: number) {
+  return await Promise.race([
+    getSetupStatus(baseUrl),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('timeout')), timeoutMs)
+    }),
+  ])
+}
+
+async function detectReachableLocalDaemonUrl(): Promise<string | null> {
+  for (const candidate of KNOWN_LOCAL_DAEMON_URLS) {
+    try {
+      await getSetupStatusWithTimeout(candidate, 900)
+      return candidate
+    } catch {
+      // try next candidate
+    }
+  }
+  return null
+}
+
 function IndexPage() {
   const instance = useActiveInstance()
   const { data: status, isLoading, error } = useSetupStatus()
   const navigate = useNavigate()
   const [showAddInstance, setShowAddInstance] = useState(false)
+  const [isDetectingLocalInstance, setIsDetectingLocalInstance] = useState(false)
+  const [isAutoLocalSigningIn, setIsAutoLocalSigningIn] = useState(false)
+  const autoDetectAttemptedRef = useRef(false)
+  const autoLocalLoginInstanceRef = useRef<string | null>(null)
   const authToken = useAuthStore((s) => s.token)
   const authExpiresAt = useAuthStore((s) => s.expiresAt)
   const authUser = useAuthStore((s) => s.user)
   const clearAuth = useAuthStore((s) => s.clearAuth)
+  const setAuth = useAuthStore((s) => s.setAuth)
 
   useEffect(() => {
-    if (status?.setup_mode) {
+    if (instance || autoDetectAttemptedRef.current) return
+    if (!isLocalUiOrigin(window.location.hostname)) return
+
+    autoDetectAttemptedRef.current = true
+    setIsDetectingLocalInstance(true)
+
+    void detectReachableLocalDaemonUrl()
+      .then((detectedUrl) => {
+        if (!detectedUrl) return
+        const store = useInstanceStore.getState()
+        const existingInstance = Object.values(store.instances).find(
+          (candidate) =>
+            normalizeUrl(candidate.url) === normalizeUrl(detectedUrl),
+        )
+        const instanceId =
+          existingInstance?.id ??
+          store.addInstance('Local', detectedUrl)
+        store.setActiveInstance(instanceId)
+      })
+      .catch(() => {
+        // No reachable local daemon; keep manual add-instance path.
+      })
+      .finally(() => {
+        setIsDetectingLocalInstance(false)
+      })
+  }, [instance])
+
+  useEffect(() => {
+    if (!status || !instance) return
+
+    if (status.setup_mode && status.runtime_mode !== 'local') {
       void navigate({ to: '/setup' })
+      return
     }
-  }, [status?.setup_mode, navigate])
 
-  useEffect(() => {
-    if (status?.is_configured) {
-      const now = Math.floor(Date.now() / 1000)
-      const valid = !!authToken && authExpiresAt != null && authExpiresAt > now
-      if (!valid) {
-        clearAuth()
-        void navigate({ to: '/login' })
-      }
+    const now = Math.floor(Date.now() / 1000)
+    const hasValidToken =
+      !!authToken && authExpiresAt != null && authExpiresAt > now
+
+    if (status.runtime_mode === 'local') {
+      if (hasValidToken) return
+      if (autoLocalLoginInstanceRef.current === instance.id) return
+
+      autoLocalLoginInstanceRef.current = instance.id
+      setIsAutoLocalSigningIn(true)
+      clearAuth()
+      void localLogin(instance.url, {})
+        .then((response) => {
+          if (!response.user.user_id || !response.user.role) {
+            throw new Error('Incomplete user profile received from server')
+          }
+          setAuth(
+            response.session_token,
+            response.expires_at,
+            {
+              email: response.user.email,
+              oidc_subject: response.user.oidc_subject,
+              user_id: response.user.user_id,
+              role: response.user.role,
+              avatar_url: response.user.avatar_url,
+            },
+            'local',
+          )
+        })
+        .catch(() => {
+          autoLocalLoginInstanceRef.current = null
+          clearAuth()
+          void navigate({ to: '/login' })
+        })
+        .finally(() => {
+          setIsAutoLocalSigningIn(false)
+        })
+      return
     }
-  }, [status?.is_configured, authToken, authExpiresAt, clearAuth, navigate])
+
+    if (status.is_configured && !hasValidToken) {
+      clearAuth()
+      void navigate({ to: '/login' })
+    }
+  }, [
+    status,
+    instance,
+    authToken,
+    authExpiresAt,
+    clearAuth,
+    setAuth,
+    navigate,
+  ])
+
+  if (!instance && isDetectingLocalInstance) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <PageMeta />
+        <div className="flex items-center gap-3">
+          <Spinner className="size-5" />
+          <p className="text-sm text-muted-foreground">
+            Detecting local daemon...
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (isAutoLocalSigningIn) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <PageMeta />
+        <div className="flex items-center gap-3">
+          <Spinner className="size-5" />
+          <p className="text-sm text-muted-foreground">
+            Signing in locally...
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   if (!instance) {
     return (
@@ -179,6 +325,7 @@ function IndexPage() {
   )
 }
 
+
 function ConfiguredDashboard({ userName }: { userName?: string }) {
   const navigate = useNavigate()
   const [triggerOpen, setTriggerOpen] = useState(false)
@@ -264,7 +411,7 @@ function ConfiguredDashboard({ userName }: { userName?: string }) {
           <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Projects
           </h2>
-          <Button variant="ghost" size="sm" render={<Link to="/projects" />}>
+          <Button variant="ghost" size="sm" render={<Link to="/projects" />} nativeButton={false}>
             View all
             <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
           </Button>
@@ -284,6 +431,7 @@ function ConfiguredDashboard({ userName }: { userName?: string }) {
                 size="sm"
                 className="mt-3"
                 render={<Link to="/projects" />}
+                nativeButton={false}
               >
                 <HugeiconsIcon icon={Add01Icon} size={14} />
                 Create project
@@ -310,7 +458,7 @@ function ConfiguredDashboard({ userName }: { userName?: string }) {
           <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Recent Builds
           </h2>
-          <Button variant="ghost" size="sm" render={<Link to="/builds" />}>
+          <Button variant="ghost" size="sm" render={<Link to="/builds" />} nativeButton={false}>
             View all
             <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
           </Button>

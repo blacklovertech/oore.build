@@ -474,13 +474,14 @@ mod paths {
     /// Local login
     ///
     /// Creates a local-mode session without OIDC.
+    /// If setup is still pending in local mode, first login auto-finalizes
+    /// local owner bootstrap.
     #[utoipa::path(post, path = "/v1/auth/local/login", tag = "Auth",
         request_body = LocalLoginRequest,
         responses(
             (status = 200, description = "Session created", body = LocalLoginResponse),
             (status = 400, description = "Email required or invalid input", body = ApiError),
             (status = 403, description = "Local mode required", body = ApiError),
-            (status = 409, description = "Setup not complete", body = ApiError),
         )
     )]
     pub(super) async fn local_login() {}

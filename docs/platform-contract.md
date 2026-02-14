@@ -1,7 +1,7 @@
 # oore.build Platform Contract
 
 Status: Active contract with locked V1 decisions.
-Last updated: 2026-02-13
+Last updated: 2026-02-14
 
 ## 0) Contract Discipline
 
@@ -76,12 +76,13 @@ Command stability rules:
 - Default mode is `local`.
 - `local` mode does not require OIDC for operator sign-in.
 - `remote` mode requires OIDC for interactive sign-in.
+- `local` mode may auto-finalize owner bootstrap on first successful local login.
 - Local username/password auth remains out of scope in V1.
 
 ### Bootstrap policy (locked)
 
 - Setup is enabled through a temporary setup window.
-- Setup token is one-time and time-bound (TTL).
+- Setup token is one-time and time-bound (TTL) for setup-token flows.
 - Setup endpoints are disabled automatically after instance reaches `ready`.
 - Enabling `remote` mode is an explicit operator action.
 

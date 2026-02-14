@@ -258,6 +258,7 @@ function LocalGitPage() {
                                 params={{ integrationId: integration.id }}
                               />
                             }
+                            nativeButton={false}
                           >
                             Open
                           </Button>

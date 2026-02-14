@@ -1,7 +1,7 @@
 # V1 User Journey (Execution-First)
 
 Status: Active guidance for product, API, and UI completion checks.
-Last updated: 2026-02-13
+Last updated: 2026-02-14
 
 ## Purpose
 
@@ -37,7 +37,7 @@ No build-related UI task is complete unless the relevant journey checkpoint here
 Actor: Owner/Admin operator
 
 User action:
-- Local mode: complete setup flow and sign in via local auth.
+- Local mode: sign in via local auth; first successful local login auto-completes bootstrap.
 - Remote mode: complete setup flow and sign in via OIDC.
 
 System outcome:
@@ -48,6 +48,7 @@ Done when:
 - `GET /v1/public/setup-status` is non-sensitive and accurate.
 - Setup mutating endpoints are disabled after `ready`.
 - Mode-specific auth behavior is enforced consistently.
+- Local mode does not require manual token copy/paste during first-run login.
 
 ### 2) Source connection (local_git or provider)
 

@@ -93,7 +93,7 @@
           "Auth"
         ],
         "summary": "Local login",
-        "description": "Creates a local-mode session without OIDC.",
+        "description": "Creates a local-mode session without OIDC.\nIf setup is still pending in local mode, first login auto-finalizes\nlocal owner bootstrap.",
         "operationId": "local_login",
         "requestBody": {
           "content": {
@@ -128,16 +128,6 @@
           },
           "403": {
             "description": "Local mode required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Setup not complete",
             "content": {
               "application/json": {
                 "schema": {

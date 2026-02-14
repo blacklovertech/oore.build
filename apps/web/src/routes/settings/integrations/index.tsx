@@ -109,6 +109,7 @@ function IntegrationsPage() {
             <Button
               variant="outline"
               render={<Link to="/settings/integrations/local-git" />}
+              nativeButton={false}
             >
               <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
               Connect Local Git
@@ -128,7 +129,7 @@ function IntegrationsPage() {
               webhook events.
             </p>
             {remoteEnabled ? (
-              <Button render={<Link to="/settings/integrations/github" />}>
+              <Button render={<Link to="/settings/integrations/github" />} nativeButton={false}>
                 <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
                 Connect GitHub
               </Button>
@@ -156,6 +157,7 @@ function IntegrationsPage() {
               <Button
                 variant="outline"
                 render={<Link to="/settings/integrations/gitlab" />}
+                nativeButton={false}
               >
                 <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
                 Connect GitLab
@@ -264,6 +266,7 @@ function IntegrationsPage() {
                                 params={{ integrationId: integration.id }}
                               />
                             }
+                            nativeButton={false}
                           >
                             Open
                           </Button>
@@ -296,7 +299,7 @@ function IntegrationsPage() {
                                     handleDisconnect(
                                       integration.id,
                                       integration.display_name ??
-                                        integration.provider,
+                                      integration.provider,
                                     )
                                   }
                                 >

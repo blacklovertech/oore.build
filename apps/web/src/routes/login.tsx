@@ -131,7 +131,7 @@ function LoginPage() {
 
     try {
       const status = await getSetupStatus(instance.url)
-      if (status.setup_mode) {
+      if (status.setup_mode && status.runtime_mode !== 'local') {
         setError('Setup is not complete yet. Finish setup before signing in.')
         setLoading(false)
         return
@@ -248,6 +248,10 @@ function LoginPage() {
                 <p className="text-xs text-muted-foreground">
                   Leave email blank to auto-sign-in when only one active user
                   exists.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  First sign-in on a new local instance will auto-initialize
+                  owner setup.
                 </p>
               </div>
             ) : null}

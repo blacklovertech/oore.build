@@ -280,8 +280,8 @@ function IntegrationDetailPage() {
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           {integration.provider === 'gitlab' &&
-          integration.auth_mode === 'oauth_app' &&
-          integration.status === 'inactive' ? (
+            integration.auth_mode === 'oauth_app' &&
+            integration.status === 'inactive' ? (
             <Button
               variant="outline"
               onClick={() =>
@@ -313,6 +313,7 @@ function IntegrationDetailPage() {
                   rel="noopener noreferrer"
                 />
               }
+              nativeButton={false}
             >
               <HugeiconsIcon icon={Setting07Icon} size={16} />
               {installations.length > 0

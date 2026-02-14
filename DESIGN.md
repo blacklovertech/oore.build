@@ -413,7 +413,13 @@ shadcn with `style: base-vega` uses Base UI primitives, not Radix. Key differenc
 
 - Use `render` prop, not `asChild`, for custom element rendering
 - Use `multiple` prop, not `type="multiple"`, on accordion/toggle groups
-- Use `nativeButton={false}` on trigger components when wrapping a `<Button>`
+- On Base UI components with button semantics (for example `Trigger`, `Close`, `Button`), if `render` is not a native `<button>`, set `nativeButton={false}` explicitly
+
+```tsx
+<Button render={<Link to="/projects" />} nativeButton={false}>
+  Projects
+</Button>
+```
 
 ## Loading States
 

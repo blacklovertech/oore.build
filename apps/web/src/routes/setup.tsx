@@ -21,6 +21,10 @@ import { getActiveInstanceOrRedirect } from '@/lib/instance-context'
 import { useInstanceStore } from '@/stores/instance-store'
 import { PageMeta } from '@/lib/seo'
 
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === '127.0.0.1' || hostname === 'localhost'
+}
+
 function maybeAutoAddBackendInstance() {
   const params = new URLSearchParams(window.location.search)
   const backendUrl = params.get('backend')
@@ -38,10 +42,9 @@ function maybeAutoAddBackendInstance() {
   if (Object.keys(store.instances).length > 0) return
 
   // Auto-add the instance
-  const id = store.addInstance(
-    new URL(backendUrl).hostname,
-    backendUrl.replace(/\/+$/, ''),
-  )
+  const parsed = new URL(backendUrl)
+  const label = isLoopbackHost(parsed.hostname) ? 'Local' : parsed.hostname
+  const id = store.addInstance(label, backendUrl.replace(/\/+$/, ''))
   store.setActiveInstance(id)
 
   // Scrub the query parameter from the URL
@@ -63,6 +66,9 @@ export const Route = createFileRoute('/setup')({
     try {
       const status = await getSetupStatus(instance.url)
       if (status.is_configured) {
+        throw redirect({ to: '/' })
+      }
+      if (status.setup_mode && status.runtime_mode === 'local') {
         throw redirect({ to: '/' })
       }
     } catch (e) {

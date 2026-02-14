@@ -6,7 +6,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use oore_contract::{
     ApiError, AuthenticatedUser, LocalLoginRequest, LocalLoginResponse, LogoutResponse,
-    OidcCallbackResponse, OidcStartResponse, RuntimeMode, SetupState,
+    OidcCallbackResponse, OidcStartResponse, OwnerRecord, RuntimeMode, SetupState,
 };
 use openidconnect::core::CoreProviderMetadata;
 use openidconnect::{
@@ -15,7 +15,8 @@ use openidconnect::{
 };
 use serde::Deserialize;
 use sqlx::Row;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::session::DEFAULT_SESSION_TTL;
 use crate::store::write_audit_log;
@@ -24,6 +25,11 @@ use crate::{AppState, MAX_PENDING_AUTH};
 
 /// Maximum lifetime of a pending OIDC auth request before it expires (10 minutes).
 const PENDING_AUTH_TTL_SECS: i64 = 600;
+const AUTO_LOCAL_OWNER_EMAIL: &str = "owner@local";
+
+fn local_subject_for_email(email: &str) -> String {
+    format!("local::{}", email.trim().to_lowercase())
+}
 
 /// Pending OIDC authorization request stored in memory while the user is
 /// redirected to the identity provider.
@@ -55,6 +61,111 @@ pub struct OidcConfig {
     pub issuer_url: String,
     pub client_id: String,
     pub client_secret: Option<String>,
+}
+
+async fn auto_complete_local_setup_if_needed(
+    store: &crate::store::SetupStore,
+    state_file: &mut oore_contract::SetupStateFile,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    if state_file.setup_state == SetupState::Ready {
+        return Ok(());
+    }
+
+    let owner_email = state_file
+        .owner
+        .as_ref()
+        .map(|owner| owner.email.trim().to_lowercase())
+        .filter(|email| !email.is_empty())
+        .unwrap_or_else(|| AUTO_LOCAL_OWNER_EMAIL.to_string());
+    let owner_subject = state_file
+        .owner
+        .as_ref()
+        .and_then(|owner| owner.oidc_subject.clone())
+        .filter(|subject| !subject.trim().is_empty())
+        .unwrap_or_else(|| local_subject_for_email(&owner_email));
+
+    let now = now_unix();
+    let owner_created_at = state_file
+        .owner
+        .as_ref()
+        .map(|owner| owner.created_at)
+        .unwrap_or(now);
+
+    state_file.owner = Some(OwnerRecord {
+        email: owner_email.clone(),
+        oidc_subject: Some(owner_subject.clone()),
+        created_at: owner_created_at,
+    });
+    state_file.setup_state = SetupState::Ready;
+    state_file.setup_session = None;
+    state_file.updated_at = now;
+
+    store.save(state_file).await.map_err(|e| {
+        error!(error = %e, "failed to save setup state during local auto-bootstrap");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to finalize local setup",
+        )
+    })?;
+
+    let user_id_seed = Uuid::new_v4().to_string();
+    let pool = store.pool();
+    sqlx::query(
+        "INSERT INTO users (id, email, oidc_subject, display_name, role, status, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, 'owner', 'active', ?5, ?5) \
+         ON CONFLICT(email) DO UPDATE SET \
+            oidc_subject = excluded.oidc_subject, \
+            display_name = excluded.display_name, \
+            role = 'owner', \
+            status = 'active', \
+            updated_at = excluded.updated_at",
+    )
+    .bind(&user_id_seed)
+    .bind(&owner_email)
+    .bind(&owner_subject)
+    .bind(&owner_email)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to upsert local owner user");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to create local owner",
+        )
+    })?;
+
+    let owner_user_id: String =
+        sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = lower(?1) LIMIT 1")
+            .bind(&owner_email)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to resolve local owner user id");
+                api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    "Failed to load local owner",
+                )
+            })?;
+
+    let _ = write_audit_log(
+        pool,
+        Some(&owner_user_id),
+        "owner_created_auto_local",
+        "user",
+        Some(&owner_user_id),
+        Some("auto-bootstrap on first local login"),
+    )
+    .await;
+
+    info!(
+        email = %owner_email,
+        "local setup auto-completed on first local login"
+    );
+    Ok(())
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -612,15 +723,20 @@ pub async fn logout(
 /// `POST /v1/auth/local/login`
 ///
 /// Creates a local-mode session without OIDC.
-/// - Requires `setup_state == Ready`
-/// - Requires runtime mode `local`
+/// - Requires runtime mode `local`.
+/// - If setup is not complete, local setup is auto-finalized on first login.
 /// - If `email` is omitted, auto-selects the single active user.
 pub async fn local_login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LocalLoginRequest>,
 ) -> Result<Json<LocalLoginResponse>, (StatusCode, Json<ApiError>)> {
+    let requested_email = req
+        .email
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
+
     let store = state.store.lock().await;
-    let sf = store.load().await.map_err(|e| {
+    let mut sf = store.load().await.map_err(|e| {
         error!(error = %e, "failed to load setup state");
         api_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -628,16 +744,7 @@ pub async fn local_login(
             "Failed to load setup state",
         )
     })?;
-    if sf.setup_state != SetupState::Ready {
-        return Err(api_err(
-            StatusCode::CONFLICT,
-            "setup_incomplete",
-            "Auth endpoints are only available after setup is complete",
-        ));
-    }
-
-    let pool = store.pool().clone();
-    let mode = crate::instance_settings::load_runtime_mode(&pool)
+    let mode = crate::instance_settings::load_runtime_mode(store.pool())
         .await
         .map_err(|e| {
             error!(error = %e, "failed to load runtime mode");
@@ -654,14 +761,15 @@ pub async fn local_login(
             "Local login is only available in local mode",
         ));
     }
+
+    if sf.setup_state != SetupState::Ready {
+        auto_complete_local_setup_if_needed(&store, &mut sf).await?;
+    }
+
+    let pool = store.pool().clone();
     drop(store);
 
-    let email = req
-        .email
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| !value.is_empty());
-
-    let row = if let Some(email) = email {
+    let row = if let Some(email) = requested_email {
         sqlx::query(
             "SELECT id, email, role, oidc_subject, avatar_url \
              FROM users WHERE lower(email) = ?1 AND status = 'active' LIMIT 1",
