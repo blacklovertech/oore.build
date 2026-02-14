@@ -8,7 +8,8 @@ These rules are mandatory unless explicitly superseded by an ADR and contract up
 - V1 default runtime mode is `local`.
 - V1 supports `local` and `remote` modes.
 - `local` mode does not require OIDC.
-- `remote` mode requires OIDC.
+- `remote` mode requires OIDC for non-loopback interactive sign-in.
+- Loopback local-login remains available after setup is `ready` in both modes.
 - Self-hosted backend is primary. Hosted offering at `ci.oore.build` is UI-only.
 - Backend runtime support in V1 is macOS only.
 

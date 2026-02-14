@@ -107,6 +107,41 @@ async fn test_local_login_rejected_when_runtime_mode_remote() {
 }
 
 #[tokio::test]
+async fn test_local_login_allowed_on_loopback_when_runtime_mode_remote_and_setup_ready() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("test.db");
+    let app = common::create_test_app(&db_path).await;
+    let pool = common::connect_pool(&db_path).await;
+    common::set_runtime_mode(&pool, "remote").await;
+
+    let now = common::now_unix();
+    sqlx::query("UPDATE setup_state SET setup_state = 'ready', updated_at = ?1 WHERE id = 1")
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("mark setup ready");
+    let _owner_id = common::seed_test_user(&pool).await;
+
+    let login_resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/auth/local/login")
+                .header("content-type", "application/json")
+                .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 41004))))
+                .body(Body::from(
+                    serde_json::to_vec(&json!({})).expect("serialize request"),
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("local login");
+    assert_eq!(login_resp.status(), 200);
+    let body = common::body_json(login_resp.into_body()).await;
+    assert!(body["session_token"].as_str().is_some());
+}
+
+#[tokio::test]
 async fn test_local_login_rejected_when_client_is_not_loopback() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let db_path = tmp.path().join("test.db");

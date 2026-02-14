@@ -121,7 +121,7 @@ Users must be invited before they can sign in. If a user authenticates successfu
 
 ## Local Login {#local-login}
 
-Create a local-mode session without OIDC.
+Create a loopback-only local session without OIDC.
 
 ```
 POST /v1/auth/local/login
@@ -148,13 +148,13 @@ Returns `LocalLoginResponse`.
 | Status | Code | Description |
 |---|---|---|
 | 400 | `email_required` | Multiple active users exist and email was omitted |
-| 403 | `mode_restricted` | Instance is not in local mode |
+| 403 | `mode_restricted` | Setup is incomplete while runtime mode is `remote` |
 | 403 | `local_login_loopback_required` | Local login attempted from non-loopback source |
 | 403 | `user_not_found` | No active user matched the provided email |
 
 ::: warning
-`local` mode authentication is loopback-only. Any non-loopback access path must
-use External Access (`runtime_mode=remote`) and OIDC.
+Local login is always loopback-only. Any non-loopback access path must use
+External Access (`runtime_mode=remote`) and OIDC.
 :::
 
 ---

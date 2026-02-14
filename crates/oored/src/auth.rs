@@ -724,8 +724,7 @@ pub async fn logout(
 
 /// `POST /v1/auth/local/login`
 ///
-/// Creates a local-mode session without OIDC.
-/// - Requires runtime mode `local`.
+/// Creates a loopback-only local session without OIDC.
 /// - If setup is not complete, local setup is auto-finalized on first login.
 /// - If `email` is omitted, auto-selects the single active user.
 pub async fn local_login(
@@ -789,15 +788,14 @@ pub async fn local_login(
                 "Failed to determine runtime mode",
             )
         })?;
-    if mode != RuntimeMode::Local {
-        return Err(api_err(
-            StatusCode::FORBIDDEN,
-            "mode_restricted",
-            "Local login is only available in local mode",
-        ));
-    }
-
     if sf.setup_state != SetupState::Ready {
+        if mode != RuntimeMode::Local {
+            return Err(api_err(
+                StatusCode::FORBIDDEN,
+                "mode_restricted",
+                "Local login during setup is only available in Local Only mode",
+            ));
+        }
         auto_complete_local_setup_if_needed(&store, &mut sf).await?;
     }
 

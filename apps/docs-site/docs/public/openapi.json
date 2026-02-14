@@ -93,7 +93,7 @@
           "Auth"
         ],
         "summary": "Local login",
-        "description": "Creates a local-mode session without OIDC.\nIf setup is still pending in local mode, first login auto-finalizes\nlocal owner bootstrap.",
+        "description": "Creates a loopback-only local session without OIDC.\nIf setup is still pending in Local Only mode, first login auto-finalizes\nlocal owner bootstrap. When setup is already complete, loopback local\nlogin remains available even if External Access is enabled.",
         "operationId": "local_login",
         "requestBody": {
           "content": {

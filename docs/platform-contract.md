@@ -76,7 +76,8 @@ Command stability rules:
 - Default mode is `local`.
 - `local` mode does not require OIDC for operator sign-in.
 - `local` mode local-login auth is loopback-only.
-- `remote` mode requires OIDC for interactive sign-in.
+- `remote` mode requires OIDC for non-loopback interactive sign-in.
+- Loopback local-login remains available after setup is `ready` in both runtime modes.
 - `local` mode may auto-finalize owner bootstrap on first successful local login.
 - Local username/password auth remains out of scope in V1.
 - Enabling `remote` mode requires successful External Access preflight checks.

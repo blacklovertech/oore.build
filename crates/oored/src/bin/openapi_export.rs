@@ -490,9 +490,10 @@ mod paths {
 
     /// Local login
     ///
-    /// Creates a local-mode session without OIDC.
-    /// If setup is still pending in local mode, first login auto-finalizes
-    /// local owner bootstrap.
+    /// Creates a loopback-only local session without OIDC.
+    /// If setup is still pending in Local Only mode, first login auto-finalizes
+    /// local owner bootstrap. When setup is already complete, loopback local
+    /// login remains available even if External Access is enabled.
     #[utoipa::path(post, path = "/v1/auth/local/login", tag = "Auth",
         request_body = LocalLoginRequest,
         responses(

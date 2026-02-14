@@ -95,8 +95,10 @@ function LoginPage() {
   const backendIsLoopback = instance
     ? isLoopbackHostname(resolveBackendHostname(instance.url))
     : false
+  const loopbackLocalPath = uiIsLoopback && backendIsLoopback
+  const localLoginAvailable = runtimeMode != null && loopbackLocalPath
   const localModeNetworkBlocked =
-    runtimeMode === 'local' && (!uiIsLoopback || !backendIsLoopback)
+    runtimeMode === 'local' && !loopbackLocalPath
 
   useEffect(() => {
     if (hasValidToken) {
@@ -163,17 +165,18 @@ function LoginPage() {
       }
       setRuntimeMode(status.runtime_mode)
 
-      if (status.runtime_mode === 'local') {
-        const localUi = isLoopbackHostname(window.location.hostname)
-        const localBackend = isLoopbackHostname(resolveBackendHostname(instance.url))
-        if (!localUi || !localBackend) {
-          setError(
-            'Local Only sign-in is restricted to loopback access. Enable External Access on the host machine.',
-          )
-          setLoading(false)
-          return
-        }
+      const localUi = isLoopbackHostname(window.location.hostname)
+      const localBackend = isLoopbackHostname(resolveBackendHostname(instance.url))
+      const canUseLoopbackLocalLogin = localUi && localBackend
+      if (status.runtime_mode === 'local' && !canUseLoopbackLocalLogin) {
+        setError(
+          'Local Only sign-in is restricted to loopback access. Enable External Access on the host machine.',
+        )
+        setLoading(false)
+        return
+      }
 
+      if (canUseLoopbackLocalLogin) {
         const response = await localLogin(instance.url, {
           email: localEmail.trim() || undefined,
         })
@@ -233,7 +236,9 @@ function LoginPage() {
             'Local Only sign-in is restricted to loopback access. Enable External Access on the host machine.',
           )
         } else if (e.code === 'mode_restricted') {
-          setError('Local sign-in is disabled while External Access is enabled.')
+          setError(
+            'Local sign-in is unavailable until setup is complete in Local Only mode.',
+          )
         } else if (e.code === 'external_access_https_required') {
           setError('External Access requires an HTTPS public URL.')
         } else if (e.code === 'external_access_origin_not_allowed') {
@@ -289,7 +294,11 @@ function LoginPage() {
                 Sign-in method
               </p>
               <p className="mt-1 text-sm font-medium">
-                {runtimeMode === 'local' ? 'Local Only' : 'OIDC'}
+                {runtimeMode === 'local'
+                  ? 'Local Only'
+                  : localLoginAvailable
+                    ? 'Local (loopback)'
+                    : 'OIDC'}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {lastAuthMeta
@@ -307,7 +316,7 @@ function LoginPage() {
               </Alert>
             ) : null}
 
-            {runtimeMode === 'local' && !localModeNetworkBlocked ? (
+            {localLoginAvailable && !localModeNetworkBlocked ? (
               <div className="space-y-2">
                 <Input
                   placeholder="Email (optional for single-user instances)"
@@ -319,10 +328,12 @@ function LoginPage() {
                   Leave email blank to auto-sign-in when only one active user
                   exists.
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  First sign-in on a new local instance will auto-initialize
-                  owner setup.
-                </p>
+                {runtimeMode === 'local' ? (
+                  <p className="text-xs text-muted-foreground">
+                    First sign-in on a new local instance will auto-initialize
+                    owner setup.
+                  </p>
+                ) : null}
               </div>
             ) : null}
 
@@ -370,10 +381,10 @@ function LoginPage() {
               {loading ? (
                 <>
                   <Spinner className="size-4" />
-                  {runtimeMode === 'local' ? 'Signing in...' : 'Redirecting...'}
+                  {localLoginAvailable ? 'Signing in...' : 'Redirecting...'}
                 </>
               ) : (
-                runtimeMode === 'local'
+                localLoginAvailable
                   ? localModeNetworkBlocked
                     ? 'Enable External Access first'
                     : 'Sign in locally'
