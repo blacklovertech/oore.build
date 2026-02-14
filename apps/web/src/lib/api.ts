@@ -15,6 +15,8 @@ import type {
   CreatePipelineResponse,
   CreateProjectRequest,
   CreateProjectResponse,
+  ConfigureExternalAccessOidcRequest,
+  ConfigureExternalAccessOidcResponse,
   ExternalAccessPreflightResponse,
   GitHubAppCompleteRequest,
   GitHubAppCompleteResponse,
@@ -613,6 +615,22 @@ export function getExternalAccessPreflight(
     '/v1/settings/external-access/preflight',
     {
       headers: authHeaders(token),
+    },
+  )
+}
+
+export function configureExternalAccessOidc(
+  baseUrl: string,
+  token: string,
+  data: ConfigureExternalAccessOidcRequest,
+): Promise<ConfigureExternalAccessOidcResponse> {
+  return request<ConfigureExternalAccessOidcResponse>(
+    baseUrl,
+    '/v1/settings/external-access/oidc',
+    {
+      method: 'PUT',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
     },
   )
 }

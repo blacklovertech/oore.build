@@ -94,6 +94,49 @@ Returns check-by-check readiness required before enabling External Access (`runt
 
 ---
 
+## Configure External Access OIDC {#configure-external-access-oidc}
+
+```
+PUT /v1/settings/external-access/oidc
+```
+
+Owner-only endpoint for configuring OIDC after setup is already complete.
+This enables local-first instances to satisfy External Access readiness without
+re-running setup.
+
+**Authentication**: User session (Bearer, write access to `instance_settings`, role `owner`)
+
+### Request body
+
+```json
+{
+  "issuer_url": "https://accounts.google.com",
+  "client_id": "your-client-id",
+  "client_secret": "optional-client-secret"
+}
+```
+
+### Response `200 OK`
+
+```json
+{
+  "discovered_issuer": "https://accounts.google.com",
+  "has_client_secret": true,
+  "configured_at": 1738886400
+}
+```
+
+### Error responses
+
+| Status | Code | Description |
+|---|---|---|
+| 400 | `invalid_input` | Issuer/client values are invalid |
+| 400 | `oidc_discovery_failed` | Provider discovery failed |
+| 403 | `external_access_owner_required` | Non-owner attempted update |
+| 409 | `invalid_state` | Setup is not yet `ready` |
+
+---
+
 ## Update Instance Preferences {#update-preferences}
 
 ```

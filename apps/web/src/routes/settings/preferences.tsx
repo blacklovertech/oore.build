@@ -8,6 +8,8 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
+  Copy01Icon,
+  Tick02Icon,
   CheckmarkCircle02Icon,
   AlertCircleIcon,
 } from '@hugeicons/core-free-icons'
@@ -22,6 +24,7 @@ import { useHasPermission } from '@/hooks/use-permissions'
 import {
   useExternalAccessPreflight,
   useArtifactStorageSettings,
+  useConfigureExternalAccessOidc,
   useInstancePreferences,
   useUpdateArtifactStorageSettings,
   useUpdateInstancePreferences,
@@ -37,6 +40,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   ApiClientError,
   getApiErrorMessage,
@@ -117,6 +128,18 @@ const storageSchema = z
 
 type StorageFormValues = z.infer<typeof storageSchema>
 
+const externalAccessOidcSchema = z.object({
+  issuer_url: z.url('Please enter a valid issuer URL'),
+  client_id: z.string().min(1, 'Client ID is required'),
+  client_secret: z.string().optional(),
+})
+
+type ExternalAccessOidcFormValues = z.infer<typeof externalAccessOidcSchema>
+
+const ENV_VARS_DOCS_URL =
+  'https://docs.oore.build/reference/config/environment-variables'
+const OIDC_DOCS_URL = 'https://docs.oore.build/guides/oidc'
+
 function guidanceForPreflight(checkId: string, failureCode?: string): string {
   if (failureCode === 'external_access_public_url_missing') {
     return 'Set OORE_PUBLIC_URL to a non-loopback URL (for example https://ci.example.com).'
@@ -139,9 +162,17 @@ function guidanceForPreflight(checkId: string, failureCode?: string): string {
   return 'Resolve this check before enabling External Access.'
 }
 
+function extractRequiredCorsOrigin(message: string): string | null {
+  const match = message.match(/Add\s+(https?:\/\/\S+)\s+to OORE_CORS_ORIGINS/i)
+  if (!match) return null
+  return match[1] ?? null
+}
+
 function PreferencesPage() {
   const navigate = useNavigate()
   const [readinessOpen, setReadinessOpen] = useState(false)
+  const [oidcDialogOpen, setOidcDialogOpen] = useState(false)
+  const [copiedAction, setCopiedAction] = useState<string | null>(null)
   const canWrite = useHasPermission('instance_settings', 'write')
   const user = useAuthStore((s) => s.user)
   const clearAuth = useAuthStore((s) => s.clearAuth)
@@ -149,6 +180,7 @@ function PreferencesPage() {
   const settingsQuery = useArtifactStorageSettings()
   const preferencesQuery = useInstancePreferences()
   const preflightQuery = useExternalAccessPreflight()
+  const configureExternalAccessOidcMutation = useConfigureExternalAccessOidc()
   const updateStorageMutation = useUpdateArtifactStorageSettings()
   const updatePreferencesMutation = useUpdateInstancePreferences()
 
@@ -162,6 +194,15 @@ function PreferencesPage() {
       s3_endpoint: '',
       access_key_id: '',
       secret_access_key: '',
+    },
+  })
+
+  const externalAccessOidcForm = useForm<ExternalAccessOidcFormValues>({
+    resolver: zodResolver(externalAccessOidcSchema),
+    defaultValues: {
+      issuer_url: '',
+      client_id: '',
+      client_secret: '',
     },
   })
 
@@ -223,6 +264,55 @@ function PreferencesPage() {
         )
       },
     })
+  }
+
+  function copyActionText(actionId: string, value: string, successLabel: string) {
+    void navigator.clipboard
+      .writeText(value)
+      .then(() => {
+        setCopiedAction(actionId)
+        toast.success(successLabel)
+        setTimeout(() => setCopiedAction((current) => (current === actionId ? null : current)), 1500)
+      })
+      .catch(() => {
+        toast.error('Failed to copy to clipboard')
+      })
+  }
+
+  function onSubmitExternalAccessOidc(values: ExternalAccessOidcFormValues) {
+    if (!isOwner) return
+
+    configureExternalAccessOidcMutation.mutate(
+      {
+        issuer_url: values.issuer_url.trim(),
+        client_id: values.client_id.trim(),
+        ...(values.client_secret?.trim()
+          ? { client_secret: values.client_secret.trim() }
+          : {}),
+      },
+      {
+        onSuccess: (response) => {
+          toast.success(`OIDC configured: ${response.discovered_issuer}`)
+          setOidcDialogOpen(false)
+          externalAccessOidcForm.setValue('client_secret', '')
+          setReadinessOpen(true)
+          void preflightQuery.refetch()
+        },
+        onError: (error) => {
+          toast.error(
+            getApiErrorMessage(error, {
+              external_access_owner_required:
+                'Only the owner can configure OIDC for External Access.',
+              oidc_discovery_failed:
+                'OIDC discovery failed. Verify issuer URL and provider availability.',
+              invalid_input: 'Check issuer URL and client ID values.',
+              invalid_state:
+                'OIDC can be configured here only after setup is complete.',
+            }),
+          )
+        },
+      },
+    )
   }
 
   const settings = settingsQuery.data?.settings
@@ -366,42 +456,167 @@ function PreferencesPage() {
 
               <CollapsibleContent className="space-y-2">
                 {preflightQuery.data
-                  ? preflightQuery.data.checks.map((check) => (
-                      <div key={check.id} className="border border-border/60 p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-start gap-2">
-                            <HugeiconsIcon
-                              icon={
-                                check.ok
-                                  ? CheckmarkCircle02Icon
-                                  : AlertCircleIcon
-                              }
-                              size={14}
-                              className={
-                                check.ok ? 'text-success' : 'text-destructive'
-                              }
-                            />
-                            <div>
-                              <p className="text-sm font-medium">{check.label}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {check.ok
-                                  ? check.message
-                                  : guidanceForPreflight(
-                                      check.id,
-                                      check.failure_code,
-                                    )}
-                              </p>
+                  ? preflightQuery.data.checks.map((check) => {
+                      const requiredCorsOrigin =
+                        check.id === 'public_origin_allowed'
+                          ? extractRequiredCorsOrigin(check.message)
+                          : null
+                      const corsTemplate = `OORE_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,${requiredCorsOrigin ?? 'https://ci.example.com'}`
+
+                      return (
+                        <div key={check.id} className="border border-border/60 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-2">
+                              <HugeiconsIcon
+                                icon={
+                                  check.ok
+                                    ? CheckmarkCircle02Icon
+                                    : AlertCircleIcon
+                                }
+                                size={14}
+                                className={
+                                  check.ok ? 'text-success' : 'text-destructive'
+                                }
+                              />
+                              <div>
+                                <p className="text-sm font-medium">{check.label}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {check.ok
+                                    ? check.message
+                                    : guidanceForPreflight(
+                                        check.id,
+                                        check.failure_code,
+                                      )}
+                                </p>
+
+                                {!check.ok ? (
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    {check.id === 'oidc_configured' ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setOidcDialogOpen(true)}
+                                        disabled={!isOwner}
+                                      >
+                                        Configure OIDC
+                                      </Button>
+                                    ) : null}
+
+                                    {check.id === 'public_url_https' ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() =>
+                                          copyActionText(
+                                            'public-url-template',
+                                            'OORE_PUBLIC_URL=https://ci.example.com',
+                                            'OORE_PUBLIC_URL template copied',
+                                          )
+                                        }
+                                      >
+                                        <HugeiconsIcon
+                                          icon={
+                                            copiedAction === 'public-url-template'
+                                              ? Tick02Icon
+                                              : Copy01Icon
+                                          }
+                                          size={14}
+                                        />
+                                        {copiedAction === 'public-url-template'
+                                          ? 'Copied'
+                                          : 'Copy URL template'}
+                                      </Button>
+                                    ) : null}
+
+                                    {check.id === 'public_origin_allowed' ? (
+                                      <>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() =>
+                                            copyActionText(
+                                              'cors-template',
+                                              corsTemplate,
+                                              'OORE_CORS_ORIGINS template copied',
+                                            )
+                                          }
+                                        >
+                                          <HugeiconsIcon
+                                            icon={
+                                              copiedAction === 'cors-template'
+                                                ? Tick02Icon
+                                                : Copy01Icon
+                                            }
+                                            size={14}
+                                          />
+                                          {copiedAction === 'cors-template'
+                                            ? 'Copied'
+                                            : 'Copy CORS template'}
+                                        </Button>
+                                        {requiredCorsOrigin ? (
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() =>
+                                              copyActionText(
+                                                'required-origin',
+                                                requiredCorsOrigin,
+                                                'Required origin copied',
+                                              )
+                                            }
+                                          >
+                                            <HugeiconsIcon
+                                              icon={
+                                                copiedAction === 'required-origin'
+                                                  ? Tick02Icon
+                                                  : Copy01Icon
+                                              }
+                                              size={14}
+                                            />
+                                            {copiedAction === 'required-origin'
+                                              ? 'Copied'
+                                              : 'Copy required origin'}
+                                          </Button>
+                                        ) : null}
+                                      </>
+                                    ) : null}
+
+                                    {(check.id === 'oidc_configured' ||
+                                      check.id === 'public_url_https' ||
+                                      check.id === 'public_origin_allowed' ||
+                                      check.id ===
+                                        'redirect_policy_consistent') ? (
+                                      <a
+                                        href={
+                                          check.id === 'oidc_configured'
+                                            ? OIDC_DOCS_URL
+                                            : ENV_VARS_DOCS_URL
+                                        }
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs text-primary underline underline-offset-2"
+                                      >
+                                        Open guide
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
+                            <Badge
+                              variant={check.ok ? 'success' : 'destructive'}
+                              className="mt-0.5"
+                            >
+                              {check.ok ? 'Ready' : 'Action needed'}
+                            </Badge>
                           </div>
-                          <Badge
-                            variant={check.ok ? 'success' : 'destructive'}
-                            className="mt-0.5"
-                          >
-                            {check.ok ? 'Ready' : 'Action needed'}
-                          </Badge>
                         </div>
-                      </div>
-                    ))
+                      )
+                    })
                   : null}
               </CollapsibleContent>
             </Collapsible>
@@ -437,6 +652,112 @@ function PreferencesPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={oidcDialogOpen} onOpenChange={setOidcDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Configure OIDC for External Access</DialogTitle>
+            <DialogDescription>
+              Owner-only. This updates runtime OIDC settings used by External
+              Access sign-in.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Form {...externalAccessOidcForm}>
+            <form
+              onSubmit={externalAccessOidcForm.handleSubmit(
+                onSubmitExternalAccessOidc,
+              )}
+              className="space-y-4"
+            >
+              <FormField
+                control={externalAccessOidcForm.control}
+                name="issuer_url"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Issuer URL</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="url"
+                        placeholder="https://accounts.google.com"
+                        {...field}
+                        disabled={configureExternalAccessOidcMutation.isPending}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={externalAccessOidcForm.control}
+                name="client_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Client ID</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="your-client-id"
+                        {...field}
+                        disabled={configureExternalAccessOidcMutation.isPending}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={externalAccessOidcForm.control}
+                name="client_secret"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Client Secret (optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        placeholder="Leave empty for public clients"
+                        {...field}
+                        disabled={configureExternalAccessOidcMutation.isPending}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      If omitted, any existing stored client secret is removed.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setOidcDialogOpen(false)}
+                  disabled={configureExternalAccessOidcMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    !isOwner || configureExternalAccessOidcMutation.isPending
+                  }
+                >
+                  {configureExternalAccessOidcMutation.isPending ? (
+                    <>
+                      <Spinner className="size-4" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save OIDC Settings'
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       <section className="grid gap-4 md:grid-cols-2">
         <Card>

@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type {
+  ConfigureExternalAccessOidcRequest,
   UpdateArtifactStorageSettingsRequest,
   UpdateInstancePreferencesRequest,
 } from '@/lib/types'
 import {
+  configureExternalAccessOidc,
   getExternalAccessPreflight,
   getArtifactStorageSettings,
   getInstancePreferences,
@@ -89,6 +91,27 @@ export function useUpdateInstancePreferences() {
       void queryClient.invalidateQueries({
         queryKey: [instance?.id ?? '__none__', 'instance-preferences'],
       })
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'external-access-preflight'],
+      })
+    },
+  })
+}
+
+export function useConfigureExternalAccessOidc() {
+  const queryClient = useQueryClient()
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useMutation({
+    mutationFn: (data: ConfigureExternalAccessOidcRequest) => {
+      if (!baseUrl || !token) {
+        return Promise.reject(new Error('Not authenticated'))
+      }
+      return configureExternalAccessOidc(baseUrl, token, data)
+    },
+    onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: [instance?.id ?? '__none__', 'external-access-preflight'],
       })

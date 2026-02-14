@@ -1326,6 +1326,21 @@ pub struct ExternalAccessPreflightResponse {
     pub checks: Vec<ExternalAccessPreflightCheck>,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ConfigureExternalAccessOidcRequest {
+    pub issuer_url: String,
+    pub client_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ConfigureExternalAccessOidcResponse {
+    pub discovered_issuer: String,
+    pub has_client_secret: bool,
+    pub configured_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InstancePreferences {
     pub key_storage_mode: KeyStorageMode,

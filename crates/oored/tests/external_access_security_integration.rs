@@ -116,6 +116,30 @@ async fn mark_setup_ready_with_oidc(pool: &sqlx::SqlitePool) {
     .bind(now)
     .execute(pool)
     .await
+        .expect("failed to update setup state");
+}
+
+async fn mark_setup_ready_without_oidc(pool: &sqlx::SqlitePool) {
+    let now = now_unix();
+    sqlx::query(
+        "UPDATE setup_state SET
+            setup_state = 'ready',
+            oidc_issuer_url = NULL,
+            oidc_client_id = NULL,
+            oidc_has_client_secret = NULL,
+            oidc_authorization_endpoint = NULL,
+            oidc_token_endpoint = NULL,
+            oidc_userinfo_endpoint = NULL,
+            oidc_jwks_uri = NULL,
+            oidc_configured_at = NULL,
+            oidc_encrypted_client_secret = NULL,
+            oidc_secret_stored_at = NULL,
+            updated_at = ?1
+         WHERE id = 1",
+    )
+    .bind(now)
+    .execute(pool)
+    .await
     .expect("failed to update setup state");
 }
 
@@ -330,4 +354,80 @@ async fn test_owner_can_enable_external_access_and_mode_change_revokes_sessions(
         .await
         .expect("query sessions");
     assert_eq!(remaining_sessions, 0);
+}
+
+#[tokio::test]
+async fn test_owner_can_configure_external_access_oidc_after_setup_ready() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+    mark_setup_ready_without_oidc(&pool).await;
+
+    let owner_id = seed_user_with_role(&pool, "owner@example.com", "owner").await;
+    let owner_session = create_session_token(&pool, &owner_id).await;
+
+    let req = Request::builder()
+        .uri("/v1/settings/external-access/oidc")
+        .method("PUT")
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {owner_session}"),
+        )
+        .body(Body::from(
+            serde_json::to_string(&serde_json::json!({
+                "issuer_url": "https://accounts.google.com",
+                "client_id": "client-id-123"
+            }))
+            .expect("serialize request"),
+        ))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.expect("oidc configure response");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp.into_body()).await;
+    assert_eq!(body["discovered_issuer"], "https://accounts.google.com");
+    assert_eq!(body["has_client_secret"], false);
+
+    let oidc_client_id: Option<String> =
+        sqlx::query_scalar("SELECT oidc_client_id FROM setup_state WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .expect("query oidc_client_id");
+    assert_eq!(oidc_client_id.as_deref(), Some("client-id-123"));
+}
+
+#[tokio::test]
+async fn test_non_owner_cannot_configure_external_access_oidc() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+    mark_setup_ready_without_oidc(&pool).await;
+
+    let admin_id = seed_user_with_role(&pool, "admin@example.com", "admin").await;
+    let admin_session = create_session_token(&pool, &admin_id).await;
+
+    let req = Request::builder()
+        .uri("/v1/settings/external-access/oidc")
+        .method("PUT")
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {admin_session}"),
+        )
+        .body(Body::from(
+            serde_json::to_string(&serde_json::json!({
+                "issuer_url": "https://accounts.google.com",
+                "client_id": "client-id-123"
+            }))
+            .expect("serialize request"),
+        ))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.expect("oidc configure response");
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_json(resp.into_body()).await;
+    assert_eq!(body["code"], "external_access_owner_required");
 }

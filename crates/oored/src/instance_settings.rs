@@ -6,8 +6,10 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use oore_contract::{
     ApiError, ArtifactStorageProvider, ArtifactStorageSettingsResponse,
+    ConfigureExternalAccessOidcRequest, ConfigureExternalAccessOidcResponse,
     ExternalAccessPreflightCheck, ExternalAccessPreflightResponse, InstancePreferences,
-    InstancePreferencesResponse, KeyStorageMode, RuntimeMode, SetupState,
+    InstancePreferencesResponse, KeyStorageMode, OidcConfigRecord, OidcSecretRecord, RuntimeMode,
+    SetupState,
     UpdateArtifactStorageSettingsRequest, UpdateInstancePreferencesRequest,
 };
 use sqlx::Row;
@@ -592,6 +594,209 @@ pub async fn get_external_access_preflight(
     .await;
 
     Ok(Json(result))
+}
+
+pub async fn configure_external_access_oidc(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Json(req): Json<ConfigureExternalAccessOidcRequest>,
+) -> ApiResult<ConfigureExternalAccessOidcResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "instance_settings", "write").await?;
+
+    if auth.0.role != "owner" {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "external_access_owner_required",
+            "Only the owner can configure External Access OIDC settings",
+        ));
+    }
+
+    let issuer_url = req.issuer_url.trim();
+    if issuer_url.is_empty() || issuer_url.len() > 2048 {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_input",
+            "issuer_url must be between 1 and 2048 characters",
+        ));
+    }
+    if url::Url::parse(issuer_url).is_err() {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_input",
+            "issuer_url is not a valid URL",
+        ));
+    }
+
+    let client_id = req.client_id.trim();
+    if client_id.is_empty() || client_id.len() > 256 {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_input",
+            "client_id must be between 1 and 256 characters",
+        ));
+    }
+
+    let client_secret = trim_opt(req.client_secret);
+    if let Some(secret) = client_secret.as_ref() {
+        if secret.len() > 1024 {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                "invalid_input",
+                "client_secret must be 1024 characters or fewer",
+            ));
+        }
+    }
+
+    let now = now_unix();
+    let has_client_secret = client_secret.is_some();
+
+    #[derive(Debug)]
+    struct OidcConfigFromDiscovery {
+        issuer: String,
+        authorization_endpoint: String,
+        token_endpoint: String,
+        userinfo_endpoint: Option<String>,
+        jwks_uri: String,
+    }
+
+    let discovered = {
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            if state.skip_oidc_discovery {
+                let base = issuer_url.trim_end_matches('/').to_string();
+                OidcConfigFromDiscovery {
+                    issuer: issuer_url.to_string(),
+                    authorization_endpoint: format!("{base}/o/oauth2/v2/auth"),
+                    token_endpoint: format!("{base}/token"),
+                    userinfo_endpoint: Some(format!("{base}/userinfo")),
+                    jwks_uri: format!("{base}/jwks"),
+                }
+            } else {
+                let provider = crate::oidc::discover_provider(issuer_url)
+                    .await
+                    .map_err(|e| {
+                        error!(error = %e, "external access OIDC discovery failed");
+                        api_err(
+                            StatusCode::BAD_REQUEST,
+                            "oidc_discovery_failed",
+                            "Failed to discover OIDC provider",
+                        )
+                    })?;
+                OidcConfigFromDiscovery {
+                    issuer: provider.issuer,
+                    authorization_endpoint: provider.authorization_endpoint,
+                    token_endpoint: provider.token_endpoint,
+                    userinfo_endpoint: provider.userinfo_endpoint,
+                    jwks_uri: provider.jwks_uri,
+                }
+            }
+        }
+        #[cfg(not(any(test, feature = "test-support")))]
+        {
+            let provider = crate::oidc::discover_provider(issuer_url)
+                .await
+                .map_err(|e| {
+                    error!(error = %e, "external access OIDC discovery failed");
+                    api_err(
+                        StatusCode::BAD_REQUEST,
+                        "oidc_discovery_failed",
+                        "Failed to discover OIDC provider",
+                    )
+                })?;
+            OidcConfigFromDiscovery {
+                issuer: provider.issuer,
+                authorization_endpoint: provider.authorization_endpoint,
+                token_endpoint: provider.token_endpoint,
+                userinfo_endpoint: provider.userinfo_endpoint,
+                jwks_uri: provider.jwks_uri,
+            }
+        }
+    };
+
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+
+    {
+        let store = state.store.lock().await;
+        let mut sf = store.load().await.map_err(|e| {
+            error!(error = %e, "failed to load setup state for External Access OIDC update");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to load setup state",
+            )
+        })?;
+
+        if sf.setup_state != SetupState::Ready {
+            return Err(api_err(
+                StatusCode::CONFLICT,
+                "invalid_state",
+                "External Access OIDC can only be configured after setup is ready",
+            ));
+        }
+
+        sf.oidc_config = Some(OidcConfigRecord {
+            issuer_url: discovered.issuer.clone(),
+            client_id: client_id.to_string(),
+            has_client_secret,
+            authorization_endpoint: discovered.authorization_endpoint.clone(),
+            token_endpoint: discovered.token_endpoint.clone(),
+            userinfo_endpoint: discovered.userinfo_endpoint.clone(),
+            jwks_uri: discovered.jwks_uri.clone(),
+            configured_at: now,
+        });
+
+        sf.oidc_secret = if let Some(secret) = client_secret {
+            let encrypted = crypto::encrypt(&secret, &state.encryption_key).map_err(|e| {
+                error!(error = %e, "failed to encrypt External Access OIDC client secret");
+                api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "encryption_error",
+                    "Failed to encrypt OIDC client secret",
+                )
+            })?;
+            Some(OidcSecretRecord {
+                encrypted_client_secret: encrypted,
+                stored_at: now,
+            })
+        } else {
+            None
+        };
+
+        sf.updated_at = now;
+
+        store.save(&sf).await.map_err(|e| {
+            error!(error = %e, "failed to persist External Access OIDC configuration");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to update OIDC configuration",
+            )
+        })?;
+    }
+
+    let details = serde_json::json!({
+        "issuer_url": discovered.issuer.clone(),
+        "has_client_secret": has_client_secret,
+    })
+    .to_string();
+    let _ = write_audit_log(
+        &pool,
+        Some(&auth.0.user_id),
+        "external_access_oidc_configured",
+        "instance_settings",
+        Some("external_access"),
+        Some(&details),
+    )
+    .await;
+
+    Ok(Json(ConfigureExternalAccessOidcResponse {
+        discovered_issuer: discovered.issuer,
+        has_client_secret,
+        configured_at: now,
+    }))
 }
 
 pub async fn update_instance_preferences(

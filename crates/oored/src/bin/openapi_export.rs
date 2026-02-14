@@ -55,6 +55,7 @@ use utoipa::OpenApi;
         paths::get_instance_preferences,
         paths::update_instance_preferences,
         paths::get_external_access_preflight,
+        paths::configure_external_access_oidc,
         // ── Integrations ──
         paths::list_integrations,
         paths::get_integration,
@@ -262,6 +263,8 @@ use utoipa::OpenApi;
         oore_contract::RuntimeMode,
         oore_contract::ExternalAccessPreflightCheck,
         oore_contract::ExternalAccessPreflightResponse,
+        oore_contract::ConfigureExternalAccessOidcRequest,
+        oore_contract::ConfigureExternalAccessOidcResponse,
         oore_contract::InstancePreferences,
         oore_contract::InstancePreferencesResponse,
         oore_contract::UpdateInstancePreferencesRequest,
@@ -646,6 +649,22 @@ mod paths {
         )
     )]
     pub(super) async fn get_external_access_preflight() {}
+
+    /// Configure OIDC for External Access
+    ///
+    /// Owner-only endpoint to configure runtime OIDC after setup is complete.
+    /// Performs provider discovery and stores issuer/client settings.
+    #[utoipa::path(put, path = "/v1/settings/external-access/oidc", tag = "Instance Settings",
+        request_body = ConfigureExternalAccessOidcRequest,
+        security(("bearer_auth" = [])),
+        responses(
+            (status = 200, description = "OIDC configured for External Access", body = ConfigureExternalAccessOidcResponse),
+            (status = 400, description = "Invalid input or OIDC discovery failure", body = ApiError),
+            (status = 403, description = "Owner-only operation", body = ApiError),
+            (status = 409, description = "Setup state does not allow runtime OIDC configuration", body = ApiError),
+        )
+    )]
+    pub(super) async fn configure_external_access_oidc() {}
 
     // ── Integrations ──
 

@@ -1471,6 +1471,10 @@ async fn build_router_inner(
             "/v1/settings/external-access/preflight",
             get(instance_settings::get_external_access_preflight),
         )
+        .route(
+            "/v1/settings/external-access/oidc",
+            axum::routing::put(instance_settings::configure_external_access_oidc),
+        )
         // Integration management endpoints
         .route("/v1/integrations", get(integrations::list_integrations))
         .route("/v1/integrations/{id}", get(integrations::get_integration))

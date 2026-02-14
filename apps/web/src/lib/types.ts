@@ -507,6 +507,18 @@ export interface ExternalAccessPreflightResponse {
   checks: Array<ExternalAccessPreflightCheck>
 }
 
+export interface ConfigureExternalAccessOidcRequest {
+  issuer_url: string
+  client_id: string
+  client_secret?: string
+}
+
+export interface ConfigureExternalAccessOidcResponse {
+  discovered_issuer: string
+  has_client_secret: boolean
+  configured_at: number
+}
+
 export interface InstancePreferences {
   key_storage_mode: KeyStorageMode
   runtime_mode: RuntimeMode

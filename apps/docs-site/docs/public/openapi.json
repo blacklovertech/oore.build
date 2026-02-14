@@ -2734,6 +2734,73 @@
         ]
       }
     },
+    "/v1/settings/external-access/oidc": {
+      "put": {
+        "tags": [
+          "Instance Settings"
+        ],
+        "summary": "Configure OIDC for External Access",
+        "description": "Owner-only endpoint to configure runtime OIDC after setup is complete.\nPerforms provider discovery and stores issuer/client settings.",
+        "operationId": "configure_external_access_oidc",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureExternalAccessOidcRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OIDC configured for External Access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigureExternalAccessOidcResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or OIDC discovery failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Owner-only operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Setup state does not allow runtime OIDC configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/settings/external-access/preflight": {
       "get": {
         "tags": [
@@ -4371,6 +4438,47 @@
             ],
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "ConfigureExternalAccessOidcRequest": {
+        "type": "object",
+        "required": [
+          "issuer_url",
+          "client_id"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "issuer_url": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigureExternalAccessOidcResponse": {
+        "type": "object",
+        "required": [
+          "discovered_issuer",
+          "has_client_secret",
+          "configured_at"
+        ],
+        "properties": {
+          "configured_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "discovered_issuer": {
+            "type": "string"
+          },
+          "has_client_secret": {
+            "type": "boolean"
           }
         }
       },
