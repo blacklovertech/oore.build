@@ -8,7 +8,7 @@ keep project tracking + documentation in one place.
 ## Canonical Docs Home
 
 - Linear project: oore.build Docs
-  - https://linear.app/oorebuild/project/oorebuild-docs-258feaed8fee
+  - https://linear.app/oorebuild/project/oorebuild-258feaed8fee
 - Docs Index (start here):
   - https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda
 
