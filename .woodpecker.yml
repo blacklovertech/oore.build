@@ -1,0 +1,273 @@
+name: validate
+skip_clone: true
+
+when:
+  event:
+    - pull_request
+    - push
+
+steps:
+  - name: checkout
+    image: bash
+    environment:
+      GITHUB_TOKEN:
+        from_secret: GITHUB_TOKEN
+    commands:
+      - set -euo pipefail
+      - rm -rf .git
+      - git init
+      - |
+        clone_url="${CI_REPO_CLONE_URL:-https://github.com/${CI_REPO}.git}"
+        clone_url="${clone_url#https://}"
+        clone_url="${clone_url#http://}"
+        git remote add origin "https://x-access-token:${GITHUB_TOKEN}@${clone_url}"
+      - git fetch --depth=200 origin "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
+      - git checkout -f "${CI_COMMIT_SHA}"
+      - git submodule update --init --recursive || true
+
+  - name: validate
+    image: bash
+    commands:
+      - set -euo pipefail
+      - bun install --frozen-lockfile
+      - make validate
+---
+name: autotag
+skip_clone: true
+
+when:
+  event:
+    - push
+  branch:
+    - main
+
+steps:
+  - name: checkout
+    image: bash
+    environment:
+      GITHUB_TOKEN:
+        from_secret: GITHUB_TOKEN
+    commands:
+      - set -euo pipefail
+      - rm -rf .git
+      - git init
+      - |
+        clone_url="${CI_REPO_CLONE_URL:-https://github.com/${CI_REPO}.git}"
+        clone_url="${clone_url#https://}"
+        clone_url="${clone_url#http://}"
+        git remote add origin "https://x-access-token:${GITHUB_TOKEN}@${clone_url}"
+      - git fetch origin "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
+      - git checkout -B main "origin/main"
+
+  - name: bump-tag
+    image: bash
+    environment:
+      GITHUB_TOKEN:
+        from_secret: GITHUB_TOKEN
+    commands:
+      - set -euo pipefail
+      - msg="$(git log -1 --pretty=%B)"
+      - |
+        if echo "$msg" | grep -q "\\[CI SKIP\\]"; then
+          echo "Skipping (already CI-generated commit)."
+          exit 0
+        fi
+      - |
+        if echo "$msg" | grep -q "^chore(release): bump version to "; then
+          echo "Skipping (already a release bump commit)."
+          exit 0
+        fi
+      - |
+        cur="$(
+          awk -F'\"' '
+            /^\\[workspace\\.package\\]/ { in_section=1; next }
+            in_section && /^[[:space:]]*version[[:space:]]*=/ { print $2; exit }
+            in_section && /^\\[/ { in_section=0 }
+          ' Cargo.toml
+        )"
+        if [ -z "$cur" ]; then
+          echo "Failed to read workspace.package.version from Cargo.toml" >&2
+          exit 1
+        fi
+        IFS=. read -r major minor patch <<<"$cur"
+        if [ -z "${major:-}" ] || [ -z "${minor:-}" ] || [ -z "${patch:-}" ]; then
+          echo "Invalid semver in Cargo.toml: $cur" >&2
+          exit 1
+        fi
+        next="${major}.${minor}.$((patch+1))"
+        tag="v${next}"
+        echo "Bumping $cur -> $next ($tag)"
+        python3 - "$next" <<'PY'
+        import sys
+        from pathlib import Path
+
+        new_version = sys.argv[1]
+        p = Path("Cargo.toml")
+        lines = p.read_text().splitlines(True)
+
+        out = []
+        in_ws = False
+        updated = False
+        for line in lines:
+            if line.strip() == "[workspace.package]":
+                in_ws = True
+                out.append(line)
+                continue
+            if in_ws and line.startswith("[") and not line.strip().startswith("[workspace.package]"):
+                in_ws = False
+            if in_ws and line.lstrip().startswith("version") and "=" in line and not updated:
+                # Replace version = "x.y.z"
+                prefix = line.split("=", 1)[0]
+                out.append(f'{prefix}= "{new_version}"\n')
+                updated = True
+                continue
+            out.append(line)
+
+        if not updated:
+            raise SystemExit("Failed to update workspace.package.version in Cargo.toml")
+
+        p.write_text("".join(out))
+        PY
+        git add Cargo.toml
+        git -c user.name="oore.build CI" -c user.email="ci@oore.build" commit -m "chore(release): bump version to ${next} [CI SKIP]"
+        git tag -a "$tag" -m "Release $tag"
+        git push origin main
+        git push origin "$tag"
+---
+name: release
+skip_clone: true
+
+when:
+  event:
+    - tag
+
+steps:
+  - name: checkout
+    image: bash
+    environment:
+      GITHUB_TOKEN:
+        from_secret: GITHUB_TOKEN
+    commands:
+      - set -euo pipefail
+      - rm -rf .git
+      - git init
+      - |
+        clone_url="${CI_REPO_CLONE_URL:-https://github.com/${CI_REPO}.git}"
+        clone_url="${clone_url#https://}"
+        clone_url="${clone_url#http://}"
+        git remote add origin "https://x-access-token:${GITHUB_TOKEN}@${clone_url}"
+      - git fetch --depth=200 origin "+refs/tags/*:refs/tags/*" "+refs/heads/*:refs/remotes/origin/*"
+      - git checkout -f "${CI_COMMIT_TAG}"
+
+  - name: build-release-assets
+    image: bash
+    commands:
+      - set -euo pipefail
+      - test -n "${CI_COMMIT_TAG:-}"
+      - ver="${CI_COMMIT_TAG#v}"
+      - mkdir -p "dist/releases/${CI_COMMIT_TAG}"
+      - bun install --frozen-lockfile
+      - bun run build:web
+      - rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - cargo build --release -p oored -p oore --target aarch64-apple-darwin
+      - cargo build --release -p oored -p oore --target x86_64-apple-darwin
+      - bun build --compile --target=bun-darwin-arm64 --outfile "dist/oore-web-arm64" "apps/web/tools/oore-web.js"
+      - bun build --compile --target=bun-darwin-x64 --outfile "dist/oore-web-x86_64" "apps/web/tools/oore-web.js"
+      - chmod +x dist/oore-web-arm64 dist/oore-web-x86_64
+      - |
+        stage_arm="dist/stage-arm64"
+        stage_x64="dist/stage-x86_64"
+        rm -rf "$stage_arm" "$stage_x64"
+        mkdir -p "$stage_arm/bin" "$stage_x64/bin"
+
+        cp "target/aarch64-apple-darwin/release/oored" "$stage_arm/bin/oored"
+        cp "target/aarch64-apple-darwin/release/oore"  "$stage_arm/bin/oore"
+        cp "dist/oore-web-arm64" "$stage_arm/bin/oore-web"
+        cp -R "apps/web/dist" "$stage_arm/web-dist"
+        cp "LICENSE" "$stage_arm/LICENSE"
+        printf '%s\n' "$ver" > "$stage_arm/VERSION"
+
+        cp "target/x86_64-apple-darwin/release/oored" "$stage_x64/bin/oored"
+        cp "target/x86_64-apple-darwin/release/oore"  "$stage_x64/bin/oore"
+        cp "dist/oore-web-x86_64" "$stage_x64/bin/oore-web"
+        cp -R "apps/web/dist" "$stage_x64/web-dist"
+        cp "LICENSE" "$stage_x64/LICENSE"
+        printf '%s\n' "$ver" > "$stage_x64/VERSION"
+
+        out="dist/releases/${CI_COMMIT_TAG}"
+        arm_asset="oore_${ver}_darwin_arm64.tar.gz"
+        x64_asset="oore_${ver}_darwin_x86_64.tar.gz"
+        tar -C "$stage_arm" -czf "$out/$arm_asset" .
+        tar -C "$stage_x64" -czf "$out/$x64_asset" .
+        (cd "$out" && shasum -a 256 "$arm_asset" "$x64_asset" > "oore_${ver}_checksums.txt")
+
+  - name: deploy-pages
+    image: bash
+    environment:
+      CLOUDFLARE_API_TOKEN:
+        from_secret: CLOUDFLARE_API_TOKEN
+    commands:
+      - set -euo pipefail
+      - bun install --frozen-lockfile
+      - make build-site build-docs build-web
+      - make deploy-site deploy-docs deploy-web
+
+  - name: generate-release-notes
+    image: bash
+    commands:
+      - set -euo pipefail
+      - tag="${CI_COMMIT_TAG}"
+      - prev="$(git tag -l 'v*' --sort=-v:refname | grep -v \"^${tag}$\" | head -n1 || true)"
+      - out="dist/releases/${tag}/RELEASE_NOTES.md"
+      - |
+        {
+          echo \"# ${tag}\"
+          echo
+          if [ -n \"$prev\" ]; then
+            echo \"Changes since ${prev}:\"
+            echo
+            git log --no-merges --pretty=format:'- %s (%h)' \"${prev}..${tag}\" | grep -v '^\\- chore(release): bump version to ' || true
+          else
+            echo \"Changes:\"
+            echo
+            git log --no-merges --pretty=format:'- %s (%h)' \"${tag}\" | grep -v '^\\- chore(release): bump version to ' || true
+          fi
+          echo
+        } > \"$out\"
+
+  - name: github-release
+    image: bash
+    environment:
+      GITHUB_TOKEN:
+        from_secret: GITHUB_TOKEN
+    commands:
+      - set -euo pipefail
+      - export GH_TOKEN="$GITHUB_TOKEN"
+      - tag="${CI_COMMIT_TAG}"
+      - ver="${tag#v}"
+      - dir="dist/releases/${tag}"
+      - notes="${dir}/RELEASE_NOTES.md"
+      - |
+        # Install gh (user-local, no brew)
+        tmp="$(mktemp -d)"
+        curl -fsSL -o \"$tmp/gh.tgz\" \"https://github.com/cli/cli/releases/latest/download/gh_$(uname -s | tr '[:upper:]' '[:lower:]')_arm64.tar.gz\"
+        tar -xzf \"$tmp/gh.tgz\" -C \"$tmp\"
+        ghbin=\"$(find \"$tmp\" -type f -path '*/bin/gh' | head -n1)\"
+        \"$ghbin\" --version
+
+        repo="$(
+          git config --get remote.origin.url \
+            | sed -n 's#.*github\\.com[:/]\\([^/]*\\/[^.]*\\)\\(\\.git\\)\\{0,1\\}$#\\1#p'
+        )"
+        if [ -z "$repo" ]; then
+          repo="${CI_REPO}"
+        fi
+
+        # Create or update release
+        if \"$ghbin\" release view \"$tag\" --repo \"$repo\" >/dev/null 2>&1; then
+          \"$ghbin\" release edit \"$tag\" --repo \"$repo\" --title \"$tag\" --notes-file \"$notes\"
+        else
+          \"$ghbin\" release create \"$tag\" --repo \"$repo\" --title \"$tag\" --notes-file \"$notes\"
+        fi
+
+        \"$ghbin\" release upload \"$tag\" \"$dir\"/*.tar.gz \"$dir\"/*.txt \"$notes\" --repo \"$repo\" --clobber
