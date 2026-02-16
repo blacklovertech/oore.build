@@ -22,6 +22,13 @@ PAGES_PROJECT_WEB ?= oore-ci
 PAGES_PROJECT_DEMO ?= oore-demo
 PAGES_PROJECT_SITE ?= oore
 PAGES_PROJECT_DOCS ?= oore-docs
+PAGES_BRANCH ?=
+
+# If PAGES_BRANCH is set (e.g. alpha/beta), deploy to a Pages preview branch.
+PAGES_BRANCH_FLAG :=
+ifneq ($(strip $(PAGES_BRANCH)),)
+PAGES_BRANCH_FLAG := --branch=$(PAGES_BRANCH)
+endif
 
 # ── Frontend: Web App ─────────────────────────────────────────────
 dev-web:
@@ -31,13 +38,13 @@ build-web:
 	bun run build:web
 
 deploy-web: build-web
-	$(WRANGLER) pages deploy apps/web/dist --project-name=$(PAGES_PROJECT_WEB)
+	$(WRANGLER) pages deploy apps/web/dist --project-name=$(PAGES_PROJECT_WEB) $(PAGES_BRANCH_FLAG)
 
 build-demo:
 	cd apps/web && VITE_DEMO_MODE=true bun run build
 
 deploy-demo: build-demo
-	$(WRANGLER) pages deploy apps/web/dist --project-name=$(PAGES_PROJECT_DEMO)
+	$(WRANGLER) pages deploy apps/web/dist --project-name=$(PAGES_PROJECT_DEMO) $(PAGES_BRANCH_FLAG)
 
 test-web:
 	cd apps/web && bun run test
@@ -62,10 +69,10 @@ build-site:
 	bun run build:site
 
 deploy-site: build-site
-	$(WRANGLER) pages deploy apps/site/dist --project-name=$(PAGES_PROJECT_SITE)
+	$(WRANGLER) pages deploy apps/site/dist --project-name=$(PAGES_PROJECT_SITE) $(PAGES_BRANCH_FLAG)
 
 deploy-docs: build-docs
-	$(WRANGLER) pages deploy apps/docs-site/docs/.vitepress/dist --project-name=$(PAGES_PROJECT_DOCS)
+	$(WRANGLER) pages deploy apps/docs-site/docs/.vitepress/dist --project-name=$(PAGES_PROJECT_DOCS) $(PAGES_BRANCH_FLAG)
 
 test-docs:
 	cd apps/docs-site && bun run test

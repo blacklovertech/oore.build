@@ -483,21 +483,22 @@ steps:
         tag="$(printenv CI_COMMIT_TAG || true)"
         test -n "$tag"
         channel="prod"
-        suffix=""
+        pages_branch=""
         if echo "$tag" | grep -q -- '-alpha\\.'; then
           channel="alpha"
-          suffix="-alpha"
+          pages_branch="alpha"
         elif echo "$tag" | grep -q -- '-beta\\.'; then
           channel="beta"
-          suffix="-beta"
+          pages_branch="beta"
         fi
 
-        export PAGES_PROJECT_SITE="oore$suffix"
-        export PAGES_PROJECT_DOCS="oore-docs$suffix"
-        export PAGES_PROJECT_WEB="oore-ci$suffix"
-        export PAGES_PROJECT_DEMO="oore-demo$suffix"
+        export PAGES_PROJECT_SITE="oore"
+        export PAGES_PROJECT_DOCS="oore-docs"
+        export PAGES_PROJECT_WEB="oore-ci"
+        export PAGES_PROJECT_DEMO="oore-demo"
+        export PAGES_BRANCH="$pages_branch"
 
-        echo "Deploy channel=$channel site=$PAGES_PROJECT_SITE docs=$PAGES_PROJECT_DOCS web=$PAGES_PROJECT_WEB"
+        echo "Deploy channel=$channel branch=$PAGES_BRANCH site=$PAGES_PROJECT_SITE docs=$PAGES_PROJECT_DOCS web=$PAGES_PROJECT_WEB"
       - ulimit -n 8192
       - bun install --frozen-lockfile
       - make build-site build-docs build-web
