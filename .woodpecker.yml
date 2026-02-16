@@ -575,12 +575,16 @@ steps:
         ghbin="$(find "$tmp" -type f -path '*/bin/gh' | head -n1)"
         "$ghbin" --version
 
-        repo="$(
-          git config --get remote.origin.url \
-            | sed -n 's#.*github\\.com[:/]\\([^/]*\\/[^.]*\\)\\(\\.git\\)\\{0,1\\}$#\\1#p'
-        )"
+        repo="$(printenv CI_REPO || true)"
         if [ -z "$repo" ]; then
-          repo="$CI_REPO"
+          repo="$(
+            git config --get remote.origin.url \
+              | sed -n 's#.*github\\.com[:/]\\([^/]*\\/[^/]*\\)\\(\\.git\\)\\{0,1\\}$#\\1#p'
+          )"
+        fi
+        if ! echo "$repo" | grep -q '/'; then
+          echo "Failed to determine GitHub repo (got: $repo)" >&2
+          exit 1
         fi
 
         # Create or update release
