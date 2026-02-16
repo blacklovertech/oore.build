@@ -502,6 +502,14 @@ steps:
       - ulimit -n 8192
       - bun install --frozen-lockfile
       - make build-site build-docs build-web
+      - |
+        token_len="$(printenv CLOUDFLARE_API_TOKEN | tr -d '\n' | wc -c | tr -d ' ')"
+        echo "CLOUDFLARE_API_TOKEN length=$token_len"
+        if [ "$token_len" -lt 20 ]; then
+          echo "CLOUDFLARE_API_TOKEN missing/empty for this step." >&2
+          exit 1
+        fi
+      - bunx --bun wrangler whoami
       - make deploy-site deploy-docs deploy-web
 
   - name: release-generate-notes
