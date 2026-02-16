@@ -408,6 +408,10 @@ steps:
   - name: deploy-pages
     image: bash
     environment:
+      HOME: /Users/arya
+      CARGO_HOME: /Users/arya/.cargo
+      RUSTUP_HOME: /Users/arya/.rustup
+      PATH: /Users/arya/opt/bin:/Users/arya/.cargo/bin:/Users/arya/.bun/bin:/usr/bin:/bin:/usr/sbin:/sbin
       CLOUDFLARE_API_TOKEN:
         from_secret: CLOUDFLARE_API_TOKEN
     commands:
