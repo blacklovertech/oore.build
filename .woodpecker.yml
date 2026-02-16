@@ -1,11 +1,11 @@
-name: validate-pr
-when:
-  event:
-    - pull_request
+name: ci
 
 steps:
-  - name: validate
+  - name: validate-pr
     image: bash
+    when:
+      event:
+        - pull_request
     environment:
       HOME: /Users/arya
       CARGO_HOME: /Users/arya/.cargo
@@ -15,20 +15,17 @@ steps:
       - set -euo pipefail
       - bun install --frozen-lockfile
       - make validate
----
-name: validate-push
-when:
-  event:
-    - push
-  branch:
-    - alpha
-    - beta
-    - stable
-    - master
 
-steps:
-  - name: validate
+  - name: validate-push
     image: bash
+    when:
+      event:
+        - push
+      branch:
+        - alpha
+        - beta
+        - stable
+        - master
     environment:
       HOME: /Users/arya
       CARGO_HOME: /Users/arya/.cargo
@@ -38,19 +35,15 @@ steps:
       - set -euo pipefail
       - bun install --frozen-lockfile
       - make validate
----
-name: autotag-prod
-skip_clone: true
 
-when:
-  event:
-    - push
-  branch:
-    - stable
-
-steps:
-  - name: checkout
+  # ----- Autotag: Production (stable -> vX.Y.Z) -----
+  - name: autotag-prod-checkout
     image: bash
+    when:
+      event:
+        - push
+      branch:
+        - stable
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
@@ -68,8 +61,13 @@ steps:
       - git fetch origin "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
       - git checkout -B stable "origin/stable"
 
-  - name: bump-tag
+  - name: autotag-prod-bump-tag
     image: bash
+    when:
+      event:
+        - push
+      branch:
+        - stable
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
@@ -145,7 +143,7 @@ steps:
                   in_ws = False
               if in_ws and line.lstrip().startswith("version") and "=" in line and not updated:
                   prefix = line.split("=", 1)[0]
-                  out.append(f'{prefix}= "{new_version}"\\n')
+                  out.append(f'{prefix}= "{new_version}"\n')
                   updated = True
                   continue
               out.append(line)
@@ -163,19 +161,14 @@ steps:
         git push origin "$branch" || true
         git push origin "$tag"
 
----
-name: autotag-alpha
-skip_clone: true
-
-when:
-  event:
-    - push
-  branch:
-    - alpha
-
-steps:
-  - name: checkout
+  # ----- Autotag: Alpha (alpha -> vX.Y.Z-alpha.N) -----
+  - name: autotag-alpha-checkout
     image: bash
+    when:
+      event:
+        - push
+      branch:
+        - alpha
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
@@ -192,8 +185,13 @@ steps:
       - git fetch origin "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
       - git checkout -B alpha "origin/alpha"
 
-  - name: tag-alpha
+  - name: autotag-alpha-tag
     image: bash
+    when:
+      event:
+        - push
+      branch:
+        - alpha
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
@@ -247,19 +245,14 @@ steps:
         git push origin "$branch"
         git push origin "$tag"
 
----
-name: autotag-beta
-skip_clone: true
-
-when:
-  event:
-    - push
-  branch:
-    - beta
-
-steps:
-  - name: checkout
+  # ----- Autotag: Beta (beta -> vX.Y.Z-beta.N) -----
+  - name: autotag-beta-checkout
     image: bash
+    when:
+      event:
+        - push
+      branch:
+        - beta
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
@@ -276,8 +269,13 @@ steps:
       - git fetch origin "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
       - git checkout -B beta "origin/beta"
 
-  - name: tag-beta
+  - name: autotag-beta-tag
     image: bash
+    when:
+      event:
+        - push
+      branch:
+        - beta
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
@@ -330,17 +328,13 @@ steps:
         branch="$(git rev-parse --abbrev-ref HEAD)"
         git push origin "$branch"
         git push origin "$tag"
----
-name: release
-skip_clone: true
 
-when:
-  event:
-    - tag
-
-steps:
-  - name: checkout
+  # ----- Release: Tag -> Pages Deploy + GitHub Release -----
+  - name: release-checkout
     image: bash
+    when:
+      event:
+        - tag
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
@@ -358,8 +352,11 @@ steps:
       - git fetch --depth=200 origin "+refs/tags/*:refs/tags/*" "+refs/heads/*:refs/remotes/origin/*"
       - git checkout -f "${CI_COMMIT_TAG}"
 
-  - name: build-release-assets
+  - name: release-build-assets
     image: bash
+    when:
+      event:
+        - tag
     environment:
       HOME: /Users/arya
       CARGO_HOME: /Users/arya/.cargo
@@ -405,8 +402,11 @@ steps:
         tar -C "$stage_x64" -czf "$out/$x64_asset" .
         (cd "$out" && shasum -a 256 "$arm_asset" "$x64_asset" > "oore_${ver}_checksums.txt")
 
-  - name: deploy-pages
+  - name: release-deploy-pages
     image: bash
+    when:
+      event:
+        - tag
     environment:
       HOME: /Users/arya
       CARGO_HOME: /Users/arya/.cargo
@@ -438,8 +438,11 @@ steps:
       - make build-site build-docs build-web
       - make deploy-site deploy-docs deploy-web
 
-  - name: generate-release-notes
+  - name: release-generate-notes
     image: bash
+    when:
+      event:
+        - tag
     commands:
       - set -euo pipefail
       - tag="${CI_COMMIT_TAG}"
@@ -463,22 +466,25 @@ steps:
       - out="dist/releases/${tag}/RELEASE_NOTES.md"
       - |
         {
-          echo \"# ${tag}\"
+          echo "# ${tag}"
           echo
-          if [ -n \"$prev\" ]; then
-            echo \"Changes since ${prev}:\"
+          if [ -n "$prev" ]; then
+            echo "Changes since ${prev}:"
             echo
-            git log --no-merges --pretty=format:'- %s (%h)' \"${prev}..${tag}\" | grep -v '^\\- chore(release): bump version to ' || true
+            git log --no-merges --pretty=format:'- %s (%h)' "${prev}..${tag}" | grep -v '^- chore(release): bump version to ' || true
           else
-            echo \"Changes:\"
+            echo "Changes:"
             echo
-            git log --no-merges --pretty=format:'- %s (%h)' \"${tag}\" | grep -v '^\\- chore(release): bump version to ' || true
+            git log --no-merges --pretty=format:'- %s (%h)' "${tag}" | grep -v '^- chore(release): bump version to ' || true
           fi
           echo
-        } > \"$out\"
+        } > "$out"
 
-  - name: github-release
+  - name: release-github
     image: bash
+    when:
+      event:
+        - tag
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
@@ -486,7 +492,6 @@ steps:
       - set -euo pipefail
       - export GH_TOKEN="$GITHUB_TOKEN"
       - tag="${CI_COMMIT_TAG}"
-      - ver="${tag#v}"
       - dir="dist/releases/${tag}"
       - notes="${dir}/RELEASE_NOTES.md"
       - |
@@ -497,10 +502,10 @@ steps:
 
         # Install gh (user-local, no brew)
         tmp="$(mktemp -d)"
-        curl -fsSL -o \"$tmp/gh.tgz\" \"https://github.com/cli/cli/releases/latest/download/gh_$(uname -s | tr '[:upper:]' '[:lower:]')_arm64.tar.gz\"
-        tar -xzf \"$tmp/gh.tgz\" -C \"$tmp\"
-        ghbin=\"$(find \"$tmp\" -type f -path '*/bin/gh' | head -n1)\"
-        \"$ghbin\" --version
+        curl -fsSL -o "$tmp/gh.tgz" "https://github.com/cli/cli/releases/latest/download/gh_$(uname -s | tr '[:upper:]' '[:lower:]')_arm64.tar.gz"
+        tar -xzf "$tmp/gh.tgz" -C "$tmp"
+        ghbin="$(find "$tmp" -type f -path '*/bin/gh' | head -n1)"
+        "$ghbin" --version
 
         repo="$(
           git config --get remote.origin.url \
@@ -511,10 +516,11 @@ steps:
         fi
 
         # Create or update release
-        if \"$ghbin\" release view \"$tag\" --repo \"$repo\" >/dev/null 2>&1; then
-          \"$ghbin\" release edit \"$tag\" --repo \"$repo\" --title \"$tag\" --notes-file \"$notes\" $prerelease_flag
+        if "$ghbin" release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+          "$ghbin" release edit "$tag" --repo "$repo" --title "$tag" --notes-file "$notes" $prerelease_flag
         else
-          \"$ghbin\" release create \"$tag\" --repo \"$repo\" --title \"$tag\" --notes-file \"$notes\" $prerelease_flag
+          "$ghbin" release create "$tag" --repo "$repo" --title "$tag" --notes-file "$notes" $prerelease_flag
         fi
 
-        \"$ghbin\" release upload \"$tag\" \"$dir\"/*.tar.gz \"$dir\"/*.txt \"$notes\" --repo \"$repo\" --clobber
+        "$ghbin" release upload "$tag" "$dir"/*.tar.gz "$dir"/*.txt "$notes" --repo "$repo" --clobber
+
