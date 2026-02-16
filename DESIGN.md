@@ -162,7 +162,7 @@ Used on login, setup, and welcome (no-instance) pages for strong brand presence:
 
 ```tsx
 <div className="mx-auto flex size-14 items-center justify-center">
-  <img src="/logo.svg" alt="oore.build logo" className="size-7" />
+  <img src="/logo.svg" alt="Oore logo" className="size-full" />
 </div>
 <h1 className="text-3xl font-bold tracking-tight">Title</h1>
 <p className="text-sm text-muted-foreground">Subtitle</p>

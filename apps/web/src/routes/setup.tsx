@@ -148,7 +148,7 @@ function SetupLayout() {
       <div className="w-full max-w-lg space-y-8">
         <div className="text-center space-y-4">
           <div className="mx-auto flex size-14 items-center justify-center">
-            <img src="/logo.svg" alt="oore.build logo" className="size-7" />
+            <img src="/logo.svg" alt="Oore logo" className="size-full" />
           </div>
           <div className="space-y-1">
             <h1 className="text-3xl font-bold tracking-tight">
