@@ -475,6 +475,7 @@ steps:
       CARGO_HOME: /Users/arya/.cargo
       RUSTUP_HOME: /Users/arya/.rustup
       PATH: /Users/arya/opt/bin:/Users/arya/.cargo/bin:/Users/arya/.bun/bin:/usr/bin:/bin:/usr/sbin:/sbin
+      CLOUDFLARE_ACCOUNT_ID: bf288a8d0e450c22157076593bc1f6be
       CLOUDFLARE_API_TOKEN:
         from_secret: CLOUDFLARE_API_TOKEN
     commands:
@@ -509,6 +510,8 @@ steps:
           echo "CLOUDFLARE_API_TOKEN missing/empty for this step." >&2
           exit 1
         fi
+        token_hash="$(printenv CLOUDFLARE_API_TOKEN | tr -d '\n' | shasum -a 256 | awk '{print $1}' | cut -c1-12)"
+        echo "CLOUDFLARE_API_TOKEN sha256_prefix=$token_hash"
       - bunx --bun wrangler whoami
       - make deploy-site deploy-docs deploy-web
 
