@@ -17,6 +17,11 @@ OORED_DEV_LISTEN_ADDR ?= 127.0.0.1:8787
 OORED_DEV_DAEMON_URL ?= http://$(OORED_DEV_LISTEN_ADDR)
 OORE_DEV_ENABLE_TUNNEL ?= 1
 OORE_DEV_SETUP_MODE ?= token
+WRANGLER ?= bunx --bun wrangler
+PAGES_PROJECT_WEB ?= oore-ci
+PAGES_PROJECT_DEMO ?= oore-demo
+PAGES_PROJECT_SITE ?= oore
+PAGES_PROJECT_DOCS ?= oore-docs
 
 # ── Frontend: Web App ─────────────────────────────────────────────
 dev-web:
@@ -26,13 +31,13 @@ build-web:
 	bun run build:web
 
 deploy-web: build-web
-	wrangler pages deploy apps/web/dist --project-name=oore-ci
+	$(WRANGLER) pages deploy apps/web/dist --project-name=$(PAGES_PROJECT_WEB)
 
 build-demo:
 	cd apps/web && VITE_DEMO_MODE=true bun run build
 
 deploy-demo: build-demo
-	wrangler pages deploy apps/web/dist --project-name=oore-demo
+	$(WRANGLER) pages deploy apps/web/dist --project-name=$(PAGES_PROJECT_DEMO)
 
 test-web:
 	cd apps/web && bun run test
@@ -57,10 +62,10 @@ build-site:
 	bun run build:site
 
 deploy-site: build-site
-	wrangler pages deploy apps/site/dist --project-name=oore
+	$(WRANGLER) pages deploy apps/site/dist --project-name=$(PAGES_PROJECT_SITE)
 
 deploy-docs: build-docs
-	wrangler pages deploy apps/docs-site/docs/.vitepress/dist --project-name=oore-docs
+	$(WRANGLER) pages deploy apps/docs-site/docs/.vitepress/dist --project-name=$(PAGES_PROJECT_DOCS)
 
 test-docs:
 	cd apps/docs-site && bun run test
@@ -73,7 +78,7 @@ fix-docs:
 
 # ── Backend (Rust) ────────────────────────────────────────────────
 cargo-check:
-	cargo check --workspace
+	cargo +stable check --workspace
 
 run-daemon:
 	OORED_DATA_DIR=$(OORED_DEV_DATA_DIR) OORE_SETUP_STATE_FILE=$(OORE_DEV_SETUP_STATE_FILE) RUST_LOG=$(OORED_LOG_LEVEL) cargo run -p oored -- run --listen $(OORED_DEV_LISTEN_ADDR)

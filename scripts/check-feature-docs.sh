@@ -69,6 +69,7 @@ if [[ -n "$BASE_SHA" ]]; then
   if [[ -n "$changed_files" ]]; then
     code_changed="false"
     docs_changed="false"
+    changes_ledger_updated="false"
 
     while IFS= read -r file; do
       [[ -z "$file" ]] && continue
@@ -80,10 +81,14 @@ if [[ -n "$BASE_SHA" ]]; then
       if [[ "$file" =~ ^docs/features/.*\.md$ && "$file" != "docs/features/README.md" ]]; then
         docs_changed="true"
       fi
+
+      if [[ "$file" == "docs/changes.md" ]]; then
+        changes_ledger_updated="true"
+      fi
     done <<< "$changed_files"
 
-    if [[ "$code_changed" == "true" && "$docs_changed" == "false" ]]; then
-      echo "code changes detected without docs/features update" >&2
+    if [[ "$code_changed" == "true" && "$docs_changed" == "false" && "$changes_ledger_updated" == "false" ]]; then
+      echo "code changes detected without docs/features update or docs/changes.md entry" >&2
       exit 1
     fi
   fi
