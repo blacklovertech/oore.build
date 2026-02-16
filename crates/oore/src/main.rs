@@ -52,6 +52,20 @@ struct UpdateArgs {
     /// Reinstall even if already on the latest version
     #[arg(long, default_value = "false")]
     force: bool,
+
+    /// Release channel to update from: stable, beta, alpha
+    ///
+    /// If not specified, this defaults to the installed channel (if available) or infers it from
+    /// the installed VERSION file; falls back to stable.
+    #[arg(long)]
+    channel: Option<String>,
+
+    /// GitHub repository in `owner/name` format
+    ///
+    /// If not specified, this defaults to the installed GITHUB_REPO file (if available) or
+    /// `devaryakjha/oore.build`.
+    #[arg(long, env = "OORE_GITHUB_REPO")]
+    repo: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1398,22 +1412,216 @@ fn run_doctor_checks() -> anyhow::Result<()> {
 
 // ── Self-update helpers ──────────────────────────────────────────
 
-const LATEST_JSON_URL: &str = "https://dl.oore.build/releases/latest.json";
+const DEFAULT_GITHUB_REPO: &str = "devaryakjha/oore.build";
 
-#[derive(Debug, serde::Deserialize)]
-struct ReleaseManifest {
-    tag: String,
-    version: String,
-    #[allow(dead_code)]
-    released_at: String,
-    assets: ReleaseAssets,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReleaseChannel {
+    Stable,
+    Beta,
+    Alpha,
+}
+
+impl ReleaseChannel {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Beta => "beta",
+            Self::Alpha => "alpha",
+        }
+    }
+
+    fn parse(raw: &str) -> anyhow::Result<Self> {
+        match raw.trim().to_lowercase().as_str() {
+            "stable" | "prod" | "production" => Ok(Self::Stable),
+            "beta" => Ok(Self::Beta),
+            "alpha" => Ok(Self::Alpha),
+            other => anyhow::bail!("invalid channel '{other}', expected: stable|beta|alpha"),
+        }
+    }
+
+    fn tag_marker(self) -> Option<&'static str> {
+        match self {
+            Self::Stable => None,
+            Self::Alpha => Some("-alpha."),
+            Self::Beta => Some("-beta."),
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct ReleaseAssets {
-    darwin_arm64: String,
-    darwin_x86_64: String,
-    checksums: String,
+struct GitHubRelease {
+    tag_name: String,
+    draft: bool,
+    prerelease: bool,
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+fn read_trimmed_file(path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn parse_semver_loose(raw: &str) -> anyhow::Result<semver::Version> {
+    let trimmed = raw.trim();
+    let trimmed = trimmed.strip_prefix('v').unwrap_or(trimmed);
+    semver::Version::parse(trimmed).with_context(|| format!("invalid semver version: {raw}"))
+}
+
+fn infer_channel_from_version(v: &semver::Version) -> ReleaseChannel {
+    let pre = v.pre.as_str();
+    if pre.starts_with("alpha") {
+        ReleaseChannel::Alpha
+    } else if pre.starts_with("beta") {
+        ReleaseChannel::Beta
+    } else {
+        ReleaseChannel::Stable
+    }
+}
+
+fn read_installed_channel(install_root: &Path) -> Option<ReleaseChannel> {
+    let raw = read_trimmed_file(&install_root.join("CHANNEL"))?;
+    ReleaseChannel::parse(&raw).ok()
+}
+
+fn read_installed_repo(install_root: &Path) -> Option<String> {
+    read_trimmed_file(&install_root.join("GITHUB_REPO"))
+}
+
+fn github_token() -> Option<String> {
+    for key in ["OORE_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"] {
+        if let Ok(val) = std::env::var(key) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn github_client() -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(format!("oore/{}/update", env!("CARGO_PKG_VERSION")))
+        .build()
+        .context("failed to build HTTP client")
+}
+
+async fn fetch_latest_release(
+    client: &reqwest::Client,
+    repo: &str,
+    channel: ReleaseChannel,
+) -> anyhow::Result<GitHubRelease> {
+    if !repo.contains('/') {
+        anyhow::bail!("invalid GitHub repo '{repo}', expected: owner/name");
+    }
+
+    let token = github_token();
+    let base = format!("https://api.github.com/repos/{repo}");
+
+    let mut req = match channel {
+        ReleaseChannel::Stable => client.get(format!("{base}/releases/latest")),
+        ReleaseChannel::Alpha | ReleaseChannel::Beta => {
+            client.get(format!("{base}/releases?per_page=100"))
+        }
+    };
+
+    req = req
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28");
+
+    if let Some(token) = token {
+        req = req.bearer_auth(token);
+    }
+
+    if channel == ReleaseChannel::Stable {
+        let rel: GitHubRelease = req
+            .send()
+            .await
+            .context("failed to fetch latest stable release")?
+            .error_for_status()
+            .context("latest stable release request failed")?
+            .json()
+            .await
+            .context("failed to parse latest stable release JSON")?;
+
+        if rel.draft {
+            anyhow::bail!("latest stable release is a draft (tag: {})", rel.tag_name);
+        }
+        if rel.prerelease {
+            anyhow::bail!(
+                "latest stable release is marked prerelease (tag: {}), refusing to use it for stable channel",
+                rel.tag_name
+            );
+        }
+
+        return Ok(rel);
+    }
+
+    let list: Vec<GitHubRelease> = req
+        .send()
+        .await
+        .context("failed to fetch release list")?
+        .error_for_status()
+        .context("release list request failed")?
+        .json()
+        .await
+        .context("failed to parse release list JSON")?;
+
+    let marker = channel.tag_marker().context("missing tag marker")?;
+    let rel = list
+        .into_iter()
+        .find(|r| !r.draft && r.prerelease && r.tag_name.contains(marker))
+        .with_context(|| {
+            format!(
+                "no {channel} release found in {repo}",
+                channel = channel.as_str()
+            )
+        })?;
+    Ok(rel)
+}
+
+fn find_asset_url(release: &GitHubRelease, name: &str) -> anyhow::Result<String> {
+    release
+        .assets
+        .iter()
+        .find(|a| a.name == name)
+        .map(|a| a.browser_download_url.clone())
+        .with_context(|| format!("release {} is missing asset {name}", release.tag_name))
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    if !src.is_dir() {
+        anyhow::bail!("expected directory: {}", src.display());
+    }
+    fs::create_dir_all(dst)
+        .with_context(|| format!("failed to create directory {}", dst.display()))?;
+
+    for entry in fs::read_dir(src).with_context(|| format!("failed to read {}", src.display()))? {
+        let entry = entry.context("failed to read directory entry")?;
+        let ty = entry.file_type().context("failed to read file type")?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+
+        if ty.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else if ty.is_file() {
+            fs::copy(&from, &to).with_context(|| {
+                format!("failed to copy {} -> {}", from.display(), to.display())
+            })?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Map `std::env::consts::ARCH` to the archive naming convention.
@@ -1433,6 +1641,19 @@ fn resolve_install_root() -> anyhow::Result<PathBuf> {
             return Ok(PathBuf::from(trimmed));
         }
     }
+
+    // Prefer deriving install root from the current executable path so `oore update` works even
+    // when users install to a non-default root and don't export `OORE_INSTALL_ROOT`.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            if bin_dir.file_name() == Some(std::ffi::OsStr::new("bin")) {
+                if let Some(root) = bin_dir.parent() {
+                    return Ok(root.to_path_buf());
+                }
+            }
+        }
+    }
+
     let home = dirs::home_dir().context("could not determine home directory")?;
     Ok(home.join(".oore"))
 }
@@ -1511,8 +1732,13 @@ fn stop_daemon(install_root: &Path) -> anyhow::Result<()> {
 async fn restart_daemon(install_root: &Path, client: &reqwest::Client) -> anyhow::Result<()> {
     let bin_dir = install_root.join("bin");
     let oored_bin = bin_dir.join("oored");
-    let log_path = install_root.join("oored.log");
+    let log_path = install_root.join("logs").join("oored.log");
     let pid_file = install_root.join("oored.pid");
+
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create log directory: {}", parent.display()))?;
+    }
 
     let log_file = fs::OpenOptions::new()
         .create(true)
@@ -1554,29 +1780,39 @@ fn set_executable(path: &Path) -> anyhow::Result<()> {
 }
 
 async fn handle_update(args: UpdateArgs) -> anyhow::Result<()> {
-    let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
-        .context("failed to parse current version")?;
+    let install_root = resolve_install_root()?;
 
-    let client = reqwest::Client::new();
+    let current_str = read_trimmed_file(&install_root.join("VERSION"))
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let current = parse_semver_loose(&current_str).context("failed to parse current version")?;
 
-    // 1. Fetch release manifest
-    let manifest: ReleaseManifest = client
-        .get(LATEST_JSON_URL)
-        .send()
-        .await
-        .context("failed to fetch release manifest")?
-        .error_for_status()
-        .context("release manifest request failed")?
-        .json()
-        .await
-        .context("failed to parse release manifest")?;
+    let repo = args
+        .repo
+        .clone()
+        .or_else(|| read_installed_repo(&install_root))
+        .unwrap_or_else(|| DEFAULT_GITHUB_REPO.to_string());
 
-    let latest = semver::Version::parse(&manifest.version)
-        .with_context(|| format!("invalid version in manifest: {}", manifest.version))?;
+    let channel = if let Some(raw) = &args.channel {
+        ReleaseChannel::parse(raw)?
+    } else if let Some(ch) = read_installed_channel(&install_root) {
+        ch
+    } else {
+        infer_channel_from_version(&current)
+    };
+
+    let client = github_client()?;
+
+    // 1. Fetch latest release metadata for the selected channel
+    let rel = fetch_latest_release(&client, &repo, channel).await?;
+    let latest_str = rel.tag_name.trim().trim_start_matches('v').to_string();
+    let latest = parse_semver_loose(&latest_str)
+        .with_context(|| format!("invalid version in release tag: {}", rel.tag_name))?;
 
     // 2. Compare versions
+    println!("Channel:         {}", channel.as_str());
+    println!("GitHub repo:     {repo}");
     println!("Current version: {current}");
-    println!("Latest version:  {latest} ({})", manifest.tag);
+    println!("Latest version:  {latest} ({})", rel.tag_name);
 
     if current >= latest && !args.force {
         println!("Already up to date.");
@@ -1594,19 +1830,12 @@ async fn handle_update(args: UpdateArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // 4. Select archive URL by architecture
+    // 4. Select archive + checksum assets for this architecture
     let arch = release_arch()?;
-    let archive_url = match arch {
-        "arm64" => &manifest.assets.darwin_arm64,
-        "x86_64" => &manifest.assets.darwin_x86_64,
-        _ => unreachable!(),
-    };
-
-    // Derive the filename from the URL
-    let archive_filename = archive_url
-        .rsplit('/')
-        .next()
-        .context("could not determine archive filename from URL")?;
+    let archive_filename = format!("oore_{latest_str}_darwin_{arch}.tar.gz");
+    let checksums_filename = format!("oore_{latest_str}_checksums.txt");
+    let archive_url = find_asset_url(&rel, &archive_filename)?;
+    let checksums_url = find_asset_url(&rel, &checksums_filename)?;
 
     println!("Downloading {archive_filename}...");
 
@@ -1614,7 +1843,7 @@ async fn handle_update(args: UpdateArgs) -> anyhow::Result<()> {
     let (archive_resp, checksums_resp) = tokio::try_join!(
         async {
             client
-                .get(archive_url)
+                .get(&archive_url)
                 .send()
                 .await
                 .context("failed to download archive")?
@@ -1623,7 +1852,7 @@ async fn handle_update(args: UpdateArgs) -> anyhow::Result<()> {
         },
         async {
             client
-                .get(&manifest.assets.checksums)
+                .get(&checksums_url)
                 .send()
                 .await
                 .context("failed to download checksums")?
@@ -1642,7 +1871,7 @@ async fn handle_update(args: UpdateArgs) -> anyhow::Result<()> {
         .context("failed to read checksums text")?;
 
     // 6. Verify SHA-256 checksum
-    let expected_hash = parse_checksum(&checksums_text, archive_filename)?;
+    let expected_hash = parse_checksum(&checksums_text, &archive_filename)?;
     let actual_hash = hex::encode(Sha256::digest(&archive_bytes));
 
     if actual_hash != expected_hash {
@@ -1662,7 +1891,10 @@ async fn handle_update(args: UpdateArgs) -> anyhow::Result<()> {
     let extracted_bin = tmpdir.path().join("bin");
     let extracted_oore = extracted_bin.join("oore");
     let extracted_oored = extracted_bin.join("oored");
+    let extracted_oore_web = extracted_bin.join("oore-web");
     let extracted_version = tmpdir.path().join("VERSION");
+    let extracted_license = tmpdir.path().join("LICENSE");
+    let extracted_web_dist = tmpdir.path().join("web-dist");
 
     if !extracted_oore.exists() {
         anyhow::bail!("archive missing bin/oore");
@@ -1675,22 +1907,45 @@ async fn handle_update(args: UpdateArgs) -> anyhow::Result<()> {
     }
 
     // 9. Stop daemon if running
-    let install_root = resolve_install_root()?;
     let daemon_was_running = check_daemon_running(&client).await;
-
     if daemon_was_running {
         println!("oored daemon is running. Stopping before update...");
         stop_daemon(&install_root)?;
     }
 
-    // 10. Copy binaries into install root
+    // 10. Copy binaries + assets into install root
     let bin_dir = install_root.join("bin");
     fs::create_dir_all(&bin_dir).context("failed to create bin directory")?;
 
     fs::copy(&extracted_oore, bin_dir.join("oore")).context("failed to copy oore binary")?;
     fs::copy(&extracted_oored, bin_dir.join("oored")).context("failed to copy oored binary")?;
+
+    if extracted_oore_web.exists() {
+        fs::copy(&extracted_oore_web, bin_dir.join("oore-web"))
+            .context("failed to copy oore-web binary")?;
+        set_executable(&bin_dir.join("oore-web"))?;
+    }
+
+    if extracted_web_dist.is_dir() {
+        let dst = install_root.join("web-dist");
+        if dst.exists() {
+            fs::remove_dir_all(&dst)
+                .with_context(|| format!("failed to remove {}", dst.display()))?;
+        }
+        copy_dir_recursive(&extracted_web_dist, &dst).context("failed to copy web-dist")?;
+    }
+
     fs::copy(&extracted_version, install_root.join("VERSION"))
         .context("failed to copy VERSION file")?;
+    fs::write(install_root.join("CHANNEL"), channel.as_str())
+        .context("failed to write CHANNEL file")?;
+    fs::write(install_root.join("GITHUB_REPO"), &repo)
+        .context("failed to write GITHUB_REPO file")?;
+
+    if extracted_license.exists() {
+        fs::copy(&extracted_license, install_root.join("LICENSE"))
+            .context("failed to copy LICENSE")?;
+    }
 
     set_executable(&bin_dir.join("oore"))?;
     set_executable(&bin_dir.join("oored"))?;
@@ -1778,7 +2033,12 @@ fn main() -> anyhow::Result<()> {
             run_doctor_checks()?;
         }
         Commands::Version => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
+            let install_root = resolve_install_root()?;
+            if let Some(v) = read_trimmed_file(&install_root.join("VERSION")) {
+                println!("{v}");
+            } else {
+                println!("{}", env!("CARGO_PKG_VERSION"));
+            }
         }
         Commands::Update(args) => {
             let runtime =

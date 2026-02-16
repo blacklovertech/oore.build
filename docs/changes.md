@@ -55,3 +55,5 @@ Rules:
   - OOR-53: https://linear.app/oorebuild/issue/OOR-53/update-web-demo-mode-for-remote-auth-external-access-endpoints
 - Fixed docs OpenAPI pages to render the explorer client-only to avoid SSR `localStorage` errors during VitePress builds.
   - OOR-55: https://linear.app/oorebuild/issue/OOR-55/fix-docs-openapi-pages-ssr-errors-from-localstorage-access
+- Hardened release-binary install/update flows: added channel-aware `latest` resolution (`OORE_CHANNEL`), persisted install metadata (`CHANNEL`, `GITHUB_REPO`), switched `oore update` to GitHub Releases (channel-aware), and made `oore version` / `oored version` report the installed `VERSION` (including `-alpha.N` / `-beta.N`).
+  - OOR-36: https://linear.app/oorebuild/issue/OOR-36/replace-scripts-makefile-releasedeploy-tooling-with-woodpecker-driven

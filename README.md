@@ -35,8 +35,25 @@ For source development, also install [Rust](https://rustup.rs/) and [Bun](https:
 ## Quick Start
 
 ```bash
-# Install latest release binaries (macOS)
+# Install latest stable release binaries (macOS)
 curl -fsSL https://oore.build/install | bash
+```
+
+Install prerelease channels:
+
+```bash
+# Latest alpha
+curl -fsSL https://oore.build/install | OORE_CHANNEL=alpha bash
+
+# Latest beta
+curl -fsSL https://oore.build/install | OORE_CHANNEL=beta bash
+```
+
+Update in-place:
+
+```bash
+oore update --check
+oore update
 ```
 
 Then complete setup using one of these paths:
@@ -109,8 +126,12 @@ Releases are published from a dedicated macOS host (for example, a Mac mini) usi
 
 High-level flow:
 
-- Merge to `main` -> CI bumps `workspace.package.version`, commits, tags (for example `v0.2.1`)
+- Merge to `alpha` -> CI cuts `vX.Y.Z-alpha.N` tags (prerelease)
+- Merge to `beta` -> CI cuts `vX.Y.Z-beta.N` tags (prerelease)
+- Merge to `stable` -> CI cuts `vX.Y.Z` tags (stable), auto-incrementing patch when needed
 - Tag push -> CI builds macOS artifacts (arm64 + x86_64), deploys Pages sites, and publishes a GitHub Release with attached artifacts
+
+Major/minor bumps are done by updating `Cargo.toml` `workspace.package.version` (for example `0.2.0`), then continuing the alpha -> beta -> stable promotion flow.
 
 ## Contributing
 

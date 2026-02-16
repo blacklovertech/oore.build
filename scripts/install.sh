@@ -2,10 +2,12 @@
 set -euo pipefail
 
 OORE_VERSION="${OORE_VERSION:-latest}"
+OORE_CHANNEL="${OORE_CHANNEL:-stable}"
 OORE_INSTALL_ROOT="${OORE_INSTALL_ROOT:-$HOME/.oore}"
 OORE_GITHUB_REPO="${OORE_GITHUB_REPO:-devaryakjha/oore.build}"
 OORE_RELEASE_BASE_URL="${OORE_RELEASE_BASE_URL:-https://github.com/$OORE_GITHUB_REPO/releases/download}"
 OORE_RELEASE_MANIFEST_URL="${OORE_RELEASE_MANIFEST_URL:-https://api.github.com/repos/$OORE_GITHUB_REPO/releases/latest}"
+OORE_RELEASES_LIST_URL="${OORE_RELEASES_LIST_URL:-https://api.github.com/repos/$OORE_GITHUB_REPO/releases?per_page=100}"
 OORE_NONINTERACTIVE="${OORE_NONINTERACTIVE:-0}"
 OORE_START_DAEMON="${OORE_START_DAEMON:-}"
 OORE_HOSTED_UI="${OORE_HOSTED_UI:-https://ci.oore.build}"
@@ -27,6 +29,7 @@ LOCAL_WEB_URL=""
 RELEASE_TAG=""
 RELEASE_VERSION=""
 RELEASE_ARCH=""
+RESOLVED_CHANNEL=""
 TMP_DIR=""
 CURRENT_STEP=0
 TOTAL_STEPS=5
@@ -41,6 +44,7 @@ Usage:
 
 Environment overrides:
   OORE_VERSION               Release tag or "latest" (default: latest)
+  OORE_CHANNEL               Release channel for latest resolution: stable|beta|alpha (default: stable)
   OORE_INSTALL_ROOT          Install root (default: ~/.oore)
   OORE_NONINTERACTIVE        Non-interactive mode (true/false)
   OORE_START_DAEMON          Start daemon in non-interactive mode (true/false)
@@ -50,6 +54,7 @@ Environment overrides:
   OORE_GITHUB_REPO           GitHub repo (default: devaryakjha/oore.build)
   OORE_RELEASE_BASE_URL      Release asset base URL (default: GitHub Releases download base)
   OORE_RELEASE_MANIFEST_URL  Release metadata URL for latest tag resolution (default: GitHub Releases API)
+  OORE_RELEASES_LIST_URL     Release list URL for prerelease channel resolution (default: GitHub Releases API list)
 EOF
 }
 
@@ -173,16 +178,89 @@ detect_arch() {
   esac
 }
 
+validate_channel() {
+  case "${OORE_CHANNEL:-}" in
+    stable|alpha|beta)
+      return 0
+      ;;
+    *)
+      die 'OORE_CHANNEL must be one of: stable,alpha,beta.'
+      ;;
+  esac
+}
+
+infer_channel_from_tag() {
+  local tag="${1:-}"
+  if echo "$tag" | grep -q -- '-alpha\\.'; then
+    printf 'alpha'
+  elif echo "$tag" | grep -q -- '-beta\\.'; then
+    printf 'beta'
+  else
+    printf 'stable'
+  fi
+}
+
+resolve_latest_channel_tag_from_list() {
+  local json_file="$1"
+  local channel="$2"
+  local want_re=""
+
+  case "$channel" in
+    alpha) want_re='-alpha\\.' ;;
+    beta) want_re='-beta\\.' ;;
+    *) die "resolve_latest_channel_tag_from_list: unsupported channel: $channel" ;;
+  esac
+
+  # The GitHub API returns releases ordered newest-first.
+  # We'll pick the first matching prerelease tag for the requested channel.
+  local tag=""
+  local draft=""
+  local prerelease=""
+  local line=""
+  while IFS= read -r line; do
+    if [[ -z "$tag" ]]; then
+      tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$line" | head -n1)"
+    fi
+    if [[ -z "$draft" ]]; then
+      draft="$(sed -n 's/.*"draft"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' <<<"$line" | head -n1)"
+    fi
+    if [[ -z "$prerelease" ]]; then
+      prerelease="$(sed -n 's/.*"prerelease"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' <<<"$line" | head -n1)"
+    fi
+
+    if [[ -n "$tag" && -n "$draft" && -n "$prerelease" ]]; then
+      if [[ "$draft" == "false" && "$prerelease" == "true" ]] && echo "$tag" | grep -qE "$want_re"; then
+        printf '%s' "$tag"
+        return 0
+      fi
+      tag=""
+      draft=""
+      prerelease=""
+    fi
+  done < "$json_file"
+
+  return 1
+}
+
 resolve_release_tag() {
   local tag=""
   if [[ "$OORE_VERSION" == "latest" ]]; then
-    local manifest_file="$TMP_DIR/latest.json"
-    curl -fsSL --retry 3 --output "$manifest_file" "$OORE_RELEASE_MANIFEST_URL" \
-      || die "Unable to fetch release manifest: $OORE_RELEASE_MANIFEST_URL"
+    if [[ "$OORE_CHANNEL" == "stable" ]]; then
+      local manifest_file="$TMP_DIR/latest.json"
+      curl -fsSL --retry 3 --output "$manifest_file" "$OORE_RELEASE_MANIFEST_URL" \
+        || die "Unable to fetch release manifest: $OORE_RELEASE_MANIFEST_URL"
 
-    # GitHub API returns "tag_name": "vX.Y.Z"
-    tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest_file" | head -n1)"
-    [[ -n "$tag" ]] || die "Unable to parse tag from release manifest: $OORE_RELEASE_MANIFEST_URL"
+      # GitHub API returns "tag_name": "vX.Y.Z"
+      tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest_file" | head -n1)"
+      [[ -n "$tag" ]] || die "Unable to parse tag from release manifest: $OORE_RELEASE_MANIFEST_URL"
+    else
+      local list_file="$TMP_DIR/releases.json"
+      curl -fsSL --retry 3 --output "$list_file" "$OORE_RELEASES_LIST_URL" \
+        || die "Unable to fetch release list: $OORE_RELEASES_LIST_URL"
+
+      tag="$(resolve_latest_channel_tag_from_list "$list_file" "$OORE_CHANNEL" || true)"
+      [[ -n "$tag" ]] || die "Unable to resolve latest $OORE_CHANNEL release from: $OORE_RELEASES_LIST_URL"
+    fi
   else
     if [[ "$OORE_VERSION" == v* ]]; then
       tag="$OORE_VERSION"
@@ -199,6 +277,12 @@ resolve_release_tag() {
   RELEASE_VERSION="${RELEASE_TAG#v}"
   if [[ -z "$RELEASE_VERSION" ]]; then
     die "Failed to normalize release version from tag: $RELEASE_TAG"
+  fi
+
+  if [[ "$OORE_VERSION" == "latest" ]]; then
+    RESOLVED_CHANNEL="$OORE_CHANNEL"
+  else
+    RESOLVED_CHANNEL="$(infer_channel_from_tag "$RELEASE_TAG")"
   fi
 }
 
@@ -264,6 +348,10 @@ install_binaries() {
   fi
 
   cp "$extract_dir/VERSION" "$OORE_INSTALL_ROOT/VERSION"
+  if [[ -n "${RESOLVED_CHANNEL:-}" ]]; then
+    printf '%s\n' "$RESOLVED_CHANNEL" > "$OORE_INSTALL_ROOT/CHANNEL"
+  fi
+  printf '%s\n' "$OORE_GITHUB_REPO" > "$OORE_INSTALL_ROOT/GITHUB_REPO"
   if [[ -f "$extract_dir/LICENSE" ]]; then
     cp "$extract_dir/LICENSE" "$OORE_INSTALL_ROOT/LICENSE"
   fi
@@ -679,6 +767,7 @@ main() {
   trap cleanup EXIT
 
   validate_local_web_mode
+  validate_channel
 
   if normalize_bool "$OORE_NONINTERACTIVE"; then
     :

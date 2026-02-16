@@ -19,6 +19,27 @@ This page walks you through installing prebuilt backend binaries from GitHub Rel
 curl -fsSL https://oore.build/install | bash
 ```
 
+## Install by channel (stable/beta/alpha)
+
+The installer supports release channels:
+
+- `stable` (default): latest non-prerelease GitHub Release
+- `beta`: latest `vX.Y.Z-beta.N` prerelease
+- `alpha`: latest `vX.Y.Z-alpha.N` prerelease
+
+```bash
+# stable (default)
+curl -fsSL https://oore.build/install | bash
+
+# beta
+curl -fsSL https://oore.build/install | OORE_CHANNEL=beta bash
+
+# alpha
+curl -fsSL https://oore.build/install | OORE_CHANNEL=alpha bash
+```
+
+`OORE_VERSION` (pinned tag/version) always overrides channel selection.
+
 The installer:
 
 - Detects your architecture (`arm64` or `x86_64`)
@@ -35,14 +56,13 @@ The installer:
 ## Install a pinned version
 
 ```bash
-OORE_VERSION=v0.2.0 curl -fsSL https://oore.build/install | bash
+curl -fsSL https://oore.build/install | OORE_VERSION=v0.2.0 bash
 ```
 
 ## Non-interactive mode (automation)
 
 ```bash
-OORE_NONINTERACTIVE=1 OORE_START_DAEMON=true \
-  curl -fsSL https://oore.build/install | bash
+curl -fsSL https://oore.build/install | OORE_NONINTERACTIVE=1 OORE_START_DAEMON=true bash
 ```
 
 If `OORE_NONINTERACTIVE=1` and `OORE_START_DAEMON` is not set, daemon startup is skipped.
@@ -51,7 +71,22 @@ If `OORE_NONINTERACTIVE=1` and `OORE_START_DAEMON` is not set, daemon startup is
 
 ```bash
 ~/.oore/bin/oored version
-~/.oore/bin/oore --version
+~/.oore/bin/oore version
+```
+
+## Update (self-update)
+
+`oore update` downloads the latest release for your installed channel and updates binaries in-place.
+
+```bash
+~/.oore/bin/oore update --check
+~/.oore/bin/oore update
+```
+
+Override channel explicitly:
+
+```bash
+~/.oore/bin/oore update --channel alpha
 ```
 
 ## Next step: choose setup path
@@ -76,10 +111,12 @@ Continue with [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding).
 | Variable | Default | Description |
 |---|---|---|
 | `OORE_VERSION` | `latest` | Release selector (`latest` or tag like `v0.2.0`) |
+| `OORE_CHANNEL` | `stable` | Channel selector when `OORE_VERSION=latest`: `stable`, `beta`, or `alpha` |
 | `OORE_INSTALL_ROOT` | `~/.oore` | Installation directory |
 | `OORE_GITHUB_REPO` | `devaryakjha/oore.build` | GitHub repository used to resolve `latest` and download assets |
 | `OORE_RELEASE_BASE_URL` | `https://github.com/<repo>/releases/download` | Base URL that contains `<tag>/` release assets |
 | `OORE_RELEASE_MANIFEST_URL` | `https://api.github.com/repos/<repo>/releases/latest` | Metadata URL used when `OORE_VERSION=latest` |
+| `OORE_RELEASES_LIST_URL` | `https://api.github.com/repos/<repo>/releases?per_page=100` | Release list URL used when `OORE_VERSION=latest` and `OORE_CHANNEL` is `alpha` or `beta` |
 | `OORE_NONINTERACTIVE` | `0` | Disable prompts when set to `1` |
 | `OORE_START_DAEMON` | unset | Non-interactive daemon startup behavior (`true` or `false`) |
 | `OORE_LOCAL_WEB_MODE` | unset | Non-interactive local web behavior for localhost backends: `off`, `run`, or `login` (launch-at-login) |
@@ -124,5 +161,5 @@ curl -fsSL https://oore.build/install | bash
 Or install to a different user-owned root:
 
 ```bash
-OORE_INSTALL_ROOT="$HOME/.oore-user" curl -fsSL https://oore.build/install | bash
+curl -fsSL https://oore.build/install | OORE_INSTALL_ROOT="$HOME/.oore-user" bash
 ```
