@@ -53,3 +53,5 @@ Rules:
   - OOR-52: https://linear.app/oorebuild/issue/OOR-52/fix-gitlab-install-sync-dispatch-oauth-reachability-precheck
 - Updated web demo mode (MSW handlers) to support latest onboarding + External Access APIs (`remote_auth_mode`, setup preferences, trusted proxy endpoints, and External Access settings/preflight routes).
   - OOR-53: https://linear.app/oorebuild/issue/OOR-53/update-web-demo-mode-for-remote-auth-external-access-endpoints
+- Fixed docs OpenAPI pages to render the explorer client-only to avoid SSR `localStorage` errors during VitePress builds.
+  - OOR-55: https://linear.app/oorebuild/issue/OOR-55/fix-docs-openapi-pages-ssr-errors-from-localstorage-access
