@@ -187,14 +187,14 @@ function OidcConfigStep() {
   const discoveredIssuer = configureMutation.data?.discovered_issuer ?? null
 
   useEffect(() => {
-    setCurrentStep(1)
+    setCurrentStep(2)
   }, [setCurrentStep])
 
   useEffect(() => {
-    if (status?.runtime_mode === 'local') {
-      void navigate({ to: '/setup/owner' })
+    if (status?.runtime_mode !== 'remote' || status?.remote_auth_mode !== 'oidc') {
+      void navigate({ to: '/setup/mode' })
     }
-  }, [status?.runtime_mode, navigate])
+  }, [status?.runtime_mode, status?.remote_auth_mode, navigate])
 
   function handleProviderChange(value: ProviderId) {
     setSelectedProvider(value)

@@ -1,21 +1,36 @@
 ---
 status: implemented
-description: "Security architecture of oore.build including OIDC, RBAC, and encryption."
+description: "Security architecture of oore.build including Remote auth providers, RBAC, and encryption."
 ---
 
 # Security Model
 
 This page explains the security design decisions in oore.build and how they protect your instance.
 
-## Authentication: OIDC (Remote) + Loopback Local Login (Local Only)
+## Authentication: Remote OIDC or Trusted Proxy + Loopback Local Login (Local Only)
 
-oore.build uses OpenID Connect (OIDC) for any non-loopback access (External Access / `runtime_mode=remote`). There are no local passwords, no password storage, and no password reset flows.
+For any non-loopback access (`runtime_mode=remote`), oore.build requires one of:
+
+- OpenID Connect (OIDC)
+- Trusted Proxy mode (for example Warpgate / IAP)
+
+There are no local passwords, no password storage, and no password reset flows.
 
 The daemon also supports loopback-only local login (`POST /v1/auth/local/login`) for local-first onboarding and local operator access. When setup is incomplete, local login is only available in Local Only mode; in Remote mode it is only available after setup is complete. In Local Only mode, the first successful local login may auto-complete setup and create the initial owner record.
 
-**Why**: Eliminates an entire class of vulnerabilities (credential storage, brute force attacks, password reuse). Users authenticate with the same credentials they use for all other services. Disabling a user in your IdP immediately revokes their access.
+**Why**: Eliminates an entire class of vulnerabilities (credential storage, brute force attacks, password reuse). Users authenticate with identity systems already used by the organization. Disabling a user in the upstream identity system revokes their ability to start new sessions.
 
-### PKCE and CSRF protection
+### Trusted Proxy mode (Warpgate / IAP)
+
+In Trusted Proxy mode, oore.build trusts identity headers from an upstream proxy and creates normal Oore sessions per user.
+
+- Default identity header: `x-warpgate-username` (expected to be an email)
+- Trust boundary: headers are accepted only when the immediate peer is trusted (loopback by default, optional CIDR allowlist for remote proxy peers)
+- Authorization stays in Oore RBAC (owner/admin/developer/qa_viewer) via Oore users and roles
+
+This mode does not introduce local passwords; it shifts authentication to the upstream access proxy while preserving Oore sessioning, RBAC, and audit attribution.
+
+### PKCE and CSRF protection (OIDC mode)
 
 All OIDC flows use PKCE (S256 method) and CSRF state tokens:
 
@@ -65,6 +80,7 @@ The first-run bootstrap token (required for Remote-mode setup flows) has multipl
 | Setup session token | SHA-256 hash in SQLite | 30-minute sliding TTL |
 | User session token | SHA-256 hash in SQLite | 24-hour TTL |
 | OIDC client secret | AES-256-GCM encrypted in SQLite | File-stored encryption key |
+| Trusted proxy shared secret (optional) | AES-256-GCM encrypted in SQLite | File-stored encryption key |
 | Signing certificates | AES-256-GCM encrypted in SQLite | Same encryption key |
 | Keystore passwords | AES-256-GCM encrypted in SQLite | Same encryption key |
 

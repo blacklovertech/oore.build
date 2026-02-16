@@ -284,6 +284,58 @@
         }
       }
     },
+    "/v1/auth/trusted-proxy/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Trusted proxy login",
+        "description": "Creates a session from trusted proxy identity headers when remote auth\nmode is configured to trusted proxy.",
+        "operationId": "trusted_proxy_login",
+        "responses": {
+          "200": {
+            "description": "Session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalLoginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Identity header missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted peer, disabled user, or user missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Setup incomplete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/builds": {
       "get": {
         "tags": [
@@ -2920,6 +2972,96 @@
         ]
       }
     },
+    "/v1/settings/external-access/trusted-proxy": {
+      "get": {
+        "tags": [
+          "Instance Settings"
+        ],
+        "summary": "Get trusted proxy runtime settings",
+        "operationId": "get_external_access_trusted_proxy_settings",
+        "responses": {
+          "200": {
+            "description": "Trusted proxy settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustedProxySettingsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Instance Settings"
+        ],
+        "summary": "Update trusted proxy runtime settings",
+        "operationId": "update_external_access_trusted_proxy_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTrustedProxySettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Trusted proxy settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustedProxySettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid header/CIDR/secret input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Owner-only or loopback-only restriction violated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/settings/preferences": {
       "get": {
         "tags": [
@@ -3264,6 +3406,63 @@
         ]
       }
     },
+    "/v1/setup/owner/claim-trusted-proxy": {
+      "post": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Claim owner identity from trusted proxy headers",
+        "description": "Creates owner record from trusted proxy identity headers (email).",
+        "operationId": "setup_owner_claim_trusted_proxy",
+        "responses": {
+          "200": {
+            "description": "Owner created from trusted proxy identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupTrustedProxyClaimOwnerResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid setup session or missing/invalid identity header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not in trusted-proxy mode or untrusted proxy peer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid setup state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/setup/owner/start-oidc": {
       "post": {
         "tags": [
@@ -3408,6 +3607,63 @@
         ]
       }
     },
+    "/v1/setup/preferences": {
+      "post": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Persist setup mode preferences",
+        "description": "Stores setup-time runtime mode and remote auth mode before owner creation.",
+        "operationId": "setup_preferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupPreferencesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Setup preferences saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPreferencesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid setup session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Setup already complete or owner already created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/setup/summary": {
       "get": {
         "tags": [
@@ -3429,6 +3685,83 @@
           },
           "401": {
             "description": "Invalid setup session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/setup/trusted-proxy/configure": {
+      "post": {
+        "tags": [
+          "Setup"
+        ],
+        "summary": "Configure trusted proxy auth during setup",
+        "description": "Upserts trusted proxy settings for remote trusted-proxy mode.",
+        "operationId": "setup_trusted_proxy_configure",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupTrustedProxyConfigureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Trusted proxy setup configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupTrustedProxyConfigureResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid header/CIDR/secret input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid setup session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not in remote trusted-proxy mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Setup already complete or owner already created",
             "content": {
               "application/json": {
                 "schema": {
@@ -5028,11 +5361,15 @@
         "required": [
           "key_storage_mode",
           "runtime_mode",
+          "remote_auth_mode",
           "restart_required"
         ],
         "properties": {
           "key_storage_mode": {
             "$ref": "#/components/schemas/KeyStorageMode"
+          },
+          "remote_auth_mode": {
+            "$ref": "#/components/schemas/RemoteAuthMode"
           },
           "restart_required": {
             "type": "boolean"
@@ -6227,6 +6564,13 @@
           }
         }
       },
+      "RemoteAuthMode": {
+        "type": "string",
+        "enum": [
+          "oidc",
+          "trusted_proxy"
+        ]
+      },
       "Runner": {
         "type": "object",
         "required": [
@@ -6426,6 +6770,49 @@
           }
         }
       },
+      "SetupPreferencesRequest": {
+        "type": "object",
+        "required": [
+          "runtime_mode"
+        ],
+        "properties": {
+          "remote_auth_mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RemoteAuthMode"
+              }
+            ]
+          },
+          "runtime_mode": {
+            "$ref": "#/components/schemas/RuntimeMode"
+          }
+        }
+      },
+      "SetupPreferencesResponse": {
+        "type": "object",
+        "required": [
+          "runtime_mode",
+          "remote_auth_mode"
+        ],
+        "properties": {
+          "remote_auth_mode": {
+            "$ref": "#/components/schemas/RemoteAuthMode"
+          },
+          "runtime_mode": {
+            "$ref": "#/components/schemas/RuntimeMode"
+          },
+          "session_expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "SetupState": {
         "type": "string",
         "enum": [
@@ -6442,6 +6829,7 @@
           "instance_id",
           "state",
           "runtime_mode",
+          "remote_auth_mode",
           "setup_mode",
           "is_configured"
         ],
@@ -6451,6 +6839,9 @@
           },
           "is_configured": {
             "type": "boolean"
+          },
+          "remote_auth_mode": {
+            "$ref": "#/components/schemas/RemoteAuthMode"
           },
           "runtime_mode": {
             "$ref": "#/components/schemas/RuntimeMode"
@@ -6484,6 +6875,78 @@
               "string",
               "null"
             ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/SetupState"
+          }
+        }
+      },
+      "SetupTrustedProxyClaimOwnerResponse": {
+        "type": "object",
+        "required": [
+          "state",
+          "owner_email"
+        ],
+        "properties": {
+          "owner_email": {
+            "type": "string"
+          },
+          "session_expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SetupState"
+          }
+        }
+      },
+      "SetupTrustedProxyConfigureRequest": {
+        "type": "object",
+        "properties": {
+          "shared_secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trusted_proxy_cidrs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "user_email_header": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SetupTrustedProxyConfigureResponse": {
+        "type": "object",
+        "required": [
+          "state",
+          "has_shared_secret",
+          "configured_at"
+        ],
+        "properties": {
+          "configured_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "has_shared_secret": {
+            "type": "boolean"
+          },
+          "session_expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           },
           "state": {
             "$ref": "#/components/schemas/SetupState"
@@ -6610,6 +7073,46 @@
           "schedule"
         ]
       },
+      "TrustedProxySettingsPublic": {
+        "type": "object",
+        "required": [
+          "user_email_header",
+          "trusted_proxy_cidrs",
+          "has_shared_secret"
+        ],
+        "properties": {
+          "has_shared_secret": {
+            "type": "boolean"
+          },
+          "trusted_proxy_cidrs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updated_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "user_email_header": {
+            "type": "string"
+          }
+        }
+      },
+      "TrustedProxySettingsResponse": {
+        "type": "object",
+        "required": [
+          "settings"
+        ],
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/TrustedProxySettingsPublic"
+          }
+        }
+      },
       "UpdateArtifactStorageSettingsRequest": {
         "type": "object",
         "required": [
@@ -6685,6 +7188,16 @@
         "properties": {
           "key_storage_mode": {
             "$ref": "#/components/schemas/KeyStorageMode"
+          },
+          "remote_auth_mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RemoteAuthMode"
+              }
+            ]
           },
           "runtime_mode": {
             "oneOf": [
@@ -6918,6 +7431,29 @@
         "properties": {
           "runner": {
             "$ref": "#/components/schemas/Runner"
+          }
+        }
+      },
+      "UpdateTrustedProxySettingsRequest": {
+        "type": "object",
+        "properties": {
+          "shared_secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trusted_proxy_cidrs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "user_email_header": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

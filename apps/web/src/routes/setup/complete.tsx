@@ -54,7 +54,7 @@ function CompleteStep() {
   const isLocalMode = status?.runtime_mode === 'local'
 
   useEffect(() => {
-    setCurrentStep(isLocalMode ? 2 : 3)
+    setCurrentStep(isLocalMode ? 3 : 4)
   }, [isLocalMode, setCurrentStep])
 
   function handleComplete() {
@@ -66,7 +66,7 @@ function CompleteStep() {
   // so the indicator shows all steps as completed
   useEffect(() => {
     if (isComplete) {
-      setCurrentStep(isLocalMode ? 3 : 4)
+      setCurrentStep(isLocalMode ? 4 : 5)
       useSetupStore.getState().setSessionToken(null)
     }
   }, [isComplete, isLocalMode, setCurrentStep])
@@ -148,8 +148,8 @@ function CompleteStep() {
             <AlertDescription>
               Completing setup will permanently lock down all setup endpoints.
               This cannot be undone. Make sure your owner details
-              {isLocalMode ? '' : ' and OIDC configuration'} are correct before
-              proceeding.
+              {isLocalMode ? '' : ' and remote authentication configuration'} are
+              correct before proceeding.
             </AlertDescription>
           </Alert>
 

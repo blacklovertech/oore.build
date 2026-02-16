@@ -15,8 +15,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 import { Route as BuildsIndexRouteImport } from './routes/builds/index'
+import { Route as SetupTrustedProxyRouteImport } from './routes/setup/trusted-proxy'
 import { Route as SetupOwnerRouteImport } from './routes/setup/owner'
 import { Route as SetupOidcRouteImport } from './routes/setup/oidc'
+import { Route as SetupModeRouteImport } from './routes/setup/mode'
 import { Route as SetupCompleteRouteImport } from './routes/setup/complete'
 import { Route as SettingsUsersRouteImport } from './routes/settings/users'
 import { Route as SettingsRunnersRouteImport } from './routes/settings/runners'
@@ -64,6 +66,11 @@ const BuildsIndexRoute = BuildsIndexRouteImport.update({
   path: '/builds/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SetupTrustedProxyRoute = SetupTrustedProxyRouteImport.update({
+  id: '/trusted-proxy',
+  path: '/trusted-proxy',
+  getParentRoute: () => SetupRoute,
+} as any)
 const SetupOwnerRoute = SetupOwnerRouteImport.update({
   id: '/owner',
   path: '/owner',
@@ -72,6 +79,11 @@ const SetupOwnerRoute = SetupOwnerRouteImport.update({
 const SetupOidcRoute = SetupOidcRouteImport.update({
   id: '/oidc',
   path: '/oidc',
+  getParentRoute: () => SetupRoute,
+} as any)
+const SetupModeRoute = SetupModeRouteImport.update({
+  id: '/mode',
+  path: '/mode',
   getParentRoute: () => SetupRoute,
 } as any)
 const SetupCompleteRoute = SetupCompleteRouteImport.update({
@@ -174,8 +186,10 @@ export interface FileRoutesByFullPath {
   '/settings/runners': typeof SettingsRunnersRoute
   '/settings/users': typeof SettingsUsersRoute
   '/setup/complete': typeof SetupCompleteRoute
+  '/setup/mode': typeof SetupModeRoute
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
+  '/setup/trusted-proxy': typeof SetupTrustedProxyRoute
   '/builds/': typeof BuildsIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/setup/': typeof SetupIndexRoute
@@ -199,8 +213,10 @@ export interface FileRoutesByTo {
   '/settings/runners': typeof SettingsRunnersRoute
   '/settings/users': typeof SettingsUsersRoute
   '/setup/complete': typeof SetupCompleteRoute
+  '/setup/mode': typeof SetupModeRoute
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
+  '/setup/trusted-proxy': typeof SetupTrustedProxyRoute
   '/builds': typeof BuildsIndexRoute
   '/projects': typeof ProjectsIndexRoute
   '/setup': typeof SetupIndexRoute
@@ -226,8 +242,10 @@ export interface FileRoutesById {
   '/settings/runners': typeof SettingsRunnersRoute
   '/settings/users': typeof SettingsUsersRoute
   '/setup/complete': typeof SetupCompleteRoute
+  '/setup/mode': typeof SetupModeRoute
   '/setup/oidc': typeof SetupOidcRoute
   '/setup/owner': typeof SetupOwnerRoute
+  '/setup/trusted-proxy': typeof SetupTrustedProxyRoute
   '/builds/': typeof BuildsIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/setup/': typeof SetupIndexRoute
@@ -254,8 +272,10 @@ export interface FileRouteTypes {
     | '/settings/runners'
     | '/settings/users'
     | '/setup/complete'
+    | '/setup/mode'
     | '/setup/oidc'
     | '/setup/owner'
+    | '/setup/trusted-proxy'
     | '/builds/'
     | '/projects/'
     | '/setup/'
@@ -279,8 +299,10 @@ export interface FileRouteTypes {
     | '/settings/runners'
     | '/settings/users'
     | '/setup/complete'
+    | '/setup/mode'
     | '/setup/oidc'
     | '/setup/owner'
+    | '/setup/trusted-proxy'
     | '/builds'
     | '/projects'
     | '/setup'
@@ -305,8 +327,10 @@ export interface FileRouteTypes {
     | '/settings/runners'
     | '/settings/users'
     | '/setup/complete'
+    | '/setup/mode'
     | '/setup/oidc'
     | '/setup/owner'
+    | '/setup/trusted-proxy'
     | '/builds/'
     | '/projects/'
     | '/setup/'
@@ -388,6 +412,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BuildsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/setup/trusted-proxy': {
+      id: '/setup/trusted-proxy'
+      path: '/trusted-proxy'
+      fullPath: '/setup/trusted-proxy'
+      preLoaderRoute: typeof SetupTrustedProxyRouteImport
+      parentRoute: typeof SetupRoute
+    }
     '/setup/owner': {
       id: '/setup/owner'
       path: '/owner'
@@ -400,6 +431,13 @@ declare module '@tanstack/react-router' {
       path: '/oidc'
       fullPath: '/setup/oidc'
       preLoaderRoute: typeof SetupOidcRouteImport
+      parentRoute: typeof SetupRoute
+    }
+    '/setup/mode': {
+      id: '/setup/mode'
+      path: '/mode'
+      fullPath: '/setup/mode'
+      preLoaderRoute: typeof SetupModeRouteImport
       parentRoute: typeof SetupRoute
     }
     '/setup/complete': {
@@ -519,15 +557,19 @@ declare module '@tanstack/react-router' {
 
 interface SetupRouteChildren {
   SetupCompleteRoute: typeof SetupCompleteRoute
+  SetupModeRoute: typeof SetupModeRoute
   SetupOidcRoute: typeof SetupOidcRoute
   SetupOwnerRoute: typeof SetupOwnerRoute
+  SetupTrustedProxyRoute: typeof SetupTrustedProxyRoute
   SetupIndexRoute: typeof SetupIndexRoute
 }
 
 const SetupRouteChildren: SetupRouteChildren = {
   SetupCompleteRoute: SetupCompleteRoute,
+  SetupModeRoute: SetupModeRoute,
   SetupOidcRoute: SetupOidcRoute,
   SetupOwnerRoute: SetupOwnerRoute,
+  SetupTrustedProxyRoute: SetupTrustedProxyRoute,
   SetupIndexRoute: SetupIndexRoute,
 }
 

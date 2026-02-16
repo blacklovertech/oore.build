@@ -11,6 +11,7 @@ use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{self, Request, StatusCode};
 use common::{body_json, connect_pool, create_test_app, now_unix};
+use sqlx::Row;
 use tower::ServiceExt;
 
 fn env_lock() -> &'static Mutex<()> {
@@ -162,6 +163,121 @@ async fn mark_setup_ready_without_oidc(pool: &sqlx::SqlitePool) {
     .execute(pool)
     .await
     .expect("failed to update setup state");
+}
+
+async fn mark_setup_ready(pool: &sqlx::SqlitePool) {
+    let now = now_unix();
+    sqlx::query(
+        "UPDATE setup_state SET
+            setup_state = 'ready',
+            updated_at = ?1
+         WHERE id = 1",
+    )
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("failed to mark setup ready");
+}
+
+async fn set_runtime_and_remote_auth_mode(
+    pool: &sqlx::SqlitePool,
+    runtime_mode: &str,
+    remote_auth_mode: &str,
+) {
+    let now = now_unix();
+    sqlx::query(
+        "INSERT INTO instance_preferences (id, key_storage_mode, runtime_mode, remote_auth_mode, created_at, updated_at)
+         VALUES (1, 'file', ?1, ?2, ?3, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+            key_storage_mode = excluded.key_storage_mode,
+            runtime_mode = excluded.runtime_mode,
+            remote_auth_mode = excluded.remote_auth_mode,
+            updated_at = excluded.updated_at",
+    )
+    .bind(runtime_mode)
+    .bind(remote_auth_mode)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("failed to set runtime/auth mode");
+}
+
+async fn upsert_trusted_proxy_settings(
+    pool: &sqlx::SqlitePool,
+    user_email_header: &str,
+    trusted_proxy_cidrs_json: &str,
+) {
+    let now = now_unix();
+    sqlx::query(
+        "INSERT INTO trusted_proxy_settings (id, user_email_header, trusted_proxy_cidrs_json, encrypted_shared_secret, updated_by, created_at, updated_at)
+         VALUES (1, ?1, ?2, NULL, NULL, ?3, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+            user_email_header = excluded.user_email_header,
+            trusted_proxy_cidrs_json = excluded.trusted_proxy_cidrs_json,
+            updated_at = excluded.updated_at",
+    )
+    .bind(user_email_header)
+    .bind(trusted_proxy_cidrs_json)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("failed to upsert trusted proxy settings");
+}
+
+async fn seed_user_with_role_and_status(
+    pool: &sqlx::SqlitePool,
+    email: &str,
+    role: &str,
+    status: &str,
+) -> String {
+    let user_id = uuid::Uuid::new_v4().to_string();
+    let now = now_unix();
+    sqlx::query(
+        "INSERT INTO users (id, email, oidc_subject, display_name, role, status, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+    )
+    .bind(&user_id)
+    .bind(email)
+    .bind(format!("{role}::{email}"))
+    .bind(email)
+    .bind(role)
+    .bind(status)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("failed to seed test user with status");
+    user_id
+}
+
+async fn set_owner_created_with_setup_session(
+    pool: &sqlx::SqlitePool,
+    owner_email: &str,
+    session_token: &str,
+) {
+    let now = now_unix();
+    let session_expires_at = now + 1800;
+    let session_hash = oored::token::hash_token(session_token);
+    let owner_subject = format!("warpgate::{}", owner_email.to_lowercase());
+
+    sqlx::query(
+        "UPDATE setup_state SET
+            setup_state = 'owner_created',
+            owner_email = ?1,
+            owner_oidc_subject = ?2,
+            owner_created_at = ?3,
+            session_hash = ?4,
+            session_expires_at = ?5,
+            updated_at = ?3
+         WHERE id = 1",
+    )
+    .bind(owner_email)
+    .bind(owner_subject)
+    .bind(now)
+    .bind(session_hash)
+    .bind(session_expires_at)
+    .execute(pool)
+    .await
+    .expect("failed to set owner_created setup state");
 }
 
 #[tokio::test]
@@ -653,6 +769,191 @@ async fn test_non_owner_cannot_configure_external_access_oidc() {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     let body = body_json(resp.into_body()).await;
     assert_eq!(body["code"], "external_access_owner_required");
+}
+
+#[tokio::test]
+async fn trusted_proxy_login_rejects_untrusted_peer() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+
+    mark_setup_ready(&pool).await;
+    set_runtime_and_remote_auth_mode(&pool, "remote", "trusted_proxy").await;
+    upsert_trusted_proxy_settings(&pool, "x-warpgate-username", "[]").await;
+
+    let req = Request::builder()
+        .uri("/v1/auth/trusted-proxy/login")
+        .method("POST")
+        .header("x-warpgate-username", "owner@example.com")
+        .extension(ConnectInfo(SocketAddr::from(([10, 10, 0, 8], 43101))))
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app
+        .clone()
+        .oneshot(req)
+        .await
+        .expect("trusted proxy login response");
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_json(resp.into_body()).await;
+    assert_eq!(body["code"], "trusted_proxy_peer_not_allowed");
+}
+
+#[tokio::test]
+async fn trusted_proxy_login_rejects_missing_identity_header() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+
+    mark_setup_ready(&pool).await;
+    set_runtime_and_remote_auth_mode(&pool, "remote", "trusted_proxy").await;
+    upsert_trusted_proxy_settings(&pool, "x-warpgate-username", "[]").await;
+
+    let req = Request::builder()
+        .uri("/v1/auth/trusted-proxy/login")
+        .method("POST")
+        .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 43102))))
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app
+        .clone()
+        .oneshot(req)
+        .await
+        .expect("trusted proxy login response");
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = body_json(resp.into_body()).await;
+    assert_eq!(body["code"], "trusted_proxy_identity_missing");
+}
+
+#[tokio::test]
+async fn trusted_proxy_login_activates_invited_user() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+
+    mark_setup_ready(&pool).await;
+    set_runtime_and_remote_auth_mode(&pool, "remote", "trusted_proxy").await;
+    upsert_trusted_proxy_settings(&pool, "x-warpgate-username", "[]").await;
+
+    let invited_user_id =
+        seed_user_with_role_and_status(&pool, "invitee@example.com", "developer", "invited").await;
+
+    let req = Request::builder()
+        .uri("/v1/auth/trusted-proxy/login")
+        .method("POST")
+        .header("x-warpgate-username", "invitee@example.com")
+        .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 43103))))
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app
+        .clone()
+        .oneshot(req)
+        .await
+        .expect("trusted proxy login response");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp.into_body()).await;
+    assert_eq!(body["user"]["email"], "invitee@example.com");
+    assert_eq!(body["user"]["role"], "developer");
+    assert!(body["session_token"].as_str().is_some());
+
+    let row = sqlx::query("SELECT status, oidc_subject FROM users WHERE id = ?1")
+        .bind(&invited_user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("query invited user");
+    let status: String = row.get("status");
+    let oidc_subject: String = row.get("oidc_subject");
+
+    assert_eq!(status, "active");
+    assert_eq!(oidc_subject, "warpgate::invitee@example.com");
+}
+
+#[tokio::test]
+async fn external_access_preflight_uses_trusted_proxy_check_when_selected() {
+    let _env_guard = env_lock().lock().expect("env lock");
+    let _public_url = EnvVarGuard::set("OORE_PUBLIC_URL", "https://external.oore.test");
+    let _cors = EnvVarGuard::set(
+        "OORE_CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,https://external.oore.test",
+    );
+
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+
+    mark_setup_ready(&pool).await;
+    set_runtime_and_remote_auth_mode(&pool, "remote", "trusted_proxy").await;
+
+    let owner_id = seed_user_with_role(&pool, "owner@example.com", "owner").await;
+    let owner_session = create_session_token(&pool, &owner_id).await;
+
+    let req = Request::builder()
+        .uri("/v1/settings/external-access/preflight")
+        .method("GET")
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {owner_session}"),
+        )
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.expect("preflight response");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp.into_body()).await;
+    let checks = body["checks"].as_array().expect("checks array");
+
+    let proxy_check = checks
+        .iter()
+        .find(|check| check["id"] == "trusted_proxy_configured")
+        .expect("trusted proxy check");
+    assert_eq!(proxy_check["ok"], false);
+    assert_eq!(
+        proxy_check["failure_code"].as_str(),
+        Some("external_access_trusted_proxy_not_configured")
+    );
+    assert!(!checks.iter().any(|check| check["id"] == "oidc_configured"));
+    assert!(
+        !checks
+            .iter()
+            .any(|check| check["id"] == "redirect_policy_consistent")
+    );
+}
+
+#[tokio::test]
+async fn complete_setup_blocks_remote_trusted_proxy_if_not_configured() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("test.db");
+    let app = create_test_app(&db_path).await;
+    let pool = connect_pool(&db_path).await;
+
+    set_runtime_and_remote_auth_mode(&pool, "remote", "trusted_proxy").await;
+
+    let setup_session_token = "setup-session-token";
+    set_owner_created_with_setup_session(&pool, "owner@example.com", setup_session_token).await;
+
+    let req = Request::builder()
+        .uri("/v1/setup/complete")
+        .method("POST")
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {setup_session_token}"),
+        )
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app
+        .clone()
+        .oneshot(req)
+        .await
+        .expect("complete setup response");
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let body = body_json(resp.into_body()).await;
+    assert_eq!(body["code"], "remote_auth_not_configured");
 }
 
 #[tokio::test]

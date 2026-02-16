@@ -63,6 +63,7 @@ pub struct SetupStatus {
     pub instance_id: String,
     pub state: SetupState,
     pub runtime_mode: RuntimeMode,
+    pub remote_auth_mode: RemoteAuthMode,
     pub setup_mode: bool,
     pub is_configured: bool,
 }
@@ -72,6 +73,7 @@ impl SetupStatus {
         instance_id: impl Into<String>,
         state: SetupState,
         runtime_mode: RuntimeMode,
+        remote_auth_mode: RemoteAuthMode,
     ) -> Self {
         let is_configured = state == SetupState::Ready;
         let setup_mode = !is_configured;
@@ -80,6 +82,7 @@ impl SetupStatus {
             instance_id: instance_id.into(),
             state,
             runtime_mode,
+            remote_auth_mode,
             setup_mode,
             is_configured,
         }
@@ -147,6 +150,48 @@ pub struct SetupLocalOwnerCreateRequest {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SetupLocalOwnerCreateResponse {
+    pub state: SetupState,
+    pub owner_email: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_expires_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SetupPreferencesRequest {
+    pub runtime_mode: RuntimeMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_auth_mode: Option<RemoteAuthMode>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SetupPreferencesResponse {
+    pub runtime_mode: RuntimeMode,
+    pub remote_auth_mode: RemoteAuthMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_expires_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SetupTrustedProxyConfigureRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_email_header: Option<String>,
+    #[serde(default)]
+    pub trusted_proxy_cidrs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_secret: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SetupTrustedProxyConfigureResponse {
+    pub state: SetupState,
+    pub has_shared_secret: bool,
+    pub configured_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_expires_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SetupTrustedProxyClaimOwnerResponse {
     pub state: SetupState,
     pub owner_email: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1310,6 +1355,34 @@ impl FromStr for RuntimeMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteAuthMode {
+    Oidc,
+    TrustedProxy,
+}
+
+impl fmt::Display for RemoteAuthMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Oidc => "oidc",
+            Self::TrustedProxy => "trusted_proxy",
+        };
+        f.write_str(s)
+    }
+}
+
+impl FromStr for RemoteAuthMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "oidc" => Ok(Self::Oidc),
+            "trusted_proxy" => Ok(Self::TrustedProxy),
+            other => Err(format!("unknown remote auth mode: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct ExternalAccessPreflightCheck {
     pub id: String,
@@ -1371,10 +1444,35 @@ pub struct ConfigureExternalAccessOidcResponse {
     pub configured_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct TrustedProxySettingsPublic {
+    pub user_email_header: String,
+    pub trusted_proxy_cidrs: Vec<String>,
+    pub has_shared_secret: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct TrustedProxySettingsResponse {
+    pub settings: TrustedProxySettingsPublic,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UpdateTrustedProxySettingsRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_email_header: Option<String>,
+    #[serde(default)]
+    pub trusted_proxy_cidrs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_secret: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InstancePreferences {
     pub key_storage_mode: KeyStorageMode,
     pub runtime_mode: RuntimeMode,
+    pub remote_auth_mode: RemoteAuthMode,
     pub restart_required: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
@@ -1390,6 +1488,8 @@ pub struct UpdateInstancePreferencesRequest {
     pub key_storage_mode: KeyStorageMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_mode: Option<RuntimeMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_auth_mode: Option<RemoteAuthMode>,
 }
 
 // ── Project API types ───────────────────────────────────────────
@@ -2115,6 +2215,14 @@ mod tests {
         assert_eq!(json, "\"local\"");
         let parsed: RuntimeMode = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed, RuntimeMode::Local);
+    }
+
+    #[test]
+    fn remote_auth_mode_round_trip_json() {
+        let json = serde_json::to_string(&RemoteAuthMode::TrustedProxy).expect("serialize");
+        assert_eq!(json, "\"trusted_proxy\"");
+        let parsed: RemoteAuthMode = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, RemoteAuthMode::TrustedProxy);
     }
 
     #[test]

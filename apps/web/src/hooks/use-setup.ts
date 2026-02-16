@@ -6,8 +6,11 @@ import {
   getSetupStatus,
   getSetupSummary,
   setupLocalOwnerCreate,
+  setupPreferences,
   setupOidcStart,
   setupOidcVerify,
+  setupTrustedProxyClaimOwner,
+  setupTrustedProxyConfigure,
   verifyBootstrapToken,
 } from '@/lib/api'
 import { useActiveInstance } from '@/stores/instance-store'
@@ -123,6 +126,82 @@ export function useSetupLocalOwnerCreate() {
       sessionToken: string
       email: string
     }) => setupLocalOwnerCreate(requireInstance(instance), sessionToken, email),
+    onSuccess: (data) => {
+      if (data.session_expires_at) {
+        useSetupStore.getState().setSessionExpiresAt(data.session_expires_at)
+      }
+      void queryClient.invalidateQueries({ queryKey })
+    },
+  })
+}
+
+export function useSetupPreferences() {
+  const queryClient = useQueryClient()
+  const instance = useActiveInstance()
+  const queryKey = useSetupStatusKey()
+
+  return useMutation({
+    mutationFn: ({
+      sessionToken,
+      runtimeMode,
+      remoteAuthMode,
+    }: {
+      sessionToken: string
+      runtimeMode: 'local' | 'remote'
+      remoteAuthMode?: 'oidc' | 'trusted_proxy'
+    }) =>
+      setupPreferences(requireInstance(instance), sessionToken, {
+        runtime_mode: runtimeMode,
+        remote_auth_mode: remoteAuthMode,
+      }),
+    onSuccess: (data) => {
+      if (data.session_expires_at) {
+        useSetupStore.getState().setSessionExpiresAt(data.session_expires_at)
+      }
+      void queryClient.invalidateQueries({ queryKey })
+    },
+  })
+}
+
+export function useSetupTrustedProxyConfigure() {
+  const queryClient = useQueryClient()
+  const instance = useActiveInstance()
+  const queryKey = useSetupStatusKey()
+
+  return useMutation({
+    mutationFn: ({
+      sessionToken,
+      userEmailHeader,
+      trustedProxyCidrs,
+      sharedSecret,
+    }: {
+      sessionToken: string
+      userEmailHeader?: string
+      trustedProxyCidrs: string[]
+      sharedSecret?: string
+    }) =>
+      setupTrustedProxyConfigure(requireInstance(instance), sessionToken, {
+        user_email_header: userEmailHeader,
+        trusted_proxy_cidrs: trustedProxyCidrs,
+        shared_secret: sharedSecret,
+      }),
+    onSuccess: (data) => {
+      if (data.session_expires_at) {
+        useSetupStore.getState().setSessionExpiresAt(data.session_expires_at)
+      }
+      void queryClient.invalidateQueries({ queryKey })
+    },
+  })
+}
+
+export function useSetupTrustedProxyClaimOwner() {
+  const queryClient = useQueryClient()
+  const instance = useActiveInstance()
+  const queryKey = useSetupStatusKey()
+
+  return useMutation({
+    mutationFn: ({ sessionToken }: { sessionToken: string }) =>
+      setupTrustedProxyClaimOwner(requireInstance(instance), sessionToken),
     onSuccess: (data) => {
       if (data.session_expires_at) {
         useSetupStore.getState().setSessionExpiresAt(data.session_expires_at)

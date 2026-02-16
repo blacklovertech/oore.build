@@ -7,7 +7,7 @@ use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use oore_contract::{
     ApiError, AuthenticatedUser, LocalLoginRequest, LocalLoginResponse, LogoutResponse,
-    OidcCallbackResponse, OidcStartResponse, OwnerRecord, RuntimeMode, SetupState,
+    OidcCallbackResponse, OidcStartResponse, OwnerRecord, RemoteAuthMode, RuntimeMode, SetupState,
 };
 use openidconnect::core::CoreProviderMetadata;
 use openidconnect::{
@@ -30,6 +30,10 @@ const AUTO_LOCAL_OWNER_EMAIL: &str = "owner@local";
 
 fn local_subject_for_email(email: &str) -> String {
     format!("local::{}", email.trim().to_lowercase())
+}
+
+fn trusted_proxy_subject_for_email(email: &str) -> String {
+    format!("warpgate::{}", email.trim().to_lowercase())
 }
 
 /// Pending OIDC authorization request stored in memory while the user is
@@ -911,6 +915,241 @@ pub async fn local_login(
                 "Session created but could not be validated",
             )
         })?;
+
+    Ok(Json(LocalLoginResponse {
+        session_token,
+        expires_at: session_info.expires_at,
+        user: AuthenticatedUser {
+            email: user_email,
+            oidc_subject,
+            user_id: Some(user_id),
+            role: Some(user_role),
+            avatar_url,
+        },
+    }))
+}
+
+/// `POST /v1/auth/trusted-proxy/login`
+///
+/// Creates a session for the identity asserted by a trusted upstream proxy
+/// (for example, Warpgate). This endpoint is only available in Remote mode
+/// when remote auth mode is configured to trusted_proxy.
+pub async fn trusted_proxy_login(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<LocalLoginResponse>, (StatusCode, Json<ApiError>)> {
+    let pool = {
+        let store = state.store.lock().await;
+        let sf = store.load().await.map_err(|e| {
+            error!(error = %e, "failed to load setup state for trusted proxy login");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to load setup state",
+            )
+        })?;
+        if sf.setup_state != SetupState::Ready {
+            return Err(api_err(
+                StatusCode::CONFLICT,
+                "setup_incomplete",
+                "Auth endpoints are only available after setup is complete",
+            ));
+        }
+
+        let runtime_mode = crate::instance_settings::load_runtime_mode(store.pool())
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to load runtime mode for trusted proxy login");
+                api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    "Failed to determine runtime mode",
+                )
+            })?;
+        if runtime_mode != RuntimeMode::Remote {
+            return Err(api_err(
+                StatusCode::FORBIDDEN,
+                "mode_restricted",
+                "Trusted proxy login is only available in External Access mode",
+            ));
+        }
+
+        let remote_auth_mode = crate::instance_settings::load_remote_auth_mode(store.pool())
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to load remote auth mode for trusted proxy login");
+                api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    "Failed to determine remote auth mode",
+                )
+            })?;
+        if remote_auth_mode != RemoteAuthMode::TrustedProxy {
+            return Err(api_err(
+                StatusCode::FORBIDDEN,
+                "mode_restricted",
+                "Trusted proxy login is not enabled for this instance",
+            ));
+        }
+
+        store.pool().clone()
+    };
+
+    let proxy_settings = crate::instance_settings::load_effective_trusted_proxy_settings(&pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load trusted proxy settings");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to load trusted proxy settings",
+            )
+        })?;
+
+    if !crate::instance_settings::is_trusted_proxy_peer(peer_addr.ip(), &proxy_settings) {
+        let details = serde_json::json!({
+            "peer_ip": peer_addr.ip().to_string(),
+        })
+        .to_string();
+        let _ = write_audit_log(
+            &pool,
+            None,
+            "trusted_proxy_login_blocked_untrusted_peer",
+            "auth",
+            None,
+            Some(&details),
+        )
+        .await;
+
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "trusted_proxy_peer_not_allowed",
+            "Trusted proxy login requests must come from an allowlisted proxy peer",
+        ));
+    }
+
+    let email = crate::instance_settings::extract_trusted_proxy_email(&headers, &proxy_settings)?;
+    let subject = trusted_proxy_subject_for_email(&email);
+
+    let row = sqlx::query(
+        "SELECT id, email, role, status, oidc_subject, avatar_url \
+         FROM users WHERE lower(email) = lower(?1) LIMIT 1",
+    )
+    .bind(&email)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to look up user for trusted proxy login");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to look up user",
+        )
+    })?
+    .ok_or_else(|| {
+        api_err(
+            StatusCode::FORBIDDEN,
+            "user_not_found",
+            "No user account exists for this identity. Contact an administrator.",
+        )
+    })?;
+
+    let user_id: String = row.get("id");
+    let user_email: String = row.get("email");
+    let user_role: String = row.get("role");
+    let user_status: String = row.get("status");
+    let current_subject: String = row.get("oidc_subject");
+    let avatar_url: Option<String> = row.get("avatar_url");
+
+    if user_status == "disabled" {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "user_disabled",
+            "This user account is disabled",
+        ));
+    }
+
+    let oidc_subject = if user_status == "invited" {
+        let now = now_unix();
+        sqlx::query(
+            "UPDATE users SET oidc_subject = ?1, status = 'active', updated_at = ?2 WHERE id = ?3",
+        )
+        .bind(&subject)
+        .bind(now)
+        .bind(&user_id)
+        .execute(&pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to activate invited trusted proxy user");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to activate user",
+            )
+        })?;
+
+        let _ = write_audit_log(
+            &pool,
+            Some(&user_id),
+            "user_activated",
+            "user",
+            Some(&user_id),
+            None,
+        )
+        .await;
+        subject
+    } else {
+        current_subject
+    };
+
+    let session_token = state
+        .sessions
+        .create_session(&user_id, DEFAULT_SESSION_TTL)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to create trusted proxy session");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                "Failed to create session",
+            )
+        })?;
+
+    let session_info = state
+        .sessions
+        .validate_session(&session_token)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to validate trusted proxy session");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                "Failed to validate session",
+            )
+        })?
+        .ok_or_else(|| {
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                "Session created but could not be validated",
+            )
+        })?;
+
+    let details = serde_json::json!({
+        "email": user_email,
+        "peer_ip": peer_addr.ip().to_string(),
+    })
+    .to_string();
+    let _ = write_audit_log(
+        &pool,
+        Some(&user_id),
+        "trusted_proxy_login_succeeded",
+        "auth",
+        Some(&user_id),
+        Some(&details),
+    )
+    .await;
 
     Ok(Json(LocalLoginResponse {
         session_token,

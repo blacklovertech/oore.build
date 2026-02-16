@@ -39,3 +39,13 @@ Rules:
   - OOR-36: https://linear.app/oorebuild/issue/OOR-36/replace-scripts-makefile-releasedeploy-tooling-with-woodpecker-driven
 - Renamed release branches to `alpha`, `beta`, and `stable`; `master` remains a non-stable playground branch (no tagging).
   - OOR-36: https://linear.app/oorebuild/issue/OOR-36/replace-scripts-makefile-releasedeploy-tooling-with-woodpecker-driven
+
+## 2026-02-16
+
+- Added an opt-in Remote auth provider `trusted_proxy` (Warpgate/IAP) so first-time remote setup/login can complete without configuring Oore OIDC, while keeping per-user Oore sessions + RBAC + audit attribution.
+  - ADR-0010: https://linear.app/oorebuild/document/adr-0010-remote-auth-providers-oidc-trusted-proxy-iap-cb4d4e4d52f5
+  - Feature doc: https://linear.app/oorebuild/document/feature-remote-trusted-proxy-auth-mode-warpgate-8b6f6f698f75
+- Added setup/runtime/settings APIs and preflight branching for `remote_auth_mode` (`oidc` vs `trusted_proxy`), including trusted-proxy peer/header validation and invite-only user mapping at login.
+  - Feature doc: https://linear.app/oorebuild/document/feature-remote-trusted-proxy-auth-mode-warpgate-8b6f6f698f75
+- Added a platform-contract amendment documenting Remote auth provider policy (`oidc` default + `trusted_proxy` opt-in) and trust-boundary constraints.
+  - Contract amendment: https://linear.app/oorebuild/document/platform-contract-amendment-remote-auth-providers-9975f97813a8

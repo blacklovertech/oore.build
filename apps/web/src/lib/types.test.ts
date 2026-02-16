@@ -41,6 +41,7 @@ describe('types', () => {
       instance_id: 'test',
       state: 'uninitialized',
       runtime_mode: 'local',
+      remote_auth_mode: 'oidc',
       setup_mode: true,
       is_configured: false,
     }
@@ -204,6 +205,7 @@ describe('types', () => {
     const prefs: InstancePreferences = {
       key_storage_mode: 'file',
       runtime_mode: 'local',
+      remote_auth_mode: 'oidc',
       restart_required: true,
       updated_at: 123,
     }

@@ -68,9 +68,6 @@ export const Route = createFileRoute('/setup')({
       if (status.is_configured) {
         throw redirect({ to: '/' })
       }
-      if (status.setup_mode && status.runtime_mode === 'local') {
-        throw redirect({ to: '/' })
-      }
     } catch (e) {
       if (isRedirect(e)) throw e
       throw e
@@ -133,8 +130,10 @@ function SetupLayout() {
   const navigate = useNavigate()
   const steps =
     status?.runtime_mode === 'local'
-      ? ['Token', 'Owner', 'Complete']
-      : ['Token', 'OIDC', 'Owner', 'Complete']
+      ? ['Token', 'Mode', 'Owner', 'Complete']
+      : status?.remote_auth_mode === 'trusted_proxy'
+        ? ['Token', 'Mode', 'Proxy', 'Owner', 'Complete']
+        : ['Token', 'Mode', 'OIDC', 'Owner', 'Complete']
 
   useEffect(() => {
     if (isExpired) {

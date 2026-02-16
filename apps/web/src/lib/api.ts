@@ -53,11 +53,17 @@ import type {
   ReEnableUserResponse,
   SetupCompleteResponse,
   SetupLocalOwnerCreateResponse,
+  SetupPreferencesRequest,
+  SetupPreferencesResponse,
   SetupOidcStartResponse,
   SetupOidcVerifyResponse,
   SetupStatus,
   SetupSummaryResponse,
+  SetupTrustedProxyClaimOwnerResponse,
+  SetupTrustedProxyConfigureRequest,
+  SetupTrustedProxyConfigureResponse,
   SyncInstallationsResponse,
+  TrustedProxySettingsResponse,
   UpdateArtifactStorageSettingsRequest,
   UpdateExternalAccessNetworkSettingsRequest,
   UpdateInstancePreferencesRequest,
@@ -67,6 +73,7 @@ import type {
   UpdateProjectRequest,
   UpdateRunnerRequest,
   UpdateRunnerResponse,
+  UpdateTrustedProxySettingsRequest,
   UpdateUserRoleRequest,
   UpdateUserRoleResponse,
   UserProfileResponse,
@@ -231,6 +238,48 @@ export function setupLocalOwnerCreate(
   )
 }
 
+export function setupPreferences(
+  baseUrl: string,
+  sessionToken: string,
+  data: SetupPreferencesRequest,
+): Promise<SetupPreferencesResponse> {
+  return request<SetupPreferencesResponse>(baseUrl, '/v1/setup/preferences', {
+    method: 'POST',
+    headers: authHeaders(sessionToken),
+    body: JSON.stringify(data),
+  })
+}
+
+export function setupTrustedProxyConfigure(
+  baseUrl: string,
+  sessionToken: string,
+  data: SetupTrustedProxyConfigureRequest,
+): Promise<SetupTrustedProxyConfigureResponse> {
+  return request<SetupTrustedProxyConfigureResponse>(
+    baseUrl,
+    '/v1/setup/trusted-proxy/configure',
+    {
+      method: 'POST',
+      headers: authHeaders(sessionToken),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function setupTrustedProxyClaimOwner(
+  baseUrl: string,
+  sessionToken: string,
+): Promise<SetupTrustedProxyClaimOwnerResponse> {
+  return request<SetupTrustedProxyClaimOwnerResponse>(
+    baseUrl,
+    '/v1/setup/owner/claim-trusted-proxy',
+    {
+      method: 'POST',
+      headers: authHeaders(sessionToken),
+    },
+  )
+}
+
 export function completeSetup(
   baseUrl: string,
   sessionToken: string,
@@ -334,6 +383,12 @@ export function localLogin(
   return request<LocalLoginResponse>(baseUrl, '/v1/auth/local/login', {
     method: 'POST',
     body: JSON.stringify(data),
+  })
+}
+
+export function trustedProxyLogin(baseUrl: string): Promise<LocalLoginResponse> {
+  return request<LocalLoginResponse>(baseUrl, '/v1/auth/trusted-proxy/login', {
+    method: 'POST',
   })
 }
 
@@ -642,6 +697,35 @@ export function updateExternalAccessNetworkSettings(
   return request<ExternalAccessNetworkSettingsResponse>(
     baseUrl,
     '/v1/settings/external-access/network',
+    {
+      method: 'PUT',
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function getExternalAccessTrustedProxySettings(
+  baseUrl: string,
+  token: string,
+): Promise<TrustedProxySettingsResponse> {
+  return request<TrustedProxySettingsResponse>(
+    baseUrl,
+    '/v1/settings/external-access/trusted-proxy',
+    {
+      headers: authHeaders(token),
+    },
+  )
+}
+
+export function updateExternalAccessTrustedProxySettings(
+  baseUrl: string,
+  token: string,
+  data: UpdateTrustedProxySettingsRequest,
+): Promise<TrustedProxySettingsResponse> {
+  return request<TrustedProxySettingsResponse>(
+    baseUrl,
+    '/v1/settings/external-access/trusted-proxy',
     {
       method: 'PUT',
       headers: authHeaders(token),

@@ -18,6 +18,7 @@ import {
   useSetupLocalOwnerCreate,
   useSetupOidcStart,
   useSetupStatus,
+  useSetupTrustedProxyClaimOwner,
 } from '@/hooks/use-setup'
 import { ApiClientError, getApiErrorMessage } from '@/lib/api'
 import { useSetupStore } from '@/stores/setup-store'
@@ -91,8 +92,12 @@ function OwnerStep() {
   const setCurrentStep = useSetupStore((s) => s.setCurrentStep)
   const startOidcMutation = useSetupOidcStart()
   const localOwnerMutation = useSetupLocalOwnerCreate()
+  const trustedProxyClaimMutation = useSetupTrustedProxyClaimOwner()
   const { data: status } = useSetupStatus()
   const isLocalMode = status?.runtime_mode === 'local'
+  const isTrustedProxyMode =
+    status?.runtime_mode === 'remote' &&
+    status?.remote_auth_mode === 'trusted_proxy'
 
   const localOwnerForm = useForm<LocalOwnerForm>({
     resolver: zodResolver(localOwnerSchema),
@@ -113,14 +118,26 @@ function OwnerStep() {
           'Local owner creation is only available in Local Only mode.',
       })
     : null
+  const trustedProxyErrorMessage = trustedProxyClaimMutation.error
+    ? getApiErrorMessage(trustedProxyClaimMutation.error, {
+        trusted_proxy_peer_not_allowed:
+          'This request did not come from a trusted proxy peer.',
+        trusted_proxy_identity_missing:
+          'Trusted proxy identity header is missing. Check Warpgate header forwarding.',
+        trusted_proxy_identity_invalid:
+          'Trusted proxy identity header must contain an email address.',
+        mode_restricted:
+          'Switch setup mode to Remote (Trusted Proxy) before claiming owner.',
+      })
+    : null
 
   useEffect(() => {
-    setCurrentStep(isLocalMode ? 1 : 2)
+    setCurrentStep(isLocalMode ? 2 : 3)
   }, [isLocalMode, setCurrentStep])
 
   useEffect(() => {
     if (status?.state === 'owner_created') {
-      setCurrentStep(isLocalMode ? 2 : 3)
+      setCurrentStep(isLocalMode ? 3 : 4)
       void navigate({ to: '/setup/complete' })
     }
   }, [status?.state, isLocalMode, setCurrentStep, navigate])
@@ -155,12 +172,25 @@ function OwnerStep() {
       },
       {
         onSuccess: () => {
-          setCurrentStep(2)
+          setCurrentStep(3)
           void navigate({ to: '/setup/complete' })
         },
       },
     )
   }
+
+  const handleClaimTrustedProxyOwner = useCallback(() => {
+    if (!sessionToken) return
+    trustedProxyClaimMutation.mutate(
+      { sessionToken },
+      {
+        onSuccess: () => {
+          setCurrentStep(4)
+          void navigate({ to: '/setup/complete' })
+        },
+      },
+    )
+  }, [sessionToken, trustedProxyClaimMutation, setCurrentStep, navigate])
 
   const handleRestartFromToken = useCallback(() => {
     useSetupStore.getState().reset()
@@ -175,6 +205,8 @@ function OwnerStep() {
         <p className="text-sm text-muted-foreground">
           {isLocalMode
             ? 'Create a local owner account to finish setup without OIDC.'
+            : isTrustedProxyMode
+              ? 'Confirm owner identity from your trusted proxy (Warpgate).'
             : "Authenticate with your OIDC provider to verify your identity. Your email and OIDC subject will be extracted from the provider's ID token."}
         </p>
       </div>
@@ -221,6 +253,33 @@ function OwnerStep() {
             </Button>
           </form>
         </Form>
+      ) : isTrustedProxyMode ? (
+        <>
+          {trustedProxyErrorMessage ? (
+            <Alert variant="destructive">
+              <AlertTitle>Failed to claim owner identity</AlertTitle>
+              <AlertDescription>{trustedProxyErrorMessage}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <Button
+            onClick={handleClaimTrustedProxyOwner}
+            disabled={trustedProxyClaimMutation.isPending}
+            className="w-full"
+          >
+            {trustedProxyClaimMutation.isPending
+              ? 'Claiming owner...'
+              : 'Confirm Owner from Trusted Proxy'}
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={() => void navigate({ to: '/setup/trusted-proxy' })}
+            className="w-full"
+          >
+            Back to Trusted Proxy Settings
+          </Button>
+        </>
       ) : (
         <>
           <Alert>

@@ -94,10 +94,12 @@ fn preferred_frontend_origin(allowed_origins: &[String], public_url: Option<&str
         })
         .cloned()
         .or_else(|| {
-            allowed_origins.iter().find(|origin| {
-                !crate::instance_settings::DEFAULT_ALLOWED_ORIGINS.contains(&origin.as_str())
-            })
-            .cloned()
+            allowed_origins
+                .iter()
+                .find(|origin| {
+                    !crate::instance_settings::DEFAULT_ALLOWED_ORIGINS.contains(&origin.as_str())
+                })
+                .cloned()
         })
         .or_else(|| allowed_origins.first().cloned())
         .unwrap_or_else(|| "http://localhost:3000".to_string())
@@ -1306,7 +1308,9 @@ use super::{error_page, favicon_data_uri, html_escape, require_remote_mode};
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cookie_secure_override, preferred_frontend_origin, validate_redirect_origin};
+    use super::{
+        parse_cookie_secure_override, preferred_frontend_origin, validate_redirect_origin,
+    };
 
     #[test]
     fn redirect_origin_accepts_default_localhost_origin() {

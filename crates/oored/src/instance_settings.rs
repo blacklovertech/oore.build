@@ -1,18 +1,21 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{ConnectInfo, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header::HeaderName};
+use ipnet::IpNet;
 use oore_contract::{
     ApiError, ArtifactStorageProvider, ArtifactStorageSettingsResponse,
     ConfigureExternalAccessOidcRequest, ConfigureExternalAccessOidcResponse,
     ExternalAccessNetworkSettings, ExternalAccessNetworkSettingsResponse,
     ExternalAccessNetworkSource, ExternalAccessPreflightCheck, ExternalAccessPreflightResponse,
     InstancePreferences, InstancePreferencesResponse, KeyStorageMode, OidcConfigRecord,
-    OidcSecretRecord, RuntimeMode, SetupState, UpdateArtifactStorageSettingsRequest,
+    OidcSecretRecord, RemoteAuthMode, RuntimeMode, SetupState, TrustedProxySettingsPublic,
+    TrustedProxySettingsResponse, UpdateArtifactStorageSettingsRequest,
     UpdateExternalAccessNetworkSettingsRequest, UpdateInstancePreferencesRequest,
+    UpdateTrustedProxySettingsRequest,
 };
 use sqlx::Row;
 use tracing::{error, info};
@@ -44,12 +47,23 @@ pub const DEFAULT_ALLOWED_ORIGINS: [&str; 4] = [
     "http://localhost:4173",
     "http://127.0.0.1:4173",
 ];
+pub const DEFAULT_TRUSTED_PROXY_EMAIL_HEADER: &str = "x-warpgate-username";
 
 #[derive(Debug, Clone)]
 pub struct EffectiveExternalAccessNetworkSettings {
     pub public_url: Option<String>,
     pub allowed_origins: Vec<String>,
     pub source: ExternalAccessNetworkSource,
+    pub updated_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectiveTrustedProxySettings {
+    pub user_email_header: String,
+    pub trusted_proxy_cidrs: Vec<String>,
+    pub trusted_proxy_networks: Vec<IpNet>,
+    pub has_shared_secret: bool,
+    pub configured: bool,
     pub updated_at: Option<i64>,
 }
 
@@ -121,6 +135,66 @@ fn parse_db_allowed_origins(raw_json: &str) -> Vec<String> {
     )
 }
 
+fn parse_db_trusted_proxy_cidrs(raw_json: &str) -> Vec<String> {
+    let parsed: Vec<String> = serde_json::from_str(raw_json).unwrap_or_default();
+    dedupe_preserve_order(
+        parsed
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect(),
+    )
+}
+
+pub(crate) fn normalize_header_name(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return None;
+    }
+    HeaderName::from_bytes(trimmed.as_bytes())
+        .ok()
+        .map(|header| header.as_str().to_string())
+}
+
+fn normalize_email_value(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().to_lowercase();
+    if trimmed.is_empty() || trimmed.len() > 256 || !trimmed.contains('@') {
+        return None;
+    }
+    Some(trimmed)
+}
+
+fn parse_cidr_list(cidr_strings: &[String]) -> Vec<IpNet> {
+    cidr_strings
+        .iter()
+        .filter_map(|cidr| cidr.parse::<IpNet>().ok())
+        .collect()
+}
+
+pub(crate) fn normalize_requested_trusted_proxy_cidrs(
+    values: Vec<String>,
+) -> Result<Vec<String>, (StatusCode, Json<ApiError>)> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let cidr = trimmed.parse::<IpNet>().map_err(|_| {
+            api_err(
+                StatusCode::BAD_REQUEST,
+                "invalid_input",
+                format!("invalid trusted proxy CIDR: {}", trimmed),
+            )
+        })?;
+        let canonical = cidr.to_string();
+        if !normalized.iter().any(|existing| existing == &canonical) {
+            normalized.push(canonical);
+        }
+    }
+    Ok(normalized)
+}
+
 pub async fn load_effective_external_access_network_settings(
     pool: &sqlx::SqlitePool,
 ) -> anyhow::Result<EffectiveExternalAccessNetworkSettings> {
@@ -173,6 +247,55 @@ pub async fn load_effective_external_access_network_settings(
         public_url: env_public_url,
         allowed_origins: default_allowed_origins(),
         source: ExternalAccessNetworkSource::Default,
+        updated_at: None,
+    })
+}
+
+pub async fn load_effective_trusted_proxy_settings(
+    pool: &sqlx::SqlitePool,
+) -> anyhow::Result<EffectiveTrustedProxySettings> {
+    let row = sqlx::query(
+        "SELECT user_email_header, trusted_proxy_cidrs_json, encrypted_shared_secret, updated_at \
+         FROM trusted_proxy_settings WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(row) = row {
+        let user_email_header = row
+            .try_get::<String, _>("user_email_header")
+            .ok()
+            .and_then(|value| normalize_header_name(&value))
+            .unwrap_or_else(|| DEFAULT_TRUSTED_PROXY_EMAIL_HEADER.to_string());
+        let trusted_proxy_cidrs = row
+            .try_get::<String, _>("trusted_proxy_cidrs_json")
+            .ok()
+            .map(|value| parse_db_trusted_proxy_cidrs(&value))
+            .unwrap_or_default();
+        let trusted_proxy_networks = parse_cidr_list(&trusted_proxy_cidrs);
+        let has_shared_secret = row
+            .try_get::<Option<String>, _>("encrypted_shared_secret")
+            .ok()
+            .flatten()
+            .is_some();
+
+        return Ok(EffectiveTrustedProxySettings {
+            user_email_header,
+            trusted_proxy_cidrs,
+            trusted_proxy_networks,
+            has_shared_secret,
+            configured: true,
+            updated_at: row.try_get::<Option<i64>, _>("updated_at").ok().flatten(),
+        });
+    }
+
+    let trusted_proxy_cidrs = Vec::new();
+    Ok(EffectiveTrustedProxySettings {
+        user_email_header: DEFAULT_TRUSTED_PROXY_EMAIL_HEADER.to_string(),
+        trusted_proxy_networks: parse_cidr_list(&trusted_proxy_cidrs),
+        trusted_proxy_cidrs,
+        has_shared_secret: false,
+        configured: false,
         updated_at: None,
     })
 }
@@ -260,19 +383,92 @@ pub async fn load_runtime_mode(pool: &sqlx::SqlitePool) -> anyhow::Result<Runtim
     Ok(mode)
 }
 
+pub async fn load_remote_auth_mode(pool: &sqlx::SqlitePool) -> anyhow::Result<RemoteAuthMode> {
+    let row = sqlx::query("SELECT remote_auth_mode FROM instance_preferences WHERE id = 1")
+        .fetch_optional(pool)
+        .await?;
+
+    let mode = match row {
+        Some(row) => {
+            let raw: Option<String> = row.try_get("remote_auth_mode").ok();
+            raw.and_then(|value| value.parse::<RemoteAuthMode>().ok())
+                .unwrap_or(RemoteAuthMode::Oidc)
+        }
+        None => RemoteAuthMode::Oidc,
+    };
+
+    Ok(mode)
+}
+
 fn preferences_response(
     mode: KeyStorageMode,
     runtime_mode: RuntimeMode,
+    remote_auth_mode: RemoteAuthMode,
     updated_at: Option<i64>,
 ) -> InstancePreferencesResponse {
     InstancePreferencesResponse {
         preferences: InstancePreferences {
             key_storage_mode: mode,
             runtime_mode,
+            remote_auth_mode,
             restart_required: true,
             updated_at,
         },
     }
+}
+
+fn trusted_proxy_settings_response(
+    settings: EffectiveTrustedProxySettings,
+) -> TrustedProxySettingsResponse {
+    TrustedProxySettingsResponse {
+        settings: TrustedProxySettingsPublic {
+            user_email_header: settings.user_email_header,
+            trusted_proxy_cidrs: settings.trusted_proxy_cidrs,
+            has_shared_secret: settings.has_shared_secret,
+            updated_at: settings.updated_at,
+        },
+    }
+}
+
+pub fn is_trusted_proxy_peer(peer_ip: IpAddr, settings: &EffectiveTrustedProxySettings) -> bool {
+    peer_ip.is_loopback()
+        || settings
+            .trusted_proxy_networks
+            .iter()
+            .any(|cidr| cidr.contains(&peer_ip))
+}
+
+pub fn extract_trusted_proxy_email(
+    headers: &HeaderMap,
+    settings: &EffectiveTrustedProxySettings,
+) -> Result<String, (StatusCode, Json<ApiError>)> {
+    let header_name =
+        HeaderName::from_bytes(settings.user_email_header.as_bytes()).map_err(|_| {
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "trusted_proxy_config_invalid",
+                "Trusted proxy email header configuration is invalid",
+            )
+        })?;
+
+    let raw_identity = headers
+        .get(header_name)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            api_err(
+                StatusCode::UNAUTHORIZED,
+                "trusted_proxy_identity_missing",
+                "Trusted proxy identity header is missing. Configure Warpgate to forward user identity.",
+            )
+        })?;
+
+    normalize_email_value(raw_identity).ok_or_else(|| {
+        api_err(
+            StatusCode::UNAUTHORIZED,
+            "trusted_proxy_identity_invalid",
+            "Trusted proxy identity must be an email address. Configure Warpgate username/header mapping to email.",
+        )
+    })
 }
 
 fn build_external_access_check(
@@ -311,8 +507,9 @@ fn preflight_failure_summary(result: &ExternalAccessPreflightResponse) -> Vec<St
 
 async fn evaluate_external_access_preflight(
     state: &Arc<AppState>,
+    remote_auth_mode_override: Option<RemoteAuthMode>,
 ) -> Result<ExternalAccessPreflightResponse, (StatusCode, Json<ApiError>)> {
-    let setup_state = {
+    let (setup_state, pool) = {
         let store = state.store.lock().await;
         let sf = store.load().await.map_err(|e| {
             error!(error = %e, "failed to load setup state for external access preflight");
@@ -322,7 +519,20 @@ async fn evaluate_external_access_preflight(
                 "Failed to load setup state",
             )
         })?;
-        sf.setup_state
+        (sf.setup_state, store.pool().clone())
+    };
+
+    let remote_auth_mode = if let Some(mode) = remote_auth_mode_override {
+        mode
+    } else {
+        load_remote_auth_mode(&pool).await.map_err(|e| {
+            error!(error = %e, "failed to load remote auth mode for external access preflight");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to load External Access auth mode",
+            )
+        })?
     };
 
     let mut checks = Vec::new();
@@ -339,23 +549,58 @@ async fn evaluate_external_access_preflight(
         None,
     ));
 
-    let oidc_check = match crate::auth::load_oidc_config_for_setup(state).await {
-        Ok(_) => build_external_access_check(
-            "oidc_configured",
-            "OIDC configuration is valid",
-            true,
-            "OIDC configuration is present and valid for runtime auth.",
-            None,
-        ),
-        Err((_, Json(err))) => build_external_access_check(
-            "oidc_configured",
-            "OIDC configuration is valid",
-            false,
-            format!("OIDC is not ready for External Access: {}", err.error),
-            None,
-        ),
-    };
-    checks.push(oidc_check);
+    match remote_auth_mode {
+        RemoteAuthMode::Oidc => {
+            let oidc_check = match crate::auth::load_oidc_config_for_setup(state).await {
+                Ok(_) => build_external_access_check(
+                    "oidc_configured",
+                    "OIDC configuration is valid",
+                    true,
+                    "OIDC configuration is present and valid for runtime auth.",
+                    None,
+                ),
+                Err((_, Json(err))) => build_external_access_check(
+                    "oidc_configured",
+                    "OIDC configuration is valid",
+                    false,
+                    format!("OIDC is not ready for External Access: {}", err.error),
+                    None,
+                ),
+            };
+            checks.push(oidc_check);
+        }
+        RemoteAuthMode::TrustedProxy => {
+            let proxy_settings =
+                load_effective_trusted_proxy_settings(&pool)
+                    .await
+                    .map_err(|e| {
+                        error!(error = %e, "failed to load trusted proxy settings for preflight");
+                        api_err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "store_error",
+                            "Failed to load trusted proxy settings",
+                        )
+                    })?;
+
+            let configured = proxy_settings.configured
+                && normalize_header_name(&proxy_settings.user_email_header).is_some();
+            checks.push(build_external_access_check(
+                "trusted_proxy_configured",
+                "Trusted proxy settings are configured",
+                configured,
+                if configured {
+                    "Trusted proxy settings are configured for runtime auth."
+                } else {
+                    "Configure Trusted Proxy settings before enabling External Access."
+                },
+                if configured {
+                    None
+                } else {
+                    Some("external_access_trusted_proxy_not_configured")
+                },
+            ));
+        }
+    }
 
     let network_settings = runtime_network_settings(state).await;
     let public_url_raw = network_settings.public_url.clone();
@@ -440,36 +685,38 @@ async fn evaluate_external_access_preflight(
         )
     });
 
-    checks.push(if let Some(public_url) = parsed_public_url {
-        let redirect_uri = format!(
-            "{}/auth/callback",
-            public_url.origin().ascii_serialization()
-        );
-        match crate::validate_redirect_uri(&redirect_uri, &network_settings.allowed_origins) {
-            Ok(()) => build_external_access_check(
-                "redirect_policy_consistent",
-                "Redirect policy is consistent with allowed origins",
-                true,
-                "Redirect URI policy is consistent with current origin rules.",
-                None,
-            ),
-            Err((_, Json(err))) => build_external_access_check(
+    if remote_auth_mode == RemoteAuthMode::Oidc {
+        checks.push(if let Some(public_url) = parsed_public_url {
+            let redirect_uri = format!(
+                "{}/auth/callback",
+                public_url.origin().ascii_serialization()
+            );
+            match crate::validate_redirect_uri(&redirect_uri, &network_settings.allowed_origins) {
+                Ok(()) => build_external_access_check(
+                    "redirect_policy_consistent",
+                    "Redirect policy is consistent with allowed origins",
+                    true,
+                    "Redirect URI policy is consistent with current origin rules.",
+                    None,
+                ),
+                Err((_, Json(err))) => build_external_access_check(
+                    "redirect_policy_consistent",
+                    "Redirect policy is consistent with allowed origins",
+                    false,
+                    format!("Redirect/origin policy validation failed: {}", err.error),
+                    None,
+                ),
+            }
+        } else {
+            build_external_access_check(
                 "redirect_policy_consistent",
                 "Redirect policy is consistent with allowed origins",
                 false,
-                format!("Redirect/origin policy validation failed: {}", err.error),
+                "Public URL check must pass before redirect/origin consistency can be validated.",
                 None,
-            ),
-        }
-    } else {
-        build_external_access_check(
-            "redirect_policy_consistent",
-            "Redirect policy is consistent with allowed origins",
-            false,
-            "Public URL check must pass before redirect/origin consistency can be validated.",
-            None,
-        )
-    });
+            )
+        });
+    }
 
     let ready = checks.iter().all(|check| check.ok);
     Ok(ExternalAccessPreflightResponse { ready, checks })
@@ -728,17 +975,19 @@ pub async fn get_instance_preferences(
         store.pool().clone()
     };
 
-    let row = sqlx::query("SELECT runtime_mode, updated_at FROM instance_preferences WHERE id = 1")
-        .fetch_optional(&pool)
-        .await
-        .map_err(|e| {
-            error!(error = %e, "failed to load instance preferences");
-            api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "store_error",
-                "Failed to load instance preferences",
-            )
-        })?;
+    let row = sqlx::query(
+        "SELECT runtime_mode, remote_auth_mode, updated_at FROM instance_preferences WHERE id = 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to load instance preferences");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to load instance preferences",
+        )
+    })?;
 
     if let Some(row) = row {
         let runtime_mode = row
@@ -747,10 +996,17 @@ pub async fn get_instance_preferences(
             .flatten()
             .and_then(|raw| raw.parse::<RuntimeMode>().ok())
             .unwrap_or(RuntimeMode::Local);
+        let remote_auth_mode = row
+            .try_get::<Option<String>, _>("remote_auth_mode")
+            .ok()
+            .flatten()
+            .and_then(|raw| raw.parse::<RemoteAuthMode>().ok())
+            .unwrap_or(RemoteAuthMode::Oidc);
         let updated_at: Option<i64> = row.get("updated_at");
         return Ok(Json(preferences_response(
             KeyStorageMode::File,
             runtime_mode,
+            remote_auth_mode,
             updated_at,
         )));
     }
@@ -758,6 +1014,7 @@ pub async fn get_instance_preferences(
     Ok(Json(preferences_response(
         KeyStorageMode::File,
         RuntimeMode::Local,
+        RemoteAuthMode::Oidc,
         None,
     )))
 }
@@ -785,6 +1042,187 @@ pub async fn get_external_access_network_settings(
         })?;
 
     Ok(Json(network_settings_response(settings)))
+}
+
+pub async fn get_external_access_trusted_proxy_settings(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+) -> ApiResult<TrustedProxySettingsResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "instance_settings", "read").await?;
+
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+
+    let settings = load_effective_trusted_proxy_settings(&pool)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load trusted proxy settings");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to load trusted proxy settings",
+            )
+        })?;
+
+    Ok(Json(trusted_proxy_settings_response(settings)))
+}
+
+pub async fn update_external_access_trusted_proxy_settings(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    auth: AuthUser,
+    Json(req): Json<UpdateTrustedProxySettingsRequest>,
+) -> ApiResult<TrustedProxySettingsResponse> {
+    check_permission(&state.enforcer, &auth.0.role, "instance_settings", "write").await?;
+
+    if auth.0.role != "owner" {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "external_access_owner_required",
+            "Only the owner can update Trusted Proxy settings",
+        ));
+    }
+
+    let pool = {
+        let store = state.store.lock().await;
+        store.pool().clone()
+    };
+
+    let runtime_mode = load_runtime_mode(&pool).await.map_err(|e| {
+        error!(error = %e, "failed to load runtime mode for trusted proxy update");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to determine runtime mode",
+        )
+    })?;
+    let effective_ip = crate::effective_client_ip(peer_addr, &headers);
+    if runtime_mode == RuntimeMode::Local && !effective_ip.is_loopback() {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "external_access_loopback_required",
+            "Trusted Proxy settings can only be changed from loopback while in Local Only mode",
+        ));
+    }
+
+    let existing_row =
+        sqlx::query("SELECT encrypted_shared_secret FROM trusted_proxy_settings WHERE id = 1")
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to read existing trusted proxy settings");
+                api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    "Failed to load existing trusted proxy settings",
+                )
+            })?;
+
+    let user_email_header = req
+        .user_email_header
+        .as_deref()
+        .and_then(normalize_header_name)
+        .unwrap_or_else(|| DEFAULT_TRUSTED_PROXY_EMAIL_HEADER.to_string());
+
+    let trusted_proxy_cidrs = normalize_requested_trusted_proxy_cidrs(req.trusted_proxy_cidrs)?;
+    let trusted_proxy_networks = parse_cidr_list(&trusted_proxy_cidrs);
+    let trusted_proxy_cidrs_json = serde_json::to_string(&trusted_proxy_cidrs).map_err(|e| {
+        error!(error = %e, "failed to serialize trusted proxy CIDRs");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to persist trusted proxy CIDRs",
+        )
+    })?;
+
+    let encrypted_shared_secret = match req.shared_secret {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                if trimmed.len() > 1024 {
+                    return Err(api_err(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_input",
+                        "shared_secret must be 1024 characters or fewer",
+                    ));
+                }
+                Some(
+                    crypto::encrypt(trimmed, &state.encryption_key).map_err(|e| {
+                        error!(error = %e, "failed to encrypt trusted proxy shared secret");
+                        api_err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "encryption_error",
+                            "Failed to persist trusted proxy shared secret",
+                        )
+                    })?,
+                )
+            }
+        }
+        None => existing_row.and_then(|row| {
+            row.try_get::<Option<String>, _>("encrypted_shared_secret")
+                .ok()
+                .flatten()
+        }),
+    };
+
+    let now = now_unix();
+    sqlx::query(
+        "INSERT INTO trusted_proxy_settings (id, user_email_header, trusted_proxy_cidrs_json, encrypted_shared_secret, updated_by, created_at, updated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+            user_email_header = excluded.user_email_header,
+            trusted_proxy_cidrs_json = excluded.trusted_proxy_cidrs_json,
+            encrypted_shared_secret = excluded.encrypted_shared_secret,
+            updated_by = excluded.updated_by,
+            updated_at = excluded.updated_at",
+    )
+    .bind(&user_email_header)
+    .bind(&trusted_proxy_cidrs_json)
+    .bind(encrypted_shared_secret.clone())
+    .bind(&auth.0.user_id)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to persist trusted proxy settings");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to update trusted proxy settings",
+        )
+    })?;
+
+    let details = serde_json::json!({
+        "user_email_header": user_email_header,
+        "trusted_proxy_cidrs": trusted_proxy_cidrs,
+        "has_shared_secret": encrypted_shared_secret.is_some(),
+    })
+    .to_string();
+    let _ = write_audit_log(
+        &pool,
+        Some(&auth.0.user_id),
+        "external_access_trusted_proxy_settings_updated",
+        "instance_settings",
+        Some("external_access"),
+        Some(&details),
+    )
+    .await;
+
+    Ok(Json(trusted_proxy_settings_response(
+        EffectiveTrustedProxySettings {
+            user_email_header,
+            trusted_proxy_cidrs,
+            trusted_proxy_networks,
+            has_shared_secret: encrypted_shared_secret.is_some(),
+            configured: true,
+            updated_at: Some(now),
+        },
+    )))
 }
 
 pub async fn update_external_access_network_settings(
@@ -945,7 +1383,7 @@ pub async fn get_external_access_preflight(
 ) -> ApiResult<ExternalAccessPreflightResponse> {
     check_permission(&state.enforcer, &auth.0.role, "instance_settings", "read").await?;
 
-    let result = evaluate_external_access_preflight(&state).await?;
+    let result = evaluate_external_access_preflight(&state, None).await?;
 
     let pool = {
         let store = state.store.lock().await;
@@ -1201,23 +1639,36 @@ pub async fn update_instance_preferences(
             "Failed to update instance preferences",
         )
     })?;
-    let runtime_mode = req.runtime_mode.unwrap_or(existing_mode);
-    let runtime_mode_changed = runtime_mode != existing_mode;
+    let existing_remote_auth_mode = load_remote_auth_mode(&pool).await.map_err(|e| {
+        error!(error = %e, "failed to load existing remote auth mode");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to update instance preferences",
+        )
+    })?;
 
-    if runtime_mode_changed && auth.0.role != "owner" {
+    let runtime_mode = req.runtime_mode.unwrap_or(existing_mode);
+    let remote_auth_mode = req.remote_auth_mode.unwrap_or(existing_remote_auth_mode);
+    let runtime_mode_changed = runtime_mode != existing_mode;
+    let remote_auth_mode_changed = remote_auth_mode != existing_remote_auth_mode;
+    let auth_policy_changed = runtime_mode_changed || remote_auth_mode_changed;
+
+    if auth_policy_changed && auth.0.role != "owner" {
         return Err(api_err(
             StatusCode::FORBIDDEN,
             "external_access_owner_required",
-            "Only the owner can change External Access mode",
+            "Only the owner can change External Access authentication settings",
         ));
     }
 
     let mut preflight_result: Option<ExternalAccessPreflightResponse> = None;
-    if runtime_mode_changed && runtime_mode == RuntimeMode::Remote {
-        let result = evaluate_external_access_preflight(&state).await?;
+    if runtime_mode == RuntimeMode::Remote && auth_policy_changed {
+        let result = evaluate_external_access_preflight(&state, Some(remote_auth_mode)).await?;
         let preflight_details = serde_json::json!({
             "ready": result.ready,
             "failed_checks": preflight_failure_summary(&result),
+            "remote_auth_mode": remote_auth_mode.to_string(),
         })
         .to_string();
         let _ = write_audit_log(
@@ -1273,16 +1724,18 @@ pub async fn update_instance_preferences(
         })?;
 
     sqlx::query(
-        "INSERT INTO instance_preferences (id, key_storage_mode, runtime_mode, updated_by, created_at, updated_at)
-         VALUES (1, ?1, ?2, ?3, ?4, ?4)
+        "INSERT INTO instance_preferences (id, key_storage_mode, runtime_mode, remote_auth_mode, updated_by, created_at, updated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?5)
          ON CONFLICT(id) DO UPDATE SET
             key_storage_mode = excluded.key_storage_mode,
             runtime_mode = excluded.runtime_mode,
+            remote_auth_mode = excluded.remote_auth_mode,
             updated_by = excluded.updated_by,
             updated_at = excluded.updated_at",
     )
     .bind(KeyStorageMode::File.to_string())
     .bind(runtime_mode.to_string())
+    .bind(remote_auth_mode.to_string())
     .bind(&auth.0.user_id)
     .bind(now)
     .execute(&pool)
@@ -1299,6 +1752,7 @@ pub async fn update_instance_preferences(
     let mut details_value = serde_json::json!({
         "key_storage_mode": KeyStorageMode::File.to_string(),
         "runtime_mode": runtime_mode.to_string(),
+        "remote_auth_mode": remote_auth_mode.to_string(),
         "active_key_source": active_source.as_str(),
     });
     if let Some(result) = preflight_result.as_ref() {
@@ -1315,40 +1769,56 @@ pub async fn update_instance_preferences(
     )
     .await;
 
-    if runtime_mode_changed {
+    if auth_policy_changed {
         let revoked_sessions = state.sessions.revoke_all_sessions().await.map_err(|e| {
-            error!(error = %e, "failed to revoke sessions after runtime mode change");
+            error!(error = %e, "failed to revoke sessions after auth policy change");
             api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "session_error",
-                "Failed to revoke sessions after runtime mode change",
+                "Failed to revoke sessions after auth policy change",
             )
         })?;
 
-        let runtime_details = serde_json::json!({
+        let change_details = serde_json::json!({
             "from_mode": existing_mode.to_string(),
             "to_mode": runtime_mode.to_string(),
+            "from_remote_auth_mode": existing_remote_auth_mode.to_string(),
+            "to_remote_auth_mode": remote_auth_mode.to_string(),
             "revoked_sessions": revoked_sessions,
         })
         .to_string();
-        let _ = write_audit_log(
-            &pool,
-            Some(&auth.0.user_id),
-            "runtime_mode_changed",
-            "instance_settings",
-            Some("preferences"),
-            Some(&runtime_details),
-        )
-        .await;
+        if runtime_mode_changed {
+            let _ = write_audit_log(
+                &pool,
+                Some(&auth.0.user_id),
+                "runtime_mode_changed",
+                "instance_settings",
+                Some("preferences"),
+                Some(&change_details),
+            )
+            .await;
+        }
+        if remote_auth_mode_changed {
+            let _ = write_audit_log(
+                &pool,
+                Some(&auth.0.user_id),
+                "remote_auth_mode_changed",
+                "instance_settings",
+                Some("preferences"),
+                Some(&change_details),
+            )
+            .await;
+        }
 
-        if runtime_mode == RuntimeMode::Remote {
+        if runtime_mode == RuntimeMode::Remote && (runtime_mode_changed || remote_auth_mode_changed)
+        {
             let _ = write_audit_log(
                 &pool,
                 Some(&auth.0.user_id),
                 "external_access_enabled",
                 "instance_settings",
                 Some("external_access"),
-                Some(&runtime_details),
+                Some(&change_details),
             )
             .await;
         }
@@ -1357,15 +1827,18 @@ pub async fn update_instance_preferences(
             mode = %KeyStorageMode::File,
             from_mode = %existing_mode,
             to_mode = %runtime_mode,
+            from_remote_auth_mode = %existing_remote_auth_mode,
+            to_remote_auth_mode = %remote_auth_mode,
             source = %active_source.as_str(),
             revoked_sessions,
             user_id = %auth.0.user_id,
-            "instance preferences updated and sessions revoked after runtime mode change"
+            "instance preferences updated and sessions revoked after auth policy change"
         );
     } else {
         info!(
             mode = %KeyStorageMode::File,
             runtime_mode = %runtime_mode,
+            remote_auth_mode = %remote_auth_mode,
             source = %active_source.as_str(),
             user_id = %auth.0.user_id,
             "instance preferences updated"
@@ -1375,6 +1848,7 @@ pub async fn update_instance_preferences(
     Ok(Json(preferences_response(
         KeyStorageMode::File,
         runtime_mode,
+        remote_auth_mode,
         Some(now),
     )))
 }

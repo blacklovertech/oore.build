@@ -43,31 +43,28 @@ function stateToStep(
   state: string,
   runtimeMode: 'local' | 'remote' | undefined,
 ): number {
+  if (state === 'bootstrap_pending' || state === 'uninitialized') {
+    return 1 // Mode selection
+  }
+
   if (runtimeMode === 'local') {
     switch (state) {
-      case 'bootstrap_pending':
-      case 'uninitialized':
-        return 0
       case 'idp_configured':
-        return 1
-      case 'owner_created':
         return 2
+      case 'owner_created':
+        return 3
       default:
         return 0
     }
   }
 
-  switch (state) {
-    case 'bootstrap_pending':
-    case 'uninitialized':
-      return 0
-    case 'idp_configured':
-      return 2
-    case 'owner_created':
-      return 3
-    default:
-      return 0
+  if (state === 'idp_configured') {
+    return 3
   }
+  if (state === 'owner_created') {
+    return 4
+  }
+  return 0
 }
 
 function BootstrapTokenStep() {
@@ -95,19 +92,15 @@ function BootstrapTokenStep() {
       return
     }
 
-    if (
-      status.runtime_mode === 'local' &&
-      status.state === 'bootstrap_pending'
-    ) {
-      setCurrentStep(1)
-      void navigate({ to: '/setup/owner' })
-      return
-    }
-
-    const backendStep = stateToStep(status.state, status.runtime_mode)
+    const backendStep = stateToStep(
+      status.state,
+      status.runtime_mode,
+    )
     if (backendStep >= 1) {
       setCurrentStep(backendStep)
-      if (status.state === 'idp_configured') {
+      if (status.state === 'bootstrap_pending' || status.state === 'uninitialized') {
+        void navigate({ to: '/setup/mode' })
+      } else if (status.state === 'idp_configured') {
         void navigate({ to: '/setup/owner' })
       } else if (status.state === 'owner_created') {
         void navigate({ to: '/setup/complete' })
@@ -134,11 +127,7 @@ function BootstrapTokenStep() {
         setSessionToken(res.session_token)
         setSessionExpiresAt(res.expires_at)
         setCurrentStep(1)
-        if (status?.runtime_mode === 'local') {
-          void navigate({ to: '/setup/owner' })
-          return
-        }
-        void navigate({ to: '/setup/oidc' })
+        void navigate({ to: '/setup/mode' })
       },
     })
   }

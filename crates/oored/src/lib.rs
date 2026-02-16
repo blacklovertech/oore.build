@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, State};
 use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::middleware as axum_mw;
 use axum::routing::{get, post};
@@ -37,12 +37,16 @@ use axum::{Json, Router};
 use metrics_exporter_prometheus::PrometheusHandle;
 use oore_contract::{
     ApiError, BootstrapTokenVerifyRequest, BootstrapTokenVerifyResponse, OidcConfigRecord,
-    OidcConfigureRequest, OidcConfigureResponse, OidcSecretRecord, OwnerRecord, RuntimeMode,
-    SetupCompleteResponse, SetupLocalOwnerCreateRequest, SetupLocalOwnerCreateResponse,
-    SetupOidcStartRequest, SetupOidcStartResponse, SetupOidcVerifyRequest, SetupOidcVerifyResponse,
-    SetupSessionRecord, SetupState, SetupStateFile, SetupStatus, SetupSummaryResponse,
+    OidcConfigureRequest, OidcConfigureResponse, OidcSecretRecord, OwnerRecord, RemoteAuthMode,
+    RuntimeMode, SetupCompleteResponse, SetupLocalOwnerCreateRequest,
+    SetupLocalOwnerCreateResponse, SetupOidcStartRequest, SetupOidcStartResponse,
+    SetupOidcVerifyRequest, SetupOidcVerifyResponse, SetupPreferencesRequest,
+    SetupPreferencesResponse, SetupSessionRecord, SetupState, SetupStateFile, SetupStatus,
+    SetupSummaryResponse, SetupTrustedProxyClaimOwnerResponse, SetupTrustedProxyConfigureRequest,
+    SetupTrustedProxyConfigureResponse,
 };
 use serde_json::json;
+use sqlx::Row;
 use tokio::sync::{Mutex, RwLock};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use zeroize::Zeroizing;
@@ -99,6 +103,10 @@ const SETUP_SESSION_TTL_SECS: i64 = 30 * 60;
 
 fn local_subject_for_email(email: &str) -> String {
     format!("local::{}", email.trim().to_lowercase())
+}
+
+fn trusted_proxy_subject_for_email(email: &str) -> String {
+    format!("warpgate::{}", email.trim().to_lowercase())
 }
 
 /// Maximum number of concurrent pending OIDC auth requests.
@@ -445,11 +453,22 @@ async fn setup_status(State(state): State<Arc<AppState>>) -> ApiResult<SetupStat
                 "Failed to load runtime mode",
             )
         })?;
+    let remote_auth_mode = crate::instance_settings::load_remote_auth_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load remote auth mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to load remote auth mode",
+            )
+        })?;
 
     Ok(Json(SetupStatus::from_state(
         sf.instance_id,
         sf.setup_state,
         runtime_mode,
+        remote_auth_mode,
     )))
 }
 
@@ -722,6 +741,366 @@ async fn configure_oidc(
     Ok(Json(OidcConfigureResponse {
         state: SetupState::IdpConfigured,
         discovered_issuer: issuer,
+        session_expires_at: sf.setup_session.as_ref().map(|s| s.expires_at),
+    }))
+}
+
+/// `POST /v1/setup/preferences`
+///
+/// Persists setup-time runtime/auth mode preferences while setup is still in
+/// progress. This endpoint is bootstrap-session gated.
+async fn setup_preferences(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<SetupPreferencesRequest>,
+) -> ApiResult<SetupPreferencesResponse> {
+    let store = state.store.lock().await;
+    let mut sf = store.load().await.map_err(|e| {
+        error!(error = %e, "failed to load setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to load setup state",
+        )
+    })?;
+
+    if sf.setup_state == SetupState::Ready {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "already_configured",
+            "Setup is already complete",
+        ));
+    }
+
+    if sf.setup_state == SetupState::OwnerCreated {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "invalid_state",
+            "Setup preferences cannot be changed after owner creation",
+        ));
+    }
+
+    validate_session(&mut sf, &headers)?;
+
+    let runtime_mode = req.runtime_mode;
+    let remote_auth_mode = if runtime_mode == RuntimeMode::Local {
+        RemoteAuthMode::Oidc
+    } else {
+        req.remote_auth_mode.unwrap_or(RemoteAuthMode::Oidc)
+    };
+
+    let now = now_unix();
+    sqlx::query(
+        "INSERT INTO instance_preferences (id, key_storage_mode, runtime_mode, remote_auth_mode, updated_by, created_at, updated_at)
+         VALUES (1, 'file', ?1, ?2, NULL, ?3, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+            key_storage_mode = excluded.key_storage_mode,
+            runtime_mode = excluded.runtime_mode,
+            remote_auth_mode = excluded.remote_auth_mode,
+            updated_at = excluded.updated_at",
+    )
+    .bind(runtime_mode.to_string())
+    .bind(remote_auth_mode.to_string())
+    .bind(now)
+    .execute(store.pool())
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to persist setup preferences");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save setup preferences",
+        )
+    })?;
+
+    // Persist bumped setup session expiry from validate_session.
+    sf.updated_at = now;
+    store.save(&sf).await.map_err(|e| {
+        error!(error = %e, "failed to save setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save setup state",
+        )
+    })?;
+
+    Ok(Json(SetupPreferencesResponse {
+        runtime_mode,
+        remote_auth_mode,
+        session_expires_at: sf.setup_session.as_ref().map(|s| s.expires_at),
+    }))
+}
+
+/// `POST /v1/setup/trusted-proxy/configure`
+///
+/// Configures trusted proxy runtime auth during setup and marks auth as
+/// configured (`setup_state = IdpConfigured`).
+async fn setup_trusted_proxy_configure(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<SetupTrustedProxyConfigureRequest>,
+) -> ApiResult<SetupTrustedProxyConfigureResponse> {
+    let store = state.store.lock().await;
+    let mut sf = store.load().await.map_err(|e| {
+        error!(error = %e, "failed to load setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to load setup state",
+        )
+    })?;
+
+    if sf.setup_state == SetupState::Ready {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "already_configured",
+            "Setup is already complete",
+        ));
+    }
+
+    if sf.setup_state == SetupState::OwnerCreated {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "invalid_state",
+            "Trusted proxy settings cannot be changed after owner creation",
+        ));
+    }
+
+    validate_session(&mut sf, &headers)?;
+
+    let runtime_mode = crate::instance_settings::load_runtime_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load runtime mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine runtime mode",
+            )
+        })?;
+    let remote_auth_mode = crate::instance_settings::load_remote_auth_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load remote auth mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine remote auth mode",
+            )
+        })?;
+    if runtime_mode != RuntimeMode::Remote || remote_auth_mode != RemoteAuthMode::TrustedProxy {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "mode_restricted",
+            "Trusted proxy setup requires remote runtime with trusted_proxy auth mode",
+        ));
+    }
+
+    let user_email_header = req
+        .user_email_header
+        .as_deref()
+        .and_then(crate::instance_settings::normalize_header_name)
+        .unwrap_or_else(|| {
+            crate::instance_settings::DEFAULT_TRUSTED_PROXY_EMAIL_HEADER.to_string()
+        });
+    let trusted_proxy_cidrs =
+        crate::instance_settings::normalize_requested_trusted_proxy_cidrs(req.trusted_proxy_cidrs)?;
+    let trusted_proxy_cidrs_json = serde_json::to_string(&trusted_proxy_cidrs).map_err(|e| {
+        error!(error = %e, "failed to serialize trusted proxy cidrs");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save trusted proxy settings",
+        )
+    })?;
+
+    let encrypted_shared_secret = if let Some(secret) = req.shared_secret {
+        let trimmed = secret.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            if trimmed.len() > 1024 {
+                return Err(api_err(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_input",
+                    "shared_secret must be 1024 characters or fewer",
+                ));
+            }
+            Some(
+                crypto::encrypt(trimmed, &state.encryption_key).map_err(|e| {
+                    error!(error = %e, "failed to encrypt trusted proxy shared secret");
+                    api_err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "encryption_error",
+                        "Failed to save trusted proxy shared secret",
+                    )
+                })?,
+            )
+        }
+    } else {
+        None
+    };
+
+    let now = now_unix();
+    sqlx::query(
+        "INSERT INTO trusted_proxy_settings (id, user_email_header, trusted_proxy_cidrs_json, encrypted_shared_secret, updated_by, created_at, updated_at)
+         VALUES (1, ?1, ?2, ?3, NULL, ?4, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+            user_email_header = excluded.user_email_header,
+            trusted_proxy_cidrs_json = excluded.trusted_proxy_cidrs_json,
+            encrypted_shared_secret = excluded.encrypted_shared_secret,
+            updated_at = excluded.updated_at",
+    )
+    .bind(&user_email_header)
+    .bind(&trusted_proxy_cidrs_json)
+    .bind(encrypted_shared_secret.clone())
+    .bind(now)
+    .execute(store.pool())
+    .await
+    .map_err(|e| {
+        error!(error = %e, "failed to persist trusted proxy setup settings");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save trusted proxy settings",
+        )
+    })?;
+
+    sf.setup_state = SetupState::IdpConfigured;
+    sf.updated_at = now;
+    store.save(&sf).await.map_err(|e| {
+        error!(error = %e, "failed to save setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save setup state",
+        )
+    })?;
+
+    Ok(Json(SetupTrustedProxyConfigureResponse {
+        state: sf.setup_state,
+        has_shared_secret: encrypted_shared_secret.is_some(),
+        configured_at: now,
+        session_expires_at: sf.setup_session.as_ref().map(|s| s.expires_at),
+    }))
+}
+
+/// `POST /v1/setup/owner/claim-trusted-proxy`
+///
+/// Creates the owner from trusted proxy identity headers.
+async fn setup_owner_claim_trusted_proxy(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> ApiResult<SetupTrustedProxyClaimOwnerResponse> {
+    let store = state.store.lock().await;
+    let mut sf = store.load().await.map_err(|e| {
+        error!(error = %e, "failed to load setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to load setup state",
+        )
+    })?;
+
+    if sf.setup_state == SetupState::Ready {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "already_configured",
+            "Setup is already complete",
+        ));
+    }
+
+    if sf.setup_state != SetupState::IdpConfigured {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "invalid_state",
+            format!(
+                "Trusted proxy owner claim requires idp_configured state, current: {}",
+                sf.setup_state
+            ),
+        ));
+    }
+
+    validate_session(&mut sf, &headers)?;
+
+    let runtime_mode = crate::instance_settings::load_runtime_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load runtime mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine runtime mode",
+            )
+        })?;
+    let remote_auth_mode = crate::instance_settings::load_remote_auth_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load remote auth mode");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine remote auth mode",
+            )
+        })?;
+    if runtime_mode != RuntimeMode::Remote || remote_auth_mode != RemoteAuthMode::TrustedProxy {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "mode_restricted",
+            "Trusted proxy owner claim is only available in remote trusted proxy mode",
+        ));
+    }
+
+    let trusted_proxy_settings =
+        crate::instance_settings::load_effective_trusted_proxy_settings(store.pool())
+            .await
+            .map_err(|e| {
+                error!(error = %e, "failed to load trusted proxy settings");
+                api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    "Failed to load trusted proxy settings",
+                )
+            })?;
+    if !trusted_proxy_settings.configured {
+        return Err(api_err(
+            StatusCode::CONFLICT,
+            "trusted_proxy_not_configured",
+            "Configure trusted proxy settings before claiming owner identity",
+        ));
+    }
+    if !crate::instance_settings::is_trusted_proxy_peer(peer_addr.ip(), &trusted_proxy_settings) {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "trusted_proxy_peer_not_allowed",
+            "Trusted proxy owner claim must come from an allowlisted proxy peer",
+        ));
+    }
+    let email =
+        crate::instance_settings::extract_trusted_proxy_email(&headers, &trusted_proxy_settings)?;
+
+    let now = now_unix();
+    sf.owner = Some(OwnerRecord {
+        email: email.clone(),
+        oidc_subject: Some(trusted_proxy_subject_for_email(&email)),
+        created_at: now,
+    });
+    sf.setup_state = SetupState::OwnerCreated;
+    sf.updated_at = now;
+
+    store.save(&sf).await.map_err(|e| {
+        error!(error = %e, "failed to save setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save setup state",
+        )
+    })?;
+
+    Ok(Json(SetupTrustedProxyClaimOwnerResponse {
+        state: sf.setup_state,
+        owner_email: email,
         session_expires_at: sf.setup_session.as_ref().map(|s| s.expires_at),
     }))
 }
@@ -1292,6 +1671,73 @@ async fn complete_setup(
 
     validate_session(&mut sf, &headers)?;
 
+    let runtime_mode = crate::instance_settings::load_runtime_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load runtime mode for setup completion");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine runtime mode",
+            )
+        })?;
+    let remote_auth_mode = crate::instance_settings::load_remote_auth_mode(store.pool())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to load remote auth mode for setup completion");
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                "Failed to determine remote auth mode",
+            )
+        })?;
+
+    if runtime_mode == RuntimeMode::Remote {
+        match remote_auth_mode {
+            RemoteAuthMode::Oidc => {
+                if sf.oidc_config.is_none() {
+                    return Err(api_err(
+                        StatusCode::CONFLICT,
+                        "remote_auth_not_configured",
+                        "Remote OIDC authentication is not configured",
+                    ));
+                }
+            }
+            RemoteAuthMode::TrustedProxy => {
+                let row = sqlx::query(
+                    "SELECT user_email_header FROM trusted_proxy_settings WHERE id = 1",
+                )
+                .fetch_optional(store.pool())
+                .await
+                .map_err(|e| {
+                    error!(error = %e, "failed to load trusted proxy settings for setup completion");
+                    api_err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "store_error",
+                        "Failed to load trusted proxy settings",
+                    )
+                })?;
+                let Some(row) = row else {
+                    return Err(api_err(
+                        StatusCode::CONFLICT,
+                        "remote_auth_not_configured",
+                        "Trusted proxy authentication is not configured",
+                    ));
+                };
+                let header_value: String = row.try_get("user_email_header").unwrap_or_else(|_| {
+                    crate::instance_settings::DEFAULT_TRUSTED_PROXY_EMAIL_HEADER.to_string()
+                });
+                if crate::instance_settings::normalize_header_name(&header_value).is_none() {
+                    return Err(api_err(
+                        StatusCode::CONFLICT,
+                        "trusted_proxy_config_invalid",
+                        "Trusted proxy email header configuration is invalid",
+                    ));
+                }
+            }
+        }
+    }
+
     let now = now_unix();
     if let Some(ref mut owner) = sf.owner {
         if owner.oidc_subject.is_none() {
@@ -1571,9 +2017,18 @@ async fn build_router_inner(
             "/v1/setup/bootstrap-token/verify",
             post(verify_bootstrap_token),
         )
+        .route("/v1/setup/preferences", post(setup_preferences))
         .route("/v1/setup/oidc/configure", post(configure_oidc))
+        .route(
+            "/v1/setup/trusted-proxy/configure",
+            post(setup_trusted_proxy_configure),
+        )
         .route("/v1/setup/owner/start-oidc", post(setup_oidc_start))
         .route("/v1/setup/owner/verify-oidc", post(setup_oidc_verify))
+        .route(
+            "/v1/setup/owner/claim-trusted-proxy",
+            post(setup_owner_claim_trusted_proxy),
+        )
         .route(
             "/v1/setup/local-owner/create",
             post(setup_local_owner_create),
@@ -1584,6 +2039,10 @@ async fn build_router_inner(
         .route("/v1/auth/oidc/start", get(auth::oidc_start))
         .route("/v1/auth/oidc/callback", post(auth::oidc_callback))
         .route("/v1/auth/local/login", post(auth::local_login))
+        .route(
+            "/v1/auth/trusted-proxy/login",
+            post(auth::trusted_proxy_login),
+        )
         .route("/v1/auth/logout", post(auth::logout))
         // User management endpoints
         .route("/v1/users/me", get(users::get_me))
@@ -1613,6 +2072,11 @@ async fn build_router_inner(
             "/v1/settings/external-access/network",
             get(instance_settings::get_external_access_network_settings)
                 .put(instance_settings::update_external_access_network_settings),
+        )
+        .route(
+            "/v1/settings/external-access/trusted-proxy",
+            get(instance_settings::get_external_access_trusted_proxy_settings)
+                .put(instance_settings::update_external_access_trusted_proxy_settings),
         )
         .route(
             "/v1/settings/external-access/preflight",

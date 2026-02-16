@@ -8,7 +8,12 @@ import AddInstanceDialog from '@/components/AddInstanceDialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { ApiClientError, getSetupStatus, localLogin } from '@/lib/api'
+import {
+  ApiClientError,
+  getSetupStatus,
+  localLogin,
+  trustedProxyLogin,
+} from '@/lib/api'
 import {
   getConnectivityIssue,
   isHostedUiOrigin,
@@ -19,6 +24,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { getLastAuthMetaForInstance, useAuthStore } from '@/stores/auth-store'
 import { useActiveInstance, useInstanceStore } from '@/stores/instance-store'
 import { PageMeta } from '@/lib/seo'
+import { resolveLoginFlow } from '@/lib/login-flow'
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
@@ -39,8 +45,12 @@ function formatLastAuthTime(epochSeconds: number): string {
   }).format(epochSeconds * 1000)
 }
 
-function formatAuthMethodLabel(method: 'oidc' | 'local'): string {
-  return method === 'local' ? 'Local Only' : 'OIDC'
+function formatAuthMethodLabel(
+  method: 'oidc' | 'local' | 'trusted_proxy',
+): string {
+  if (method === 'local') return 'Local Only'
+  if (method === 'trusted_proxy') return 'Trusted Proxy'
+  return 'OIDC'
 }
 
 function isLoopbackHostname(hostname: string): boolean {
@@ -76,6 +86,9 @@ function LoginPage() {
   const [showAddInstance, setShowAddInstance] = useState(false)
   const [loading, setLoading] = useState(false)
   const [runtimeMode, setRuntimeMode] = useState<'local' | 'remote' | null>(null)
+  const [remoteAuthMode, setRemoteAuthMode] = useState<
+    'oidc' | 'trusted_proxy' | null
+  >(null)
   const [localEmail, setLocalEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [connectivityIssue, setConnectivityIssue] =
@@ -124,11 +137,13 @@ function LoginPage() {
       .then((status) => {
         if (!canceled) {
           setRuntimeMode(status.runtime_mode)
+          setRemoteAuthMode(status.remote_auth_mode)
         }
       })
       .catch(() => {
         if (!canceled) {
           setRuntimeMode(null)
+          setRemoteAuthMode(null)
         }
       })
 
@@ -164,6 +179,7 @@ function LoginPage() {
         return
       }
       setRuntimeMode(status.runtime_mode)
+      setRemoteAuthMode(status.remote_auth_mode)
 
       const localUi = isLoopbackHostname(window.location.hostname)
       const localBackend = isLoopbackHostname(resolveBackendHostname(instance.url))
@@ -176,7 +192,9 @@ function LoginPage() {
         return
       }
 
-      if (canUseLoopbackLocalLogin) {
+      const loginFlow = resolveLoginFlow(status, canUseLoopbackLocalLogin)
+
+      if (loginFlow === 'local') {
         const response = await localLogin(instance.url, {
           email: localEmail.trim() || undefined,
         })
@@ -194,6 +212,28 @@ function LoginPage() {
             avatar_url: response.user.avatar_url,
           },
           'local',
+        )
+        setLoading(false)
+        void navigate({ to: '/' })
+        return
+      }
+
+      if (loginFlow === 'trusted_proxy') {
+        const response = await trustedProxyLogin(instance.url)
+        if (!response.user.user_id || !response.user.role) {
+          throw new Error('Incomplete user profile received from server')
+        }
+        setAuth(
+          response.session_token,
+          response.expires_at,
+          {
+            email: response.user.email,
+            oidc_subject: response.user.oidc_subject,
+            user_id: response.user.user_id,
+            role: response.user.role,
+            avatar_url: response.user.avatar_url,
+          },
+          'trusted_proxy',
         )
         setLoading(false)
         void navigate({ to: '/' })
@@ -253,6 +293,18 @@ function LoginPage() {
           setError(
             'External Access preflight checks are failing. Resolve setup and Preferences readiness checks first.',
           )
+        } else if (e.code === 'trusted_proxy_peer_not_allowed') {
+          setError(
+            'Trusted proxy login request did not come from an allowlisted proxy peer.',
+          )
+        } else if (e.code === 'trusted_proxy_identity_missing') {
+          setError(
+            'Trusted proxy identity header is missing. Check Warpgate header forwarding.',
+          )
+        } else if (e.code === 'trusted_proxy_identity_invalid') {
+          setError(
+            'Trusted proxy identity header must contain an email address.',
+          )
         } else {
           setError(e.message)
         }
@@ -298,7 +350,9 @@ function LoginPage() {
                   ? 'Local Only'
                   : localLoginAvailable
                     ? 'Local (loopback)'
-                    : 'OIDC'}
+                    : remoteAuthMode === 'trusted_proxy'
+                      ? 'Trusted Proxy'
+                      : 'OIDC'}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {lastAuthMeta
@@ -388,7 +442,9 @@ function LoginPage() {
                   ? localModeNetworkBlocked
                     ? 'Enable External Access first'
                     : 'Sign in locally'
-                  : 'Sign in with OIDC'
+                  : remoteAuthMode === 'trusted_proxy'
+                    ? 'Sign in via Trusted Proxy'
+                    : 'Sign in with OIDC'
               )}
             </Button>
           </CardContent>
