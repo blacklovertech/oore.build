@@ -614,7 +614,11 @@ steps:
             print("", end="")
             sys.exit(0)
 
-        want = "_" + os_id + "_" + arch_id + ".tar.gz"
+        ext = ".tar.gz"
+        if os_id == "macOS":
+            ext = ".zip"
+
+        want = "_" + os_id + "_" + arch_id + ext
         for a in data.get("assets", []):
             name = a.get("name") or ""
             if name.endswith(want):
@@ -627,8 +631,18 @@ steps:
           exit 1
         fi
 
-        curl -fsSL -L -o "$tmp/gh.tgz" "$asset_url"
-        tar -xzf "$tmp/gh.tgz" -C "$tmp"
+        archive="$tmp/gh.asset"
+        case "$asset_url" in
+          *.zip) archive="$tmp/gh.zip" ;;
+          *.tar.gz) archive="$tmp/gh.tgz" ;;
+          *) echo "Unknown gh asset URL: $asset_url" >&2; exit 1 ;;
+        esac
+        curl -fsSL -L -o "$archive" "$asset_url"
+        if echo "$archive" | grep -q '\\.zip$'; then
+          unzip -q "$archive" -d "$tmp"
+        else
+          tar -xzf "$archive" -C "$tmp"
+        fi
         ghbin="$(find "$tmp" -type f -path '*/bin/gh' | head -n1)"
         "$ghbin" --version
 
