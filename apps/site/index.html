@@ -61,7 +61,8 @@
         --text: #fafafa;
         --text-soft: #d4d4d4;
         --text-muted: #737373;
-        --text-dim: #525252;
+        /* Keep "dim" copy accessible on --bg (Lighthouse contrast). */
+        --text-dim: #8a8a8a;
         --amber: #f59e0b;
         --warning-bg: rgba(234, 179, 8, 0.1);
         --warning-border: rgba(234, 179, 8, 0.2);
@@ -276,7 +277,7 @@
       }
 
       footer a {
-        color: #737373;
+        color: var(--text-dim);
         text-decoration: none;
       }
 
@@ -382,6 +383,7 @@ curl http://127.0.0.1:8787/healthz
           <div class="links">
             <a href="https://github.com/devaryakjha/oore.build">GitHub</a>
             <a href="https://ci.oore.build">Hosted UI</a>
+            <a href="https://demo.oore.build">Demo</a>
             <a href="https://docs.oore.build">Docs</a>
           </div>
         </section>
