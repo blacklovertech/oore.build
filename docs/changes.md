@@ -71,3 +71,5 @@ Rules:
   - OOR-61: https://linear.app/oorebuild/issue/OOR-61/beta-readiness-fix-linttest-gates-webdocscli
 - Rust hardening: fixed all `cargo clippy --workspace --all-targets --all-features -- -D warnings` findings and aligned formatting (`cargo fmt`).
   - OOR-61: https://linear.app/oorebuild/issue/OOR-61/beta-readiness-fix-linttest-gates-webdocscli
+- Tooling: expanded `make validate` to include lint, tests, `cargo fmt --check`, and strict clippy (`-D warnings`).
+  - OOR-61: https://linear.app/oorebuild/issue/OOR-61/beta-readiness-fix-linttest-gates-webdocscli
