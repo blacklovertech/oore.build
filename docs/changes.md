@@ -85,3 +85,5 @@ Rules:
   - OOR-63: https://linear.app/oorebuild/issue/OOR-63/p0-fix-requests-not-going-to-mock-service-worker-for-non-initial-pages
 - Public alpha release docs: added a first-time onboarding “Public Alpha (v0.1.x)” page and updated docs homepage wording to reflect remote-vs-loopback auth reality.
   - OOR-62: https://linear.app/oorebuild/issue/OOR-62/public-alpha-release-messaging-onboarding-checklist-docs
+- Site: improved landing page contrast for secondary text and added a Demo link.
+  - OOR-67: https://linear.app/oorebuild/issue/OOR-67/p0-improve-landing-page
