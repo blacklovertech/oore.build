@@ -1135,7 +1135,9 @@ struct WorkspaceCleanup {
 
 impl Drop for WorkspaceCleanup {
     fn drop(&mut self) {
-        if self.path.exists() && let Err(e) = fs::remove_dir_all(&self.path) {
+        if self.path.exists()
+            && let Err(e) = fs::remove_dir_all(&self.path)
+        {
             eprintln!(
                 "Warning: failed to clean up workspace {}: {}",
                 self.path.display(),
