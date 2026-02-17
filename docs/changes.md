@@ -73,3 +73,5 @@ Rules:
   - OOR-61: https://linear.app/oorebuild/issue/OOR-61/beta-readiness-fix-linttest-gates-webdocscli
 - Tooling: expanded `make validate` to include lint, tests, `cargo fmt --check`, and strict clippy (`-D warnings`).
   - OOR-61: https://linear.app/oorebuild/issue/OOR-61/beta-readiness-fix-linttest-gates-webdocscli
+- Docs: corrected production deployment prerequisites (OIDC default vs `trusted_proxy`) and removed a misleading landing-page claim about launchd service support.
+  - OOR-61: https://linear.app/oorebuild/issue/OOR-61/beta-readiness-fix-linttest-gates-webdocscli
