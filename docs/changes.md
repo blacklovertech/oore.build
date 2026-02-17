@@ -59,3 +59,11 @@ Rules:
   - OOR-36: https://linear.app/oorebuild/issue/OOR-36/replace-scripts-makefile-releasedeploy-tooling-with-woodpecker-driven
 - Ensured Pages deploys are non-interactive (wrangler `--commit-dirty=true`) and added `oore-demo` Pages deployment to the tag release pipeline.
   - OOR-36: https://linear.app/oorebuild/issue/OOR-36/replace-scripts-makefile-releasedeploy-tooling-with-woodpecker-driven
+
+## 2026-02-17
+
+- Release readiness hardening: fixed lint/test gates so `make lint-*`, `make test-*`, and `cargo test --workspace` pass cleanly.
+  - OOR-61: https://linear.app/oorebuild/issue/OOR-61/beta-readiness-fix-linttest-gates-webdocscli
+  - Apps: added missing `eslint` dependency to `apps/docs-site`, ignored generated VitePress artifacts in lint, and made docs tests pass when no test files exist (`vitest --passWithNoTests`).
+  - Web: resolved TypeScript lint failures (`no-unnecessary-condition`) and ignored a non-TS tool script in eslint config.
+  - CLI: updated `oore` status CLI test to assert the current (implemented) behavior when the daemon is unreachable.
