@@ -106,3 +106,5 @@ Rules:
   - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha
 - Launch operations/release hygiene: added `.github/release.yml` changelog categories to surface breaking changes and migration notes, and moved the alpha launch-day runbook to an internal Linear document (not public docs site): https://linear.app/oorebuild/document/alpha-launch-day-runbook-internal-19638f05ed00
   - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha
+- Installer prerelease-channel fix: corrected portable pattern matching in `scripts/install.sh` so `OORE_CHANNEL=beta` and `OORE_CHANNEL=alpha` resolve latest prerelease tags correctly on macOS shells (`sed`/`grep` portability).
+  - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha
