@@ -1,0 +1,9 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability report
+    url: https://github.com/devaryakjha/oore.build/security/advisories/new
+    about: Report security issues privately.
+  - name: Public alpha onboarding guide
+    url: https://docs.oore.build/getting-started/public-alpha
+    about: Follow the quickest path for first-time setup.
+

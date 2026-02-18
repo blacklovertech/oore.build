@@ -98,3 +98,5 @@ Rules:
 - Site performance follow-up for the landing page hero preview: added responsive WebP screenshot variants, prioritized LCP image discovery (`fetchpriority` + preload), and deferred Cloudflare analytics bootstrap until post-load idle time.
   - OOR-68: https://linear.app/oorebuild/issue/OOR-68/p0-improve-landing-page
   - Feature doc: https://linear.app/oorebuild/document/feature-landing-page-mission-brief-cloudflare-wa-c6f5c4bb91e4
+- Community/repo launch readiness hardening: added `CODE_OF_CONDUCT.md`, `SUPPORT.md`, `.github/CODEOWNERS`, `.github/FUNDING.yml`, and new issue templates for feature requests, alpha test reports, and docs feedback.
+  - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha

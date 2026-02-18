@@ -156,7 +156,7 @@ Major/minor bumps are done by updating `Cargo.toml` `workspace.package.version` 
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [SUPPORT.md](SUPPORT.md).
 
 ## License
 
