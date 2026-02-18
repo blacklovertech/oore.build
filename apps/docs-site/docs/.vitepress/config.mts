@@ -174,6 +174,7 @@ export default defineConfig({
           items: [
             { text: "What is oore.build?", link: "/getting-started/" },
             { text: "Public Alpha (v0.1.x)", link: "/getting-started/public-alpha" },
+            { text: "Known Alpha Limitations", link: "/getting-started/known-limitations" },
             { text: "Prerequisites", link: "/getting-started/prerequisites" },
             { text: "Install", link: "/getting-started/install" },
             {

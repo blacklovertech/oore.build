@@ -100,3 +100,9 @@ Rules:
   - Feature doc: https://linear.app/oorebuild/document/feature-landing-page-mission-brief-cloudflare-wa-c6f5c4bb91e4
 - Community/repo launch readiness hardening: added `CODE_OF_CONDUCT.md`, `SUPPORT.md`, `.github/CODEOWNERS`, `.github/FUNDING.yml`, and new issue templates for feature requests, alpha test reports, and docs feedback.
   - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha
+- Docs/launch readiness: added a public `Known Alpha Limitations (v0.1.x)` page and linked it from the Getting Started flow and README quick-start references.
+  - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha
+- Community onboarding follow-up: enabled GitHub Discussions, seeded 10 starter `good first issue` + `help wanted` tickets with acceptance criteria, and updated support/contact paths to route setup questions to Discussions.
+  - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha
+- Launch operations/release hygiene: added `.github/release.yml` changelog categories to surface breaking changes and migration notes, and moved the alpha launch-day runbook to an internal Linear document (not public docs site): https://linear.app/oorebuild/document/alpha-launch-day-runbook-internal-19638f05ed00
+  - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha

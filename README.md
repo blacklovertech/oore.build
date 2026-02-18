@@ -56,6 +56,7 @@ curl -fsSL https://oore.build/install | bash
 Public alpha onboarding guide (common first-time blockers + fastest paths):
 
 - [Public alpha onboarding guide](https://docs.oore.build/getting-started/public-alpha)
+- [Known alpha limitations (v0.1.x)](https://docs.oore.build/getting-started/known-limitations)
 - [Live demo (no install)](https://demo.oore.build)
 
 Install prerelease channels:

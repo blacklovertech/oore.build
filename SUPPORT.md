@@ -4,9 +4,11 @@ Use this guide to choose the right support path for Oore CI.
 
 ## Questions and setup help
 
-- Open a GitHub issue with the `question` label:
+- Prefer GitHub Discussions:
+  - https://github.com/devaryakjha/oore.build/discussions
+- If something is actionable/trackable, open a GitHub issue:
   - https://github.com/devaryakjha/oore.build/issues
-- Include your environment and what you already tried.
+- Include your environment and what you already tried in either case.
 
 ## Bug reports
 
