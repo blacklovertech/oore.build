@@ -98,13 +98,15 @@ make dev-web          # Local web UI (http://localhost:3000)
 make clean-dev-state  # Remove isolated dev daemon data (~/.oore/dev.noindex)
 ```
 
-`make dev-fresh-setup` starts a Cloudflare quick tunnel by default and prints the assigned public URL.  
-Disable it with `OORE_DEV_ENABLE_TUNNEL=0 make dev-fresh-setup`.
-It runs token-only setup by default for hosted UI E2E.  
-Use `OORE_DEV_SETUP_MODE=cli make dev-fresh-setup` only when you explicitly want CLI-driven OIDC setup.
-Dev state uses a `.noindex` directory and writes `.metadata_never_index` to reduce Spotlight indexing load on macOS.
-`make clean-dev-state` also stops the matching dev daemon and Cloudflare tunnel for the configured dev URL/port before deleting state.
-`make run-daemon*` targets use an isolated dev data root (`~/.oore/dev.noindex`) so local source runs do not collide with production daemon data.
+Notes:
+
+- `make dev-fresh-setup` starts a Cloudflare quick tunnel by default and prints the assigned public URL.
+- Disable the tunnel with `OORE_DEV_ENABLE_TUNNEL=0 make dev-fresh-setup`.
+- `make dev-fresh-setup` runs token-only setup by default for hosted UI E2E.
+- Use `OORE_DEV_SETUP_MODE=cli make dev-fresh-setup` only when you explicitly want CLI-driven OIDC setup.
+- Dev state uses a `.noindex` directory and writes `.metadata_never_index` to reduce Spotlight indexing load on macOS.
+- `make clean-dev-state` also stops the matching dev daemon and Cloudflare tunnel for the configured dev URL/port before deleting state.
+- `make run-daemon*` targets use an isolated dev data root (`~/.oore/dev.noindex`) so local source runs do not collide with production daemon data.
 
 ## Project Structure
 
