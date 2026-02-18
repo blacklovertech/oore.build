@@ -92,3 +92,9 @@ Rules:
 - OOR-68: Site: redesign landing page (product-forward hero w/ demo UI screenshots) and add optional Cloudflare Web Analytics (page views only).
   - https://linear.app/oorebuild/issue/OOR-68/p0-improve-landing-page
   - Feature doc: https://linear.app/oorebuild/document/feature-landing-page-mission-brief-cloudflare-wa-c6f5c4bb91e4
+
+## 2026-02-18
+
+- Site performance follow-up for the landing page hero preview: added responsive WebP screenshot variants, prioritized LCP image discovery (`fetchpriority` + preload), and deferred Cloudflare analytics bootstrap until post-load idle time.
+  - OOR-68: https://linear.app/oorebuild/issue/OOR-68/p0-improve-landing-page
+  - Feature doc: https://linear.app/oorebuild/document/feature-landing-page-mission-brief-cloudflare-wa-c6f5c4bb91e4

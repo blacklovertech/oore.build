@@ -13,6 +13,10 @@
   <link rel="canonical" href="https://oore.build/" />
   <link rel="alternate" href="https://oore.build/" hreflang="en" />
   <link rel="alternate" href="https://oore.build/" hreflang="x-default" />
+  <link rel="preload" href="/fonts/google-sans-flex-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" as="image" href="/product/demo-dashboard-1200.webp"
+    imagesrcset="/product/demo-dashboard-720.webp 720w, /product/demo-dashboard-1200.webp 1200w"
+    imagesizes="(max-width: 900px) calc(100vw - 64px), 609px" fetchpriority="high" />
   <!-- Open Graph -->
   <meta property="og:title" content="Oore CI | Flutter CI on macOS" />
   <meta property="og:description"
@@ -55,17 +59,32 @@
         "author": { "@type": "Organization", "name": "Oore CI" }
       }
     </script>
-  <script type="module">
+  <script>
     ; (() => {
-      const token = import.meta.env.VITE_CF_WEB_ANALYTICS_TOKEN
+      const token = '%VITE_CF_WEB_ANALYTICS_TOKEN%'
       if (!token) return
+      if (token.includes('VITE_CF_WEB_ANALYTICS_TOKEN')) return
       if (navigator.doNotTrack === '1') return
 
-      const script = document.createElement('script')
-      script.defer = true
-      script.src = 'https://static.cloudflareinsights.com/beacon.min.js'
-      script.dataset.cfBeacon = JSON.stringify({ token })
-      document.head.appendChild(script)
+      const loadAnalytics = () => {
+        const script = document.createElement('script')
+        script.defer = true
+        script.src = 'https://static.cloudflareinsights.com/beacon.min.js'
+        script.dataset.cfBeacon = JSON.stringify({ token })
+        document.head.appendChild(script)
+      }
+
+      window.addEventListener(
+        'load',
+        () => {
+          if ('requestIdleCallback' in window) {
+            window.requestIdleCallback(loadAnalytics, { timeout: 3000 })
+            return
+          }
+          window.setTimeout(loadAnalytics, 1200)
+        },
+        { once: true },
+      )
     })()
   </script>
   <style>
@@ -978,8 +997,12 @@
                 <div class="shot-stage" id="shot-panel" role="tabpanel" aria-labelledby="tab-dashboard" tabindex="0"
                   data-active="dashboard" aria-label="Oore CI UI screenshots">
                   <img class="shot" src="/product/demo-dashboard.png" data-shot="dashboard"
-                    alt="Oore CI demo dashboard screenshot" decoding="async" />
+                    srcset="/product/demo-dashboard-720.webp 720w, /product/demo-dashboard-1200.webp 1200w"
+                    sizes="(max-width: 900px) calc(100vw - 64px), 609px" width="1440" height="900"
+                    alt="Oore CI demo dashboard screenshot" loading="eager" fetchpriority="high" decoding="async" />
                   <img class="shot" src="/product/demo-builds.png" data-shot="builds"
+                    srcset="/product/demo-builds-720.webp 720w, /product/demo-builds-1200.webp 1200w"
+                    sizes="(max-width: 900px) calc(100vw - 64px), 609px" width="1440" height="900"
                     alt="Oore CI demo builds list screenshot" decoding="async" loading="lazy" />
                 </div>
                 <span class="shot-open" aria-hidden="true">Open demo</span>
