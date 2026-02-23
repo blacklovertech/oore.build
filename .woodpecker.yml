@@ -521,6 +521,9 @@ steps:
         export PAGES_PROJECT_WEB="oore-ci"
         export PAGES_PROJECT_DEMO="oore-demo"
         export PAGES_BRANCH="$pages_branch"
+        export PAGES_COMMIT_HASH="$(git rev-list -n 1 "$tag")"
+        export PAGES_COMMIT_MESSAGE="$tag"
+        export WRANGLER="./node_modules/.bin/wrangler"
 
         echo "Deploy channel=$channel branch=$PAGES_BRANCH site=$PAGES_PROJECT_SITE docs=$PAGES_PROJECT_DOCS web=$PAGES_PROJECT_WEB"
       - ulimit -n 8192
@@ -540,6 +543,7 @@ steps:
       # Demo build intentionally overwrites apps/web/dist.
       - make build-demo
       - make deploy-demo-only
+      - bash tools/verify-pages-deploy.sh
 
   - name: release-generate-notes
     image: bash

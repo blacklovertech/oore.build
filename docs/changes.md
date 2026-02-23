@@ -108,3 +108,19 @@ Rules:
   - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha
 - Installer prerelease-channel fix: corrected portable pattern matching in `scripts/install.sh` so `OORE_CHANNEL=beta` and `OORE_CHANNEL=alpha` resolve latest prerelease tags correctly on macOS shells (`sed`/`grep` portability).
   - OOR-69: https://linear.app/oorebuild/issue/OOR-69/initial-release-checklist-public-alpha
+
+## 2026-02-22
+
+- OOR-5 runner checkout reliability hardening: branch-based and commit-SHA checkout flows now guarantee recursive submodule sync/update (`git submodule sync --recursive` + `git submodule update --init --recursive`), and submodule failures are surfaced as explicit checkout-step hard failures.
+  - OOR-5: https://linear.app/oorebuild/issue/OOR-5
+- Added runner coverage for nested submodule checkout behavior and explicit failure-marker behavior using local fixture repositories.
+  - OOR-5: https://linear.app/oorebuild/issue/OOR-5
+- OOR-65 release reliability hardening: Pages deploy commands now pass commit metadata (`--commit-hash`, `--commit-message`), tag release pipeline now verifies all four Pages targets (`oore`, `oore-docs`, `oore-ci`, `oore-demo`) reached the expected branch/commit before success, and a deterministic local smoke gate (`make release-smoke`) was added.
+  - OOR-65: https://linear.app/oorebuild/issue/OOR-65
+  - Release channels doc: https://linear.app/oorebuild/document/release-channels-alpha-beta-stable-via-woodpecker-github-releases-993db297927a
+- Expanded `oore` operator CLI alpha contract: implemented `oore login` (token import/validation + local-mode login), implemented `oore config set/get` with strict key whitelist (`daemon_url`, `session_token`) and exit code `2` for unsupported keys, expanded authenticated `oore status` summary, and expanded `oore doctor` with signing diagnostics plus JSON output.
+  - V1 roadmap: https://linear.app/oorebuild/document/v1-implementation-roadmap-5e4fa12cdb04
+- Updated user-facing docs for new CLI behavior, release verification flow, and alpha feedback intake (including a strict issue-report checklist page).
+  - Docs index: https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda
+- Added a consolidated Linear feature doc for this post-alpha reliability tranche.
+  - Feature doc: https://linear.app/oorebuild/document/feature-post-alpha-reliability-tranche-2026-02-22-db79675a84e3

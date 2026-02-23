@@ -18,15 +18,19 @@ Use this flow with a dedicated macOS host (for example, a Mac mini) that runs Wo
 
 ## Workflow
 
-- Merge to `main`:
-  - CI bumps `workspace.package.version` (patch increment), commits, and creates a semver tag (for example `v0.2.1`).
-  - The bump commit includes `[CI SKIP]` to avoid re-trigger loops.
-- Tag push:
+- Merge to `alpha`:
+  - CI auto-cuts prerelease tags `vX.Y.Z-alpha.N`.
+- Merge to `beta`:
+  - CI auto-cuts prerelease tags `vX.Y.Z-beta.N`.
+- Merge to `stable`:
+  - CI auto-cuts stable tags `vX.Y.Z`.
+- Tag push (`v*`):
   - CI builds release artifacts for:
     - `aarch64-apple-darwin`
     - `x86_64-apple-darwin`
   - CI builds the web UI (`apps/web/dist`) and compiles `oore-web` for both macOS architectures.
-  - CI deploys Pages sites (web + docs + site) using `wrangler pages deploy`.
+  - CI deploys Pages sites (site + docs + web + demo) using `wrangler pages deploy`.
+  - CI verifies post-deploy state for all Pages targets using branch + commit-hash matching.
   - CI creates/updates a GitHub Release and uploads artifacts + checksums + release notes.
 
 ## Required Woodpecker Secrets
@@ -42,3 +46,10 @@ Set these secrets in Woodpecker (repo/org/global as appropriate):
 ## Notes
 
 The legacy webhook/poller/R2-based release automation is replaced by Woodpecker pipelines and GitHub Releases.
+
+Before promoting to `stable`, run:
+
+```bash
+make validate
+make release-smoke
+```
