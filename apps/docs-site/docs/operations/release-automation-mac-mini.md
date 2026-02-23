@@ -13,6 +13,8 @@ Use this flow with a dedicated macOS host (for example, a Mac mini) that runs Wo
 - Rust toolchain installed
 - Bun installed (for web asset build + `oore-web` executable compile)
 - Woodpecker server + agent running on the macOS host
+  - Pin to stable release line (`v3.13.0` as of Feb 23, 2026), not `dev`
+  - Use `plugin-git v2.8.1` (or newer stable) for clone behavior parity
 - Cloudflare token configured in Woodpecker secrets (for `wrangler pages deploy`)
 - GitHub token configured in Woodpecker secrets (for pushing tags and creating releases)
 
@@ -24,13 +26,16 @@ Use this flow with a dedicated macOS host (for example, a Mac mini) that runs Wo
   - CI auto-cuts prerelease tags `vX.Y.Z-beta.N`.
 - Merge to `stable`:
   - CI auto-cuts stable tags `vX.Y.Z`.
+- PR/push validation:
+  - CI installs dependencies and runs `make validate-ci` (full checks split into parallel lanes).
+  - CI lints `.woodpecker.yml` with pinned `woodpecker-cli` before running validation lanes.
 - Tag push (`v*`):
   - CI builds release artifacts for:
     - `aarch64-apple-darwin`
     - `x86_64-apple-darwin`
   - CI builds the web UI (`apps/web/dist`) and compiles `oore-web` for both macOS architectures.
-  - CI deploys Pages sites (site + docs + web + demo) using `wrangler pages deploy`.
-  - CI verifies post-deploy state for all Pages targets using branch + commit-hash matching.
+  - CI deploys Pages sites (site + docs + web in parallel, then demo) using `wrangler pages deploy`.
+  - CI verifies post-deploy state for all Pages targets using branch + commit-hash matching (strict hard-fail; parallel polling by default).
   - CI creates/updates a GitHub Release and uploads artifacts + checksums + release notes.
 
 ## Required Woodpecker Secrets
@@ -53,3 +58,9 @@ Before promoting to `stable`, run:
 make validate
 make release-smoke
 ```
+
+Release verification tuning knobs (optional):
+
+- `PAGES_VERIFY_MODE` (`parallel` default, `serial` fallback)
+- `PAGES_VERIFY_ATTEMPTS` (default `24`)
+- `PAGES_VERIFY_SLEEP_SECONDS` (default `5`)

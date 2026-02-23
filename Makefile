@@ -4,7 +4,7 @@
 		       fmt-rust fmt-rust-check clippy-rust test-rust-workspace lint test \
 		       cargo-check run-daemon run-daemon-debug run-daemon-release \
 		       run-runner register-runner run-cli doctor clean-dev-state dev-fresh-setup \
-		       docs-check ui-init install-local validate gen-openapi release-smoke \
+		       docs-check lint-woodpecker ui-init install-local validate validate-ci gen-openapi release-smoke \
 		       release-local release-cut
 
 RUNNER_DAEMON_URL ?= http://127.0.0.1:8787
@@ -172,6 +172,9 @@ gen-openapi:
 docs-check:
 	bun run docs:check
 
+lint-woodpecker:
+	bash tools/lint-woodpecker.sh .woodpecker.yml
+
 ui-init:
 	bun run ui:init
 
@@ -185,6 +188,9 @@ lint: lint-web lint-docs fmt-rust-check
 test: test-web test-docs test-rust-workspace
 
 validate: docs-check lint test clippy-rust build-web build-docs build-site cargo-check
+
+validate-ci:
+	bash tools/validate-ci.sh
 
 release-smoke:
 	bash tools/release-smoke.sh
