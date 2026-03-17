@@ -15,10 +15,12 @@ import {
   ArrowLeft02Icon,
   Home01Icon,
   RotateClockwiseIcon,
+  Search01Icon,
 } from '@hugeicons/core-free-icons'
 import type { ErrorComponentProps } from '@tanstack/react-router'
 
 import AppSidebar from '@/components/app-sidebar'
+const CommandPalette = lazy(() => import('@/components/command-palette'))
 import ConnectivityBanner from '@/components/connectivity-banner'
 import PageBreadcrumb from '@/components/page-breadcrumb'
 import { Button } from '@/components/ui/button'
@@ -28,7 +30,9 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
+import { Kbd } from '@/components/ui/kbd'
 import { Toaster } from '@/components/ui/sonner'
+import { useSessionMonitor } from '@/hooks/use-session-monitor'
 import { syncSetupStoreContext } from '@/lib/instance-context'
 import { queryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/stores/auth-store'
@@ -181,6 +185,8 @@ function RootLayout() {
     !!authToken &&
     !!authUser
 
+  useSessionMonitor()
+
   useEffect(() => {
     useSetupStore.getState().setInstanceContext(activeInstanceId)
     useAuthStore.getState().setInstanceContext(activeInstanceId)
@@ -215,6 +221,17 @@ function RootLayout() {
                   className="mr-2 h-4! self-auto!"
                 />
                 <PageBreadcrumb />
+                <div className="ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+                    className="inline-flex h-8 items-center gap-2 rounded-sm border bg-muted/50 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <HugeiconsIcon icon={Search01Icon} size={14} />
+                    <span className="hidden sm:inline">Search</span>
+                    <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
+                  </button>
+                </div>
               </header>
               <ConnectivityBanner />
               <div className="flex flex-1 flex-col bg-surface">
@@ -231,6 +248,11 @@ function RootLayout() {
           </div>
         )}
         <Toaster />
+        {showAppChrome ? (
+          <Suspense fallback={null}>
+            <CommandPalette />
+          </Suspense>
+        ) : null}
         {import.meta.env.VITE_DEMO_MODE === 'true' && (
           <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md">
             <span className="size-1.5 animate-pulse bg-primary" />

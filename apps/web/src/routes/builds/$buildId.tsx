@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
+  Copy01Icon,
   Download04Icon,
   File01Icon,
   GitBranchIcon,
@@ -99,6 +100,63 @@ function BuildDetailPage() {
       setLabel('/builds/$buildId', `Build #${data.build.build_number}`)
     }
   }, [data?.build.build_number, setLabel])
+
+  // ── Build notifications (title + browser Notification) ──
+  const prevStatusRef = useRef<string | undefined>(undefined)
+
+  useEffect(() => {
+    if (
+      typeof Notification !== 'undefined' &&
+      Notification.permission === 'default'
+    ) {
+      Notification.requestPermission()
+    }
+    return () => {
+      document.title = 'Oore CI'
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!data?.build) return
+
+    const { build_number, status, branch } = data.build
+
+    switch (status) {
+      case 'running':
+      case 'queued':
+        document.title = `\u23F3 Build #${build_number} | Oore CI`
+        break
+      case 'succeeded':
+        document.title = `\u2713 Build #${build_number} | Oore CI`
+        break
+      case 'failed':
+      case 'timed_out':
+      case 'expired':
+        document.title = `\u2717 Build #${build_number} | Oore CI`
+        break
+      case 'canceled':
+        document.title = `\u2298 Build #${build_number} | Oore CI`
+        break
+      default:
+        document.title = `Build #${build_number} | Oore CI`
+    }
+
+    const prevStatus = prevStatusRef.current
+    prevStatusRef.current = status
+
+    if (
+      prevStatus !== undefined &&
+      prevStatus !== status &&
+      isTerminal &&
+      document.hidden &&
+      typeof Notification !== 'undefined' &&
+      Notification.permission === 'granted'
+    ) {
+      new Notification(`Build #${build_number} ${status}`, {
+        body: `Branch: ${branch ?? 'n/a'}`,
+      })
+    }
+  }, [data?.build, isTerminal])
 
   // ── Log stream / fetch ───────────────────────────────────
 
@@ -255,6 +313,7 @@ function BuildDetailPage() {
           <ArtifactsPanel
             artifacts={artifactsQuery.data?.artifacts ?? []}
             isLoading={artifactsQuery.isLoading}
+            buildStatus={build.status}
           />
 
           <EventTimeline events={events} />
@@ -284,9 +343,11 @@ function BuildDetailPage() {
 function ArtifactsPanel({
   artifacts,
   isLoading,
+  buildStatus,
 }: {
   artifacts: Array<Artifact>
   isLoading: boolean
+  buildStatus: string
 }) {
   const downloadMutation = useArtifactDownloadLink()
 
@@ -297,6 +358,20 @@ function ArtifactsPanel({
       },
       onError: (err) => {
         toast.error(`Failed to get download link for ${name}: ${err.message}`)
+      },
+    })
+  }
+
+  function handleCopyLink(artifactId: string, name: string) {
+    downloadMutation.mutate(artifactId, {
+      onSuccess: (res) => {
+        void navigator.clipboard.writeText(res.download_url).then(
+          () => toast.success(`Download link copied for ${name}`),
+          () => toast.error('Failed to copy link'),
+        )
+      },
+      onError: (err) => {
+        toast.error(`Failed to get link for ${name}: ${err.message}`)
       },
     })
   }
@@ -321,7 +396,11 @@ function ArtifactsPanel({
             <Skeleton className="h-8 w-full" />
           </div>
         ) : !artifacts.length ? (
-          <p className="text-xs text-muted-foreground">No artifacts yet.</p>
+          <p className="text-xs text-muted-foreground">
+            {buildStatus === 'succeeded' || buildStatus === 'failed'
+              ? 'No artifacts were produced. Check that your pipeline has artifact patterns configured.'
+              : 'Artifacts will appear here once the build produces them.'}
+          </p>
         ) : (
           <div className="space-y-2">
             {artifacts.map((artifact) => (
@@ -347,15 +426,30 @@ function ArtifactsPanel({
                     </span>
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 shrink-0"
-                  onClick={() => handleDownload(artifact.id, artifact.name)}
-                  disabled={downloadMutation.isPending}
-                >
-                  <HugeiconsIcon icon={Download04Icon} size={14} />
-                </Button>
+                <div className="flex items-center gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 shrink-0"
+                    title="Copy download link"
+                    aria-label={`Copy link for ${artifact.name}`}
+                    onClick={() => handleCopyLink(artifact.id, artifact.name)}
+                    disabled={downloadMutation.isPending}
+                  >
+                    <HugeiconsIcon icon={Copy01Icon} size={14} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 shrink-0"
+                    title="Download"
+                    aria-label={`Download ${artifact.name}`}
+                    onClick={() => handleDownload(artifact.id, artifact.name)}
+                    disabled={downloadMutation.isPending}
+                  >
+                    <HugeiconsIcon icon={Download04Icon} size={14} />
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

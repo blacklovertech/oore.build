@@ -10,6 +10,37 @@ Rules:
 - Any code change under `apps/`, `crates/`, `tools/`, etc. must add an entry here.
 - Include a Linear issue/doc link for each entry.
 
+## 2026-03-17
+
+- UX journey audit — multi-persona frontend fixes across `apps/web`:
+  - Session expiry: added 5-minute warning toast + auto-redirect to login on expiry.
+  - Build notifications: `document.title` updates with status emoji + browser Notification API on terminal state.
+  - Build list: added status, branch, and project filter dropdowns + pagination integration.
+  - Onboarding: getting-started checklist on empty dashboard, role-based welcome banner on first login.
+  - Setup wizard: added mode descriptions, softened irreversible warning on complete step.
+  - Invitations: auto-copies instance URL to clipboard on invite with share prompt.
+  - Sidebar: added Documentation link (docs.oore.build).
+  - Artifacts: added copy-link button for sharing download URLs.
+  - Project detail: added "Latest successful build" shortcut on builds tab, permission-aware empty states.
+  - Pipeline form: added contextual help text for signing/triggers, clearer manual-only trigger explanation.
+  - Pipeline creation: added 5 template presets (Debug APK, Release Android, iOS+Android, All Platforms, Custom).
+  - Log viewer: added ANSI SGR color support (16 colors, bold, dim, italic, underline).
+  - Command palette: Cmd+K global search across projects, pages, and actions with keyboard navigation.
+  - Header: added search trigger button (⌘K) for command palette discoverability.
+  - Nav user: added role description in dropdown menu.
+- UX journey audit — phase 2 (remaining frontend-fixable gaps):
+  - Invite form: added role descriptions for all 4 roles, client-side email validation on blur.
+  - Run Build button: tooltip explains why it's disabled (no pipelines / no source).
+  - Dashboard recent builds: added Project column with name lookup.
+  - Builds list: switched "Created" column from locale datetime to relative time for consistency.
+  - Trigger build dialog: loading state for projects dropdown, branch/commit precedence help text.
+  - Integration detail: humanized `auth_mode` enum values (e.g. `github_app_manifest` → "GitHub App (Manifest)").
+  - Integration disconnect: button disabled while mutation is pending.
+  - Artifacts panel: contextual empty state (terminal vs in-progress builds).
+  - Artifact buttons: added `aria-label` with artifact name for accessibility.
+  - Pipeline breadcrumb: dynamic name from loaded pipeline data (matches build detail pattern).
+  - Clickable table rows: added `tabIndex`, `role="link"`, and keyboard handler (Enter/Space) across all list pages.
+
 ## 2026-03-16
 
 - DX: added portless support for named `.localhost` dev URLs.

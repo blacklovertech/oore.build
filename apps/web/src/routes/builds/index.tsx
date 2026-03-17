@@ -20,6 +20,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import PageHeader from '@/components/page-header'
 import PageLayout from '@/components/page-layout'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -39,10 +47,20 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
+import { relativeTime } from '@/lib/format-utils'
 import { PageMeta } from '@/lib/seo'
 import TriggerBuildDialog from '@/components/trigger-build-dialog'
 
 const PAGE_SIZE = 20
+
+const STATUS_OPTIONS: Record<string, string> = {
+  all: 'All statuses',
+  queued: 'Queued',
+  running: 'Running',
+  succeeded: 'Succeeded',
+  failed: 'Failed',
+  canceled: 'Canceled',
+}
 
 export const Route = createFileRoute('/builds/')({
   staticData: { breadcrumbLabel: 'Builds' },
@@ -64,7 +82,16 @@ function BuildsListPage() {
   const page = search.page ?? 1
   const offset = (page - 1) * PAGE_SIZE
 
-  const buildsQuery = useBuilds({ limit: PAGE_SIZE, offset })
+  const [projectFilter, setProjectFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [branchFilter, setBranchFilter] = useState('')
+  const buildsQuery = useBuilds({
+    limit: PAGE_SIZE,
+    offset,
+    project_id: projectFilter !== 'all' ? projectFilter : undefined,
+    status: statusFilter !== 'all' ? statusFilter : undefined,
+    branch: branchFilter.trim() || undefined,
+  })
   const total = buildsQuery.data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const projectsQuery = useProjects({ limit: 200 })
@@ -104,6 +131,66 @@ function BuildsListPage() {
           ) : undefined
         }
       />
+
+      {!missingProjects && !isLoading ? (
+        <div className="flex items-center gap-3">
+          <Select
+            value={projectFilter}
+            onValueChange={(v) => setProjectFilter(v ?? 'all')}
+            items={Object.fromEntries([
+              ['all', 'All projects'],
+              ...projects.map((p) => [p.id, p.name] as const),
+            ])}
+          >
+            <SelectTrigger className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All projects</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v ?? 'all')}
+            items={STATUS_OPTIONS}
+          >
+            <SelectTrigger className="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(STATUS_OPTIONS).map(([key, label]) => (
+                <SelectItem key={key} value={key}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            placeholder="Filter by branch..."
+            value={branchFilter}
+            onChange={(e) => setBranchFilter(e.target.value)}
+            className="max-w-xs"
+          />
+          {projectFilter !== 'all' || statusFilter !== 'all' || branchFilter ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setProjectFilter('all')
+                setStatusFilter('all')
+                setBranchFilter('')
+              }}
+            >
+              Clear filters
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {isLoading ? (
         <Card>
@@ -208,12 +295,23 @@ function BuildsListPage() {
                       <TableRow
                         key={build.id}
                         className="group cursor-pointer"
+                        role="link"
+                        tabIndex={0}
                         onClick={() =>
                           void navigate({
                             to: '/builds/$buildId',
                             params: { buildId: build.id },
                           })
                         }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            void navigate({
+                              to: '/builds/$buildId',
+                              params: { buildId: build.id },
+                            })
+                          }
+                        }}
                       >
                         <TableCell>
                           <div>
@@ -251,7 +349,7 @@ function BuildsListPage() {
                             : 'n/a'}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {new Date(build.created_at * 1000).toLocaleString()}
+                          {relativeTime(build.created_at)}
                         </TableCell>
                       </TableRow>
                     ))}

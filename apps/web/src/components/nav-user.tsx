@@ -1,6 +1,7 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
   ArrowUp01Icon,
+  BookOpen01Icon,
   Logout03Icon,
   Moon02Icon,
   SmartPhone01Icon,
@@ -131,6 +132,18 @@ export default function NavUser() {
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuItem
+              render={
+                <a
+                  href="https://docs.oore.build"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              }
+            >
+              <HugeiconsIcon icon={BookOpen01Icon} size={16} />
+              Documentation
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => logoutMutation.mutate()}
               disabled={logoutMutation.isPending}
