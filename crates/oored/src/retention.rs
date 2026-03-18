@@ -6,8 +6,8 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use oore_contract::{
-    ApiError, EffectiveProjectRetentionResponse, ProjectRetentionOverride, RetentionCleanupTarget,
-    RetentionCleanupSummary, RetentionCleanupSummaryResponse, RetentionPolicy,
+    ApiError, EffectiveProjectRetentionResponse, ProjectRetentionOverride, RetentionCleanupSummary,
+    RetentionCleanupSummaryResponse, RetentionCleanupTarget, RetentionPolicy,
     RetentionPolicyResponse, UpdateProjectRetentionOverrideRequest, UpdateRetentionPolicyRequest,
 };
 use sqlx::Row;
@@ -51,10 +51,8 @@ pub async fn load_global_policy(pool: &sqlx::SqlitePool) -> Result<RetentionPoli
         max_age_days: row.get("max_age_days"),
         max_builds_per_project: row.get("max_builds_per_project"),
         max_artifact_size_bytes: row.get("max_artifact_size_bytes"),
-        cleanup_target: RetentionCleanupTarget::from_str(
-            row.get::<&str, _>("cleanup_target"),
-        )
-        .unwrap_or(RetentionCleanupTarget::ArtifactsOnly),
+        cleanup_target: RetentionCleanupTarget::from_str(row.get::<&str, _>("cleanup_target"))
+            .unwrap_or(RetentionCleanupTarget::ArtifactsOnly),
         keep_statuses: serde_json::from_str(row.get::<&str, _>("keep_statuses"))
             .unwrap_or_default(),
         dry_run: row.get::<i32, _>("dry_run") != 0,
