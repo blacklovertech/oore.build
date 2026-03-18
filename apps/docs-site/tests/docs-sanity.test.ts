@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 describe('Documentation Sanity Tests', () => {
   const docsDir = path.resolve(__dirname, '../docs/getting-started');
