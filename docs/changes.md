@@ -10,6 +10,18 @@ Rules:
 - Any code change under `apps/`, `crates/`, `tools/`, etc. must add an entry here.
 - Include a Linear issue/doc link for each entry.
 
+## 2026-03-18
+
+- **CI migration: Woodpecker → GitHub Actions**:
+  - Replaced `.woodpecker.yml` with 3 GitHub Actions workflows: `validate.yml`, `autotag.yml`, `release.yml`.
+  - Validation split into parallel jobs: frontend/docs on Linux (`ubuntu-latest`), Rust on macOS (`macos-latest`). Saves ~70% of billable CI minutes.
+  - Autotag runs on Linux (git+bash only, no macOS needed). Uses `RELEASE_PAT` secret to push tags that trigger the release workflow.
+  - Release workflow: 4-job DAG — `build-assets` (macOS), `generate-notes` (Linux), `deploy-pages` (Linux), `github-release` (Linux). Uses `actions/upload-artifact` to pass build outputs between jobs.
+  - Eliminated 50-line Python `gh` CLI download script — `gh` is pre-installed on GitHub Actions runners.
+  - Caching: `Swatinem/rust-cache` for Cargo, `actions/cache` for `node_modules`.
+  - Deleted: `.woodpecker.yml`, `tools/lint-woodpecker.sh`, `lint-woodpecker` Makefile target.
+  - Updated: `tools/validate-ci.sh` (removed woodpecker lint call), `Makefile` (removed woodpecker references).
+
 ## 2026-03-17
 
 - Audit log read endpoint and frontend viewer ([OOR-135](https://linear.app/oorebuild/issue/OOR-135)):

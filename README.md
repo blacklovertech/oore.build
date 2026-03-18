@@ -144,11 +144,11 @@ make doctor           # Check system prerequisites
 
 ## Releases (macOS, Automated)
 
-Releases are published from a dedicated macOS host (for example, a Mac mini) using Woodpecker CI.
+Releases are published via GitHub Actions.
 
 High-level flow:
 
-- PR/push validation -> CI runs `make validate-ci` (full checks in parallel lanes + Woodpecker config lint)
+- PR/push validation -> CI runs frontend/docs (Linux) and Rust (macOS) checks in parallel
 - Merge to `alpha` -> CI cuts `vX.Y.Z-alpha.N` tags (prerelease)
 - Merge to `beta` -> CI cuts `vX.Y.Z-beta.N` tags (prerelease)
 - Merge to `stable` -> CI cuts `vX.Y.Z` tags (stable), auto-incrementing patch when needed
