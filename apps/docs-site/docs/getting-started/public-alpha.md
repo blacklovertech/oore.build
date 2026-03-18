@@ -37,6 +37,8 @@ curl -fsSL https://oore.build/install | OORE_CHANNEL=alpha bash
 oore update
 ```
 
+## Auth‑mode decision table
+
 ## The two supported onboarding paths
 
 Choosing the right path depends on your environment and whether your daemon is reachable from the public internet.
@@ -45,6 +47,8 @@ Choosing the right path depends on your environment and whether your daemon is r
 |---|---|---|---|
 | **Local-only** | Fast local evaluation on a single Mac. | macOS, loopback access (`127.0.0.1`) | No remote UI access; authentication is loopback-only. |
 | **Hosted UI** | Team collaboration or remote dashboard access. | macOS, **HTTPS-reachable URL**, OIDC provider. | Requires a tunnel (e.g. Cloudflare) and an OIDC provider (e.g. GitHub). |
+
+![Oore CI Dashboard screenshot](/demo-dashboard.webp)
 
 ### Path A: Local-first (no HTTPS required)
 
@@ -68,6 +72,8 @@ oored run
 oore setup
 ```
 
+![Oore CI Builds list screenshot](/demo-builds.webp)
+
 Continue with:
 - [Install](/getting-started/install)
 - [Set Up Your Instance](/getting-started/first-instance)
@@ -86,6 +92,27 @@ cloudflared tunnel --url http://127.0.0.1:8787
 ```
 
 3. Open `https://ci.oore.build`, add your tunnel URL as the backend, and follow the setup wizard.
+
+### Cloudflared Troubleshooting (#43)
+
+If you have trouble connecting your tunnel to the Hosted UI, check these common failure modes:
+
+1. **Tunnel URL has expired**
+   - **Symptom**: Cloudflare logo page says "This tunnel is not active."
+   - **Fix**: Restart your tunnel command. If using Quick Tunnels, you will get a new URL each time.
+   - **Check**: `cloudflared tunnel --url http://127.0.0.1:8787`
+
+2. **Localhost Mismatch (Port 8787)**
+   - **Symptom**: "Backend unreachable" from `ci.oore.build` despite tunnel being up.
+   - **Fix**: Ensure `oored` is running on the same port your tunnel is pointing to.
+   - **Check**: `curl -I http://127.0.0.1:8787/healthz`
+
+3. **Mixed Content / HTTP instead of HTTPS**
+   - **Symptom**: Browser console shows "Blocked loading of mixed active content."
+   - **Fix**: Ensure your backend URL in `ci.oore.build` starts with `https://`.
+   - **Check**: Look for the `trycloudflare.com` URL in your terminal logs.
+
+For a full reset of your Oore CI instance, see the [Clean Reinstall Guide](/getting-started/clean-reinstall).
 
 Continue with:
 - [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding)

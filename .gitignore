@@ -34,3 +34,5 @@ dist/releases
 # playwright / browser automation
 .playwright-mcp/
 /*.png
+
+package-lock.json

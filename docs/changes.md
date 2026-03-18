@@ -12,6 +12,14 @@ Rules:
 
 ## 2026-03-18
 
+- **Doc improvements for early testers** ([#49](https://github.com/devaryakjha/oore.build/issues/49), [#44](https://github.com/devaryakjha/oore.build/issues/44), [#40](https://github.com/devaryakjha/oore.build/issues/40), [#48](https://github.com/devaryakjha/oore.build/issues/48), [#41](https://github.com/devaryakjha/oore.build/issues/41), [#42](https://github.com/devaryakjha/oore.build/issues/42), [#43](https://github.com/devaryakjha/oore.build/issues/43)):
+  - Added "Alpha Feedback Playbook" with 10-minute test flow and templates.
+  - Added "Issue Report Checklist" page and linked from SUPPORT.md.
+  - Added screenshots with modern `.webp` formatting to the Public Alpha guide.
+  - Added Cloudflared tunnel troubleshooting section to Public Alpha guide.
+  - Added onboarding path decision table and release-channel reference table.
+  - Linked playbook from README.md and SUPPORT.md.
+
 - **CI migration: Woodpecker → GitHub Actions**:
   - Replaced `.woodpecker.yml` with 3 GitHub Actions workflows: `validate.yml`, `autotag.yml`, `release.yml`.
   - Validation split into parallel jobs: frontend/docs on Linux (`ubuntu-latest`), Rust on macOS (`macos-latest`). Saves ~70% of billable CI minutes.
