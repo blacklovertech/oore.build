@@ -16,12 +16,20 @@ launchctl bootout gui/$(id -u)/build.oore.oored 2>/dev/null || true
 ```
 
 ## 2. Remove local data
+
+Typical paths for alpha users:
+
+```bash
+# macOS default
+rm -rf ~/Library/Application\ Support/oore/
+```
+
+If you have a custom configuration path, you can use `oore doctor` and `jq` to dynamically find your config directory:
+
 ```bash
 rm -rf "$(dirname $(oore doctor --json | jq -r .configPath))"
-# Typical locations:
-#   ~/Library/Application Support/oore/oore.db
-#   ~/Library/Application Support/oore/encryption.key
 ```
+
 
 ## 3. Re‑install (optional)
 If you want a fresh binary, reinstall:

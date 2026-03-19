@@ -1,6 +1,6 @@
 ---
 status: implemented
-description: "Public alpha release notes + the fastest paths to first success (and how to avoid common setup blockers)."
+description: 'Public alpha release notes + the fastest paths to first success (and how to avoid common setup blockers).'
 ---
 
 # Public Alpha (v0.1.x)
@@ -18,11 +18,11 @@ Before broader rollout, review: [Known Alpha Limitations](/getting-started/known
 
 Oore CI uses three release channels to balance stability and velocity.
 
-| Channel | Frequency | Stability | Recommended For |
-|---|---|---|---|
-| **stable** | ~Weekly | Highest | Typical evaluation and production usage. |
-| **beta** | ~Daily | Moderate | Previewing upcoming features. |
-| **alpha** | Per-commit | Experimental | Testing bug fixes or contributing code. |
+| Channel    | Frequency  | Stability    | Recommended For                          |
+| ---------- | ---------- | ------------ | ---------------------------------------- |
+| **stable** | ~Weekly    | Highest      | Typical evaluation and production usage. |
+| **beta**   | ~Daily     | Moderate     | Previewing upcoming features.            |
+| **alpha**  | Per-commit | Experimental | Testing bug fixes or contributing code.  |
 
 ### Install/Update Examples
 
@@ -39,14 +39,22 @@ oore update
 
 ## Auth‑mode decision table
 
+Choosing the right authentication mode depends on where you access your daemon from.
+
+| Mode               | Access      | Auth    | Use Case        |
+| ------------------ | ----------- | ------- | --------------- |
+| **Local-only**     | `127.0.0.1` | None    | Local eval      |
+| **Remote (OIDC)**  | HTTPS       | OIDC    | Team Dashboards |
+| **Remote (Proxy)** | Proxy/IAP   | Headers | Private/Ent     |
+
 ## The two supported onboarding paths
 
 Choosing the right path depends on your environment and whether your daemon is reachable from the public internet.
 
-| Path | Use When | Requirements | Tradeoffs |
-|---|---|---|---|
-| **Local-only** | Fast local evaluation on a single Mac. | macOS, loopback access (`127.0.0.1`) | No remote UI access; authentication is loopback-only. |
-| **Hosted UI** | Team collaboration or remote dashboard access. | macOS, **HTTPS-reachable URL**, OIDC provider. | Requires a tunnel (e.g. Cloudflare) and an OIDC provider (e.g. GitHub). |
+| Path            | Use When        | Requirements       | Tradeoffs           |
+| --------------- | --------------- | ------------------ | ------------------- |
+| **Local-first** | Fast local eval | macOS, loopback    | No remote access    |
+| **Hosted UI**   | Teams & Remote  | macOS, HTTPS, OIDC | Needs tunnel + OIDC |
 
 ![Oore CI Dashboard screenshot](/demo-dashboard.webp)
 
@@ -75,6 +83,7 @@ oore setup
 ![Oore CI Builds list screenshot](/demo-builds.webp)
 
 Continue with:
+
 - [Install](/getting-started/install)
 - [Set Up Your Instance](/getting-started/first-instance)
 
@@ -115,6 +124,7 @@ If you have trouble connecting your tunnel to the Hosted UI, check these common 
 For a full reset of your Oore CI instance, see the [Clean Reinstall Guide](/getting-started/clean-reinstall).
 
 Continue with:
+
 - [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding)
 
 ## Common first-time blockers (and fixes)
@@ -138,6 +148,7 @@ If your backend URL is `http://127.0.0.1:8787`, the hosted UI will not be able t
 Remote access defaults to OIDC, but local-first onboarding supports loopback-only login (no local passwords).
 
 If you want a remote-first path without configuring OIDC immediately, see the deployment docs for the `trusted_proxy` option:
+
 - [Deployment](/operations/deployment)
 
 ## How to report issues and security findings

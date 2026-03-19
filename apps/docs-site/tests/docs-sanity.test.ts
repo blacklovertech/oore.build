@@ -10,7 +10,9 @@ describe('Documentation Sanity Tests', () => {
     'install.md',
     'public-alpha.md',
     'hosted-ui-onboarding.md',
-    'known-limitations.md'
+    'known-limitations.md',
+    'clean-reinstall.md',
+    'issue-report-checklist.md'
   ];
 
   it('should have all critical getting-started pages', () => {

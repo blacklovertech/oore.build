@@ -20,7 +20,7 @@ jobs:
       docs: ${{ steps.filter.outputs.docs }}
       rust: ${{ steps.filter.outputs.rust }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -44,7 +44,7 @@ jobs:
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -67,7 +67,7 @@ jobs:
     if: needs.changes.outputs.docs == 'true'
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -93,7 +93,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ vars.RUNNER_MACOS || 'macos-latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Format check
         run: cargo fmt --check
