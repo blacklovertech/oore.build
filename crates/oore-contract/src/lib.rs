@@ -2567,6 +2567,7 @@ mod tests {
 pub enum NotificationChannelType {
     Webhook,
     Mattermost,
+    Email,
 }
 
 impl fmt::Display for NotificationChannelType {
@@ -2574,6 +2575,7 @@ impl fmt::Display for NotificationChannelType {
         match self {
             Self::Webhook => f.write_str("webhook"),
             Self::Mattermost => f.write_str("mattermost"),
+            Self::Email => f.write_str("email"),
         }
     }
 }
@@ -2584,9 +2586,47 @@ impl FromStr for NotificationChannelType {
         match s {
             "webhook" => Ok(Self::Webhook),
             "mattermost" => Ok(Self::Mattermost),
+            "email" => Ok(Self::Email),
             other => Err(format!("unknown notification channel type: {other}")),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SmtpTlsMode {
+    None,
+    StartTls,
+    Tls,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub tls_mode: SmtpTlsMode,
+    pub from_address: String,
+    pub recipients: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateSmtpConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_mode: Option<SmtpTlsMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipients: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -2620,6 +2660,8 @@ pub struct NotificationChannel {
     pub has_url: bool,
     /// True if the channel has an HMAC secret configured (webhook only).
     pub has_secret: bool,
+    /// True if the channel has SMTP configuration (email only).
+    pub has_smtp_config: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
     pub created_at: i64,
@@ -2635,11 +2677,15 @@ pub struct CreateNotificationChannelRequest {
     /// Terminal build statuses to notify on. Empty or omitted means all terminal events.
     #[serde(default)]
     pub events: Vec<String>,
-    /// Webhook/Mattermost incoming webhook URL (required).
-    pub url: String,
+    /// Webhook/Mattermost incoming webhook URL (required for webhook/mattermost).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     /// HMAC secret for signing webhook payloads (webhook only, optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret: Option<String>,
+    /// SMTP configuration (required for email channel type).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smtp_config: Option<SmtpConfig>,
 }
 
 fn default_true() -> bool {
@@ -2660,6 +2706,9 @@ pub struct UpdateNotificationChannelRequest {
     /// New HMAC secret. Omit to keep existing; pass empty string to clear.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret: Option<String>,
+    /// Partial SMTP configuration update (email only). Omit fields to keep existing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smtp_config: Option<UpdateSmtpConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
