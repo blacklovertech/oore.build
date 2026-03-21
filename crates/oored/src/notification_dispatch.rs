@@ -692,18 +692,31 @@ fn test_email_html() -> String {
     )
 }
 
-fn build_email_html(payload: &serde_json::Value) -> (String, String) {
-    let project_name = payload["project_name"]
-        .as_str()
-        .unwrap_or("Unknown Project");
-    let pipeline_name = payload["pipeline_name"]
-        .as_str()
-        .unwrap_or("Unknown Pipeline");
-    let build_number = payload["build"]["build_number"].as_i64().unwrap_or(0);
-    let status = payload["build"]["status"].as_str().unwrap_or("unknown");
-    let branch = payload["build"]["branch"].as_str().unwrap_or("—");
+/// Escape HTML special characters to prevent injection in email templates.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
 
-    let (color, emoji) = match status {
+fn build_email_html(payload: &serde_json::Value) -> (String, String) {
+    let project_name = html_escape(
+        payload["project_name"]
+            .as_str()
+            .unwrap_or("Unknown Project"),
+    );
+    let pipeline_name = html_escape(
+        payload["pipeline_name"]
+            .as_str()
+            .unwrap_or("Unknown Pipeline"),
+    );
+    let build_number = payload["build"]["build_number"].as_i64().unwrap_or(0);
+    let status_raw = payload["build"]["status"].as_str().unwrap_or("unknown");
+    let branch = html_escape(payload["build"]["branch"].as_str().unwrap_or("—"));
+
+    let (color, emoji) = match status_raw {
         "succeeded" => ("#16a34a", "&#x2705;"),
         "failed" => ("#dc2626", "&#x274C;"),
         "canceled" => ("#6b7280", "&#x1F6AB;"),
@@ -711,6 +724,8 @@ fn build_email_html(payload: &serde_json::Value) -> (String, String) {
         "expired" => ("#9333ea", "&#x1F552;"),
         _ => ("#6b7280", "&#x1F514;"),
     };
+
+    let status = html_escape(status_raw);
 
     let subject = format!(
         "{} {} / {} — Build #{} {}",
@@ -739,10 +754,13 @@ fn build_email_html(payload: &serde_json::Value) -> (String, String) {
 }
 
 fn runner_email_html(payload: &serde_json::Value) -> (String, String) {
-    let runner_name = payload["runner"]["name"].as_str().unwrap_or("Unknown");
-    let from_status = payload["runner"]["from_status"]
-        .as_str()
-        .unwrap_or("unknown");
+    let runner_name =
+        html_escape(payload["runner"]["name"].as_str().unwrap_or("Unknown"));
+    let from_status = html_escape(
+        payload["runner"]["from_status"]
+            .as_str()
+            .unwrap_or("unknown"),
+    );
 
     let subject = format!("⚠️ Runner {} went offline", runner_name);
 

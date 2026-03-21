@@ -956,7 +956,7 @@ export interface SyncPipelineIosSigningResponse {
 
 export type NotificationChannelType = 'webhook' | 'mattermost' | 'email'
 export type NotificationDeliveryStatus = 'pending' | 'delivered' | 'failed'
-export type SmtpTlsMode = 'none' | 'starttls' | 'tls'
+export type SmtpTlsMode = 'none' | 'start_tls' | 'tls'
 
 export interface SmtpConfig {
   host: string

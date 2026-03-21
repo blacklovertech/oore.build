@@ -75,7 +75,7 @@ const schema = z.object({
   smtp_port: z.string().optional(),
   smtp_username: z.string().optional(),
   smtp_password: z.string().optional(),
-  smtp_tls_mode: z.enum(['none', 'starttls', 'tls']).optional(),
+  smtp_tls_mode: z.enum(['none', 'start_tls', 'tls']).optional(),
   smtp_from_address: z.string().optional(),
   smtp_recipients: z.string().optional(),
 })
@@ -98,7 +98,7 @@ function NewNotificationChannelPage() {
       smtp_port: '587',
       smtp_username: '',
       smtp_password: '',
-      smtp_tls_mode: 'starttls',
+      smtp_tls_mode: 'start_tls',
       smtp_from_address: '',
       smtp_recipients: '',
     },
@@ -142,7 +142,7 @@ function NewNotificationChannelPage() {
         port: Number(values.smtp_port),
         username: values.smtp_username!,
         password: values.smtp_password!,
-        tls_mode: (values.smtp_tls_mode ?? 'starttls') as SmtpTlsMode,
+        tls_mode: (values.smtp_tls_mode ?? 'start_tls') as SmtpTlsMode,
         from_address: values.smtp_from_address!,
         recipients,
       }
@@ -392,7 +392,7 @@ function NewNotificationChannelPage() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="starttls">
+                            <SelectItem value="start_tls">
                               STARTTLS (port 587)
                             </SelectItem>
                             <SelectItem value="tls">
