@@ -717,19 +717,25 @@ fn build_email_html(payload: &serde_json::Value) -> (String, String) {
     let branch = html_escape(payload["build"]["branch"].as_str().unwrap_or("—"));
 
     let (color, emoji) = match status_raw {
-        "succeeded" => ("#16a34a", "&#x2705;"),
-        "failed" => ("#dc2626", "&#x274C;"),
-        "canceled" => ("#6b7280", "&#x1F6AB;"),
-        "timed_out" => ("#d97706", "&#x23F3;"),
-        "expired" => ("#9333ea", "&#x1F552;"),
-        _ => ("#6b7280", "&#x1F514;"),
+        "succeeded" => ("#16a34a", "\u{2705}"),
+        "failed" => ("#dc2626", "\u{274C}"),
+        "canceled" => ("#6b7280", "\u{1F6AB}"),
+        "timed_out" => ("#d97706", "\u{23F3}"),
+        "expired" => ("#9333ea", "\u{1F552}"),
+        _ => ("#6b7280", "\u{1F514}"),
     };
 
     let status = html_escape(status_raw);
+    let project_name_raw = payload["project_name"]
+        .as_str()
+        .unwrap_or("Unknown Project");
+    let pipeline_name_raw = payload["pipeline_name"]
+        .as_str()
+        .unwrap_or("Unknown Pipeline");
 
     let subject = format!(
         "{} {} / {} — Build #{} {}",
-        emoji, project_name, pipeline_name, build_number, status
+        emoji, project_name_raw, pipeline_name_raw, build_number, status_raw
     );
 
     let html = format!(
@@ -754,15 +760,14 @@ fn build_email_html(payload: &serde_json::Value) -> (String, String) {
 }
 
 fn runner_email_html(payload: &serde_json::Value) -> (String, String) {
-    let runner_name =
-        html_escape(payload["runner"]["name"].as_str().unwrap_or("Unknown"));
-    let from_status = html_escape(
-        payload["runner"]["from_status"]
-            .as_str()
-            .unwrap_or("unknown"),
-    );
+    let runner_name_raw = payload["runner"]["name"].as_str().unwrap_or("Unknown");
+    let from_status_raw = payload["runner"]["from_status"]
+        .as_str()
+        .unwrap_or("unknown");
+    let runner_name = html_escape(runner_name_raw);
+    let from_status = html_escape(from_status_raw);
 
-    let subject = format!("⚠️ Runner {} went offline", runner_name);
+    let subject = format!("\u{26A0}\u{FE0F} Runner {} went offline", runner_name_raw);
 
     let html = format!(
         r#"<!DOCTYPE html>
