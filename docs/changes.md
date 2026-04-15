@@ -330,3 +330,8 @@ Rules:
   - Docs index: https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda
 - Added a consolidated Linear feature doc for this post-alpha reliability tranche.
   - Feature doc: https://linear.app/oorebuild/document/feature-post-alpha-reliability-tranche-2026-02-22-db79675a84e3
+
+## 2026-04-15
+
+- Installer and bundled uninstall script UX follow-up: restored the local web onboarding path to the dedicated `/setup` route and preserved legacy `y`/`n` answers in the new numeric prompt selector so interactive shell flows keep working as before.
+  - Docs index: https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda
