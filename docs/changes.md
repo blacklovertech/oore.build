@@ -10,6 +10,13 @@ Rules:
 - Any code change under `apps/`, `crates/`, `tools/`, etc. must add an entry here.
 - Include a Linear issue/doc link for each entry.
 
+## 2026-05-05
+
+- **Project RBAC hardening from Codex scan** ([GitHub #88](https://github.com/devaryakjha/oore.build/issues/88), [#89](https://github.com/devaryakjha/oore.build/issues/89)):
+  - `POST /v1/builds/{build_id}/cancel` now resolves the build project and requires `ProjectPermission::CancelBuild` before transitioning build state.
+  - Scoped artifact token create/list/revoke routes now resolve artifact -> build -> project and require `ProjectPermission::ReadArtifacts` before minting or managing bearer download URLs.
+  - Docs index: https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda
+
 ## 2026-04-15
 
 - **Security fixes from Codex scan** ([GitHub #83](https://github.com/devaryakjha/oore.build/issues/83), [#84](https://github.com/devaryakjha/oore.build/issues/84), [#85](https://github.com/devaryakjha/oore.build/issues/85), [#86](https://github.com/devaryakjha/oore.build/issues/86)):
