@@ -54,6 +54,32 @@ async fn seed_user_with_role(pool: &sqlx::SqlitePool, email: &str, role: &str) -
     user_id
 }
 
+async fn json_request(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    token: &str,
+    body: Option<serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
+    let mut builder = Request::builder()
+        .uri(uri)
+        .method(method)
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"));
+
+    let req_body = if let Some(json) = body {
+        builder = builder.header(http::header::CONTENT_TYPE, "application/json");
+        Body::from(serde_json::to_string(&json).unwrap())
+    } else {
+        Body::empty()
+    };
+
+    let req = builder.body(req_body).unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let json = body_json(resp.into_body()).await;
+    (status, json)
+}
+
 /// Register a runner and return (runner_id, runner_token).
 async fn register_runner(app: &axum::Router, session_token: &str, name: &str) -> (String, String) {
     let body = serde_json::json!({
@@ -422,7 +448,7 @@ async fn test_get_logs_build_not_found() {
 
 #[tokio::test]
 async fn test_non_member_cannot_read_build_logs_or_artifacts() {
-    let (app, pool, _session_token, runner_id, runner_token, build_id) = full_scaffold().await;
+    let (app, pool, session_token, runner_id, runner_token, build_id) = full_scaffold().await;
     let outsider_id = seed_user_with_role(&pool, "outsider@example.com", "developer").await;
     let outsider_session = create_session_token(&pool, &outsider_id).await;
 
@@ -445,31 +471,56 @@ async fn test_non_member_cannot_read_build_logs_or_artifacts() {
     let artifact_json = body_json(resp.into_body()).await;
     let artifact_id = artifact_json["artifact"]["id"].as_str().unwrap();
 
-    for (method, uri) in [
-        ("GET", "/v1/builds".to_string()),
-        ("GET", format!("/v1/builds/{build_id}")),
-        ("GET", format!("/v1/builds/{build_id}/logs")),
-        ("POST", format!("/v1/builds/{build_id}/stream-token")),
-        ("GET", format!("/v1/builds/{build_id}/logs/stream")),
-        ("GET", format!("/v1/builds/{build_id}/artifacts")),
-        ("POST", format!("/v1/artifacts/{artifact_id}/download-link")),
-    ] {
-        let req = Request::builder()
-            .uri(uri)
-            .method(method)
-            .header(
-                http::header::AUTHORIZATION,
-                format!("Bearer {outsider_session}"),
-            )
-            .body(Body::empty())
-            .unwrap();
+    let (status, owner_token_json) = json_request(
+        &app,
+        "POST",
+        &format!("/v1/artifacts/{artifact_id}/scoped-token"),
+        &session_token,
+        Some(serde_json::json!({
+            "ttl_secs": 3600,
+            "single_use": true
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "owner scoped token create: {owner_token_json}"
+    );
+    let token_id = owner_token_json["id"].as_str().unwrap().to_string();
 
-        let resp = app.clone().oneshot(req).await.unwrap();
-        if method == "GET" && resp.status() == StatusCode::OK {
-            let json = body_json(resp.into_body()).await;
+    for (method, uri, body) in [
+        ("GET", "/v1/builds".to_string(), None),
+        ("GET", format!("/v1/builds/{build_id}"), None),
+        ("GET", format!("/v1/builds/{build_id}/logs"), None),
+        ("POST", format!("/v1/builds/{build_id}/stream-token"), None),
+        ("GET", format!("/v1/builds/{build_id}/logs/stream"), None),
+        ("GET", format!("/v1/builds/{build_id}/artifacts"), None),
+        (
+            "POST",
+            format!("/v1/artifacts/{artifact_id}/download-link"),
+            None,
+        ),
+        (
+            "POST",
+            format!("/v1/artifacts/{artifact_id}/scoped-token"),
+            Some(serde_json::json!({
+                "ttl_secs": 3600,
+                "single_use": true
+            })),
+        ),
+        (
+            "GET",
+            format!("/v1/artifacts/{artifact_id}/scoped-tokens"),
+            None,
+        ),
+        ("DELETE", format!("/v1/artifact-tokens/{token_id}"), None),
+    ] {
+        let (status, json) = json_request(&app, method, &uri, &outsider_session, body).await;
+        if method == "GET" && status == StatusCode::OK {
             assert_eq!(json["total"].as_i64(), Some(0));
         } else {
-            assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}: {json}");
         }
     }
 }
