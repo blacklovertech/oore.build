@@ -3,7 +3,13 @@ set -euo pipefail
 
 OORE_VERSION="${OORE_VERSION:-latest}"
 OORE_CHANNEL="${OORE_CHANNEL:-stable}"
-OORE_INSTALL_MODE="${OORE_INSTALL_MODE:-full}"
+OORE_INSTALL_MODE_WAS_SET=0
+OORE_WEB_BACKEND_URL_WAS_SET=0
+OORE_DAEMON_URL_WAS_SET=0
+[[ -n "${OORE_INSTALL_MODE+x}" ]] && OORE_INSTALL_MODE_WAS_SET=1
+[[ -n "${OORE_WEB_BACKEND_URL+x}" ]] && OORE_WEB_BACKEND_URL_WAS_SET=1
+[[ -n "${OORE_DAEMON_URL+x}" ]] && OORE_DAEMON_URL_WAS_SET=1
+OORE_INSTALL_MODE="${OORE_INSTALL_MODE:-auto}"
 OORE_INSTALL_ROOT="${OORE_INSTALL_ROOT:-$HOME/.oore}"
 OORE_GITHUB_REPO="${OORE_GITHUB_REPO:-devaryakjha/oore.build}"
 OORE_RELEASE_BASE_URL="${OORE_RELEASE_BASE_URL:-https://github.com/$OORE_GITHUB_REPO/releases/download}"
@@ -11,6 +17,11 @@ OORE_RELEASE_MANIFEST_URL="${OORE_RELEASE_MANIFEST_URL:-https://api.github.com/r
 OORE_RELEASES_LIST_URL="${OORE_RELEASES_LIST_URL:-https://api.github.com/repos/$OORE_GITHUB_REPO/releases?per_page=100}"
 OORE_NONINTERACTIVE="${OORE_NONINTERACTIVE:-0}"
 OORE_START_DAEMON="${OORE_START_DAEMON:-}"
+OORE_INSTALL_DAEMON_SERVICE="${OORE_INSTALL_DAEMON_SERVICE:-}"
+OORE_DAEMON_LISTEN="${OORE_DAEMON_LISTEN:-}"
+OORE_PUBLIC_URL="${OORE_PUBLIC_URL:-}"
+OORE_CORS_ORIGINS="${OORE_CORS_ORIGINS:-}"
+OORE_ENABLE_LINGER="${OORE_ENABLE_LINGER:-}"
 OORE_HOSTED_UI="${OORE_HOSTED_UI:-https://ci.oore.build}"
 OORE_DAEMON_URL="${OORE_DAEMON_URL:-http://127.0.0.1:8787}"
 OORE_WEB_BACKEND_URL="${OORE_WEB_BACKEND_URL:-$OORE_DAEMON_URL}"
@@ -60,14 +71,19 @@ Usage:
 Environment overrides:
   OORE_VERSION               Release tag or "latest" (default: latest)
   OORE_CHANNEL               Release channel for latest resolution: stable|beta|alpha (default: stable)
-  OORE_INSTALL_MODE          Install mode: full|frontend (default: full)
+  OORE_INSTALL_MODE          Install mode: auto|full|frontend (default: auto)
   OORE_INSTALL_ROOT          Install root (default: ~/.oore)
   OORE_NONINTERACTIVE        Non-interactive mode (true/false)
+  OORE_DAEMON_LISTEN         Daemon listen address for full installs (default: from OORE_DAEMON_URL)
   OORE_START_DAEMON          Start daemon in non-interactive mode (true/false)
+  OORE_INSTALL_DAEMON_SERVICE Install oored as a launchd service in full mode (true/false)
+  OORE_PUBLIC_URL            Browser-visible HTTPS URL for split/remote installs
+  OORE_CORS_ORIGINS          Comma-separated allowed browser origins (default: OORE_PUBLIC_URL when set)
   OORE_DAEMON_URL            Daemon URL used by full-mode setup helpers (default: http://127.0.0.1:8787)
   OORE_WEB_BACKEND_URL       Backend URL proxied by oore-web (default: OORE_DAEMON_URL)
   OORE_LOCAL_WEB_MODE        Local web behavior in non-interactive mode: off|run|login
   OORE_LOCAL_WEB_LISTEN      Local web listen address (default: 127.0.0.1:4173)
+  OORE_ENABLE_LINGER         Enable systemd lingering for Linux frontend login service (true/false)
   OORE_HOSTED_UI             Hosted UI URL (default: https://ci.oore.build)
   OORE_GITHUB_REPO           GitHub repo (default: devaryakjha/oore.build)
   OORE_RELEASE_BASE_URL      Release asset base URL (default: GitHub Releases download base)
@@ -142,6 +158,12 @@ print_install_intro() {
   printf '  Mode:          %s\n' "$OORE_INSTALL_MODE"
   printf '  Prompting:     %s\n' "$(ui_prompt_mode)"
   printf '  Install root:  %s\n' "$OORE_INSTALL_ROOT"
+  if [[ "$OORE_INSTALL_MODE" == "full" ]]; then
+    printf '  Daemon listen: %s\n' "$OORE_DAEMON_LISTEN"
+    if [[ -n "$OORE_PUBLIC_URL" ]]; then
+      printf '  Public URL:    %s\n' "$OORE_PUBLIC_URL"
+    fi
+  fi
   if [[ "$OORE_VERSION" == "latest" ]]; then
     printf '  Release:       latest (%s channel)\n' "$OORE_CHANNEL"
   else
@@ -185,6 +207,24 @@ normalize_bool() {
       return 2
       ;;
   esac
+}
+
+validate_optional_bool_env() {
+  local name="$1"
+  local value="${2:-}"
+  local status=0
+
+  [[ -z "$value" ]] && return 0
+
+  if normalize_bool "$value"; then
+    return 0
+  fi
+  status="$?"
+  if [[ "$status" -eq 1 ]]; then
+    return 0
+  fi
+
+  die "$name must be one of: true,false,1,0,yes,no,on,off."
 }
 
 is_noninteractive() {
@@ -301,6 +341,45 @@ prompt_select() {
   done
 }
 
+prompt_text() {
+  local question="$1"
+  local default="${2:-}"
+  local required="${3:-optional}"
+  local answer=""
+
+  if is_noninteractive || ! has_prompt_tty; then
+    if [[ -z "$default" && "$required" == "required" ]]; then
+      die "$question must be provided in non-interactive mode."
+    fi
+    printf '%s' "$default"
+    return 0
+  fi
+
+  while true; do
+    if [[ -n "$default" ]]; then
+      printf '\n%b%s%b\n%bDefault:%b %s\n> ' \
+        "$UI_BOLD" "$question" "$UI_RESET" "$UI_DIM" "$UI_RESET" "$default" > /dev/tty
+    else
+      printf '\n%b%s%b\n> ' "$UI_BOLD" "$question" "$UI_RESET" > /dev/tty
+    fi
+
+    if ! read -r answer < /dev/tty; then
+      answer="$default"
+    fi
+
+    if [[ -z "$answer" ]]; then
+      answer="$default"
+    fi
+
+    if [[ -n "$answer" || "$required" != "required" ]]; then
+      printf '%s' "$answer"
+      return 0
+    fi
+
+    printf '%bPlease enter a value.%b\n' "$UI_WARNING" "$UI_RESET" > /dev/tty
+  done
+}
+
 ensure_dependency() {
   local cmd="$1"
 
@@ -341,11 +420,11 @@ detect_os() {
 
 validate_install_mode() {
   case "${OORE_INSTALL_MODE:-}" in
-    full|frontend)
+    auto|full|frontend)
       return 0
       ;;
     *)
-      die 'OORE_INSTALL_MODE must be one of: full,frontend.'
+      die 'OORE_INSTALL_MODE must be one of: auto,full,frontend.'
       ;;
   esac
 }
@@ -359,6 +438,230 @@ validate_channel() {
       die 'OORE_CHANNEL must be one of: stable,alpha,beta.'
       ;;
   esac
+}
+
+url_to_host_port() {
+  local raw="$1"
+  local without_scheme="${raw#http://}"
+  without_scheme="${without_scheme#https://}"
+  without_scheme="${without_scheme%%/*}"
+  without_scheme="${without_scheme%%\?*}"
+  without_scheme="${without_scheme%%#*}"
+  printf '%s' "$without_scheme"
+}
+
+daemon_url_from_listen() {
+  local listen="$1"
+  if [[ "$listen" == http://* || "$listen" == https://* ]]; then
+    printf '%s' "${listen%/}"
+  else
+    printf 'http://%s' "$listen"
+  fi
+}
+
+detect_overlay_ip() {
+  local ip_addr=""
+
+  if have_cmd ip; then
+    ip_addr="$(ip -4 addr show 2>/dev/null | awk '
+      /inet 100\./ {
+        split($2, parts, "/");
+        print parts[1];
+        exit;
+      }
+    ')"
+  elif have_cmd ifconfig; then
+    ip_addr="$(ifconfig 2>/dev/null | awk '
+      $1 == "inet" && $2 ~ /^100\./ {
+        print $2;
+        exit;
+      }
+    ')"
+  fi
+
+  printf '%s' "$ip_addr"
+}
+
+normalize_runtime_config() {
+  if [[ -z "$OORE_DAEMON_LISTEN" ]]; then
+    OORE_DAEMON_LISTEN="$(url_to_host_port "$DAEMON_URL")"
+  fi
+
+  if [[ "$OORE_DAEMON_LISTEN" == http://* || "$OORE_DAEMON_LISTEN" == https://* ]]; then
+    OORE_DAEMON_LISTEN="$(url_to_host_port "$OORE_DAEMON_LISTEN")"
+  fi
+
+  if [[ -z "$OORE_DAEMON_LISTEN" ]]; then
+    OORE_DAEMON_LISTEN="127.0.0.1:8787"
+  fi
+
+  if [[ "$OORE_DAEMON_URL_WAS_SET" -eq 0 ]]; then
+    DAEMON_URL="$(daemon_url_from_listen "$OORE_DAEMON_LISTEN")"
+    OORE_DAEMON_URL="$DAEMON_URL"
+  fi
+
+  if [[ -z "$OORE_CORS_ORIGINS" && -n "$OORE_PUBLIC_URL" ]]; then
+    OORE_CORS_ORIGINS="$OORE_PUBLIC_URL"
+  fi
+}
+
+configure_install_mode() {
+  if [[ "$OORE_INSTALL_MODE" == "auto" ]]; then
+    case "$RELEASE_OS" in
+      linux)
+        OORE_INSTALL_MODE="frontend"
+        ;;
+      darwin)
+        if [[ "$OORE_INSTALL_MODE_WAS_SET" -eq 0 && ! is_noninteractive && has_prompt_tty ]]; then
+          OORE_INSTALL_MODE="$(
+            prompt_select \
+              "What are you installing on this machine?" \
+              "full" \
+              "full:Backend + runner on this Mac" \
+              "frontend:Frontend-only proxy"
+          )"
+        else
+          OORE_INSTALL_MODE="full"
+        fi
+        ;;
+    esac
+  fi
+}
+
+configure_backend_install() {
+  [[ "$OORE_INSTALL_MODE" == "full" ]] || return 0
+
+  if [[ "$RELEASE_OS" != "darwin" ]]; then
+    die 'Oore CI V1 backend installer currently supports macOS only.'
+  fi
+
+  if [[ -z "$OORE_DAEMON_LISTEN" ]]; then
+    OORE_DAEMON_LISTEN="$(url_to_host_port "$DAEMON_URL")"
+  fi
+  [[ -n "$OORE_DAEMON_LISTEN" ]] || OORE_DAEMON_LISTEN="127.0.0.1:8787"
+
+  if ! is_noninteractive && has_prompt_tty; then
+    local overlay_ip=""
+    local listen_default="$OORE_DAEMON_LISTEN"
+    overlay_ip="$(detect_overlay_ip)"
+    if [[ "$listen_default" == "127.0.0.1:8787" && -n "$overlay_ip" ]]; then
+      log "Detected private overlay IP: $overlay_ip"
+      listen_default="$overlay_ip:8787"
+    fi
+
+    OORE_DAEMON_LISTEN="$(
+      prompt_text \
+        "Daemon listen address. Use the Mac Studio NetBird IP for a split Ubuntu frontend, or 127.0.0.1:8787 for same-host/private-proxy setup." \
+        "$listen_default" \
+        "required"
+    )"
+
+    OORE_PUBLIC_URL="$(
+      prompt_text \
+        "Browser-visible HTTPS URL for this instance. Leave blank if you will configure External Access later." \
+        "$OORE_PUBLIC_URL" \
+        "optional"
+    )"
+
+    if [[ -z "$OORE_CORS_ORIGINS" && -n "$OORE_PUBLIC_URL" ]]; then
+      OORE_CORS_ORIGINS="$OORE_PUBLIC_URL"
+    fi
+
+    OORE_CORS_ORIGINS="$(
+      prompt_text \
+        "Allowed browser origins for the daemon." \
+        "$OORE_CORS_ORIGINS" \
+        "optional"
+    )"
+
+    if [[ -z "$OORE_INSTALL_DAEMON_SERVICE" ]]; then
+      local service_choice=""
+      service_choice="$(
+        prompt_select \
+          "Run oored as a launchd service?" \
+          "yes" \
+          "yes:Install and start launchd service (recommended)" \
+          "no:Start one background process only" \
+          "skip:Do not start now"
+      )"
+      case "$service_choice" in
+        yes)
+          OORE_INSTALL_DAEMON_SERVICE=true
+          OORE_START_DAEMON=true
+          ;;
+        no)
+          OORE_INSTALL_DAEMON_SERVICE=false
+          OORE_START_DAEMON=true
+          ;;
+        skip)
+          OORE_INSTALL_DAEMON_SERVICE=false
+          OORE_START_DAEMON=false
+          ;;
+      esac
+    fi
+  fi
+
+  normalize_runtime_config
+}
+
+configure_frontend_install() {
+  [[ "$OORE_INSTALL_MODE" == "frontend" ]] || return 0
+
+  if ! is_noninteractive && has_prompt_tty; then
+    local backend_default="$WEB_BACKEND_URL"
+    if [[ "$OORE_WEB_BACKEND_URL_WAS_SET" -eq 0 && "$OORE_DAEMON_URL_WAS_SET" -eq 0 ]]; then
+      backend_default=""
+    fi
+
+    WEB_BACKEND_URL="$(
+      prompt_text \
+        "Mac Studio backend URL reachable from this machine over NetBird, for example http://100.64.10.20:8787." \
+        "$backend_default" \
+        "required"
+    )"
+    OORE_WEB_BACKEND_URL="$WEB_BACKEND_URL"
+
+    OORE_LOCAL_WEB_LISTEN="$(
+      prompt_text \
+        "Local oore-web listen address. Keep loopback when Caddy/Warpgate is on this Ubuntu host." \
+        "$OORE_LOCAL_WEB_LISTEN" \
+        "required"
+    )"
+
+    if [[ -z "$OORE_LOCAL_WEB_MODE" ]]; then
+      OORE_LOCAL_WEB_MODE="$(
+        prompt_select \
+          "Run oore-web automatically as a user service?" \
+          "login" \
+          "login:Enable systemd/launchd service (recommended)" \
+          "run:Start it now only" \
+          "off:Install only"
+      )"
+    fi
+
+    if [[ "$RELEASE_OS" == "linux" && "$OORE_LOCAL_WEB_MODE" == "login" && -z "$OORE_ENABLE_LINGER" ]]; then
+      local linger_choice=""
+      linger_choice="$(
+        prompt_select \
+          "Enable systemd lingering so oore-web survives logout/reboot?" \
+          "yes" \
+          "yes:Enable lingering now" \
+          "no:Show command later"
+      )"
+      if [[ "$linger_choice" == "yes" ]]; then
+        OORE_ENABLE_LINGER=true
+      else
+        OORE_ENABLE_LINGER=false
+      fi
+    fi
+  else
+    if [[ "$OORE_WEB_BACKEND_URL_WAS_SET" -eq 0 && "$OORE_DAEMON_URL_WAS_SET" -eq 0 ]]; then
+      die 'Frontend-only non-interactive install requires OORE_WEB_BACKEND_URL, for example http://<mac-netbird-ip>:8787.'
+    fi
+  fi
+
+  WEB_BACKEND_URL="$OORE_WEB_BACKEND_URL"
+  resolve_local_web_url
 }
 
 infer_channel_from_tag() {
@@ -636,18 +939,18 @@ ensure_on_path() {
 start_daemon() {
   mkdir -p "$LOG_DIR"
 
-  if curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
-    log 'A healthy daemon is already running on http://127.0.0.1:8787.'
+  if curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
+    log "A healthy daemon is already running on $DAEMON_URL."
     return 0
   fi
 
-  log 'Starting oored in background on 127.0.0.1:8787...'
-  nohup "$BIN_DIR/oored" run --listen 127.0.0.1:8787 >"$DAEMON_LOG" 2>&1 &
+  log "Starting oored in background on $OORE_DAEMON_LISTEN..."
+  nohup "$BIN_DIR/oored" run --listen "$OORE_DAEMON_LISTEN" >"$DAEMON_LOG" 2>&1 &
   echo "$!" > "$DAEMON_PID_FILE"
 
   local i
   for i in $(seq 1 15); do
-    if curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
+    if curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
       log 'Daemon is healthy.'
       return 0
     fi
@@ -655,6 +958,32 @@ start_daemon() {
   done
 
   log "Daemon failed to become healthy. Check logs: $DAEMON_LOG"
+  return 1
+}
+
+install_daemon_service() {
+  local cmd=("$BIN_DIR/oored" "install-service" "--listen" "$OORE_DAEMON_LISTEN")
+
+  if [[ -n "$OORE_PUBLIC_URL" ]]; then
+    cmd+=("--env" "OORE_PUBLIC_URL=$OORE_PUBLIC_URL")
+  fi
+  if [[ -n "$OORE_CORS_ORIGINS" ]]; then
+    cmd+=("--env" "OORE_CORS_ORIGINS=$OORE_CORS_ORIGINS")
+  fi
+  cmd+=("--env" "RUST_LOG=${RUST_LOG:-info}")
+
+  "${cmd[@]}" || return 1
+
+  local i
+  for i in $(seq 1 15); do
+    if curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
+      log 'Daemon service is healthy.'
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Daemon service did not become healthy yet. Check logs: $DAEMON_LOG"
   return 1
 }
 
@@ -690,6 +1019,10 @@ is_localhost_backend() {
       return 1
       ;;
   esac
+}
+
+should_install_daemon_service() {
+  normalize_bool "${OORE_INSTALL_DAEMON_SERVICE:-false}"
 }
 
 validate_local_web_mode() {
@@ -825,6 +1158,8 @@ install_local_web_systemd_user_service() {
     return 1
   fi
 
+  enable_linux_lingering || true
+
   mkdir -p "$WEB_SYSTEMD_USER_DIR" "$LOG_DIR"
   cat > "$WEB_SYSTEMD_SERVICE_FILE" <<EOF
 [Unit]
@@ -845,6 +1180,49 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable --now "$WEB_SYSTEMD_SERVICE_NAME"
   log "Installed systemd user service: $WEB_SYSTEMD_SERVICE_NAME"
+  return 0
+}
+
+enable_linux_lingering() {
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+  [[ "${OORE_LOCAL_WEB_MODE:-}" == "login" ]] || return 0
+  have_cmd loginctl || return 0
+
+  if loginctl show-user "$USER" -p Linger --value 2>/dev/null | grep -q '^yes$'; then
+    log "systemd lingering is already enabled for $USER."
+    return 0
+  fi
+
+  case "${OORE_ENABLE_LINGER:-}" in
+    1|true|TRUE|yes|YES|on|ON)
+      ;;
+    0|false|FALSE|no|NO|off|OFF)
+      log "systemd lingering was not enabled. To keep oore-web alive after logout: sudo loginctl enable-linger $USER"
+      return 0
+      ;;
+    "")
+      log "To keep oore-web alive after logout/reboot, run: sudo loginctl enable-linger $USER"
+      return 0
+      ;;
+    *)
+      die 'OORE_ENABLE_LINGER must be one of: true,false,1,0,yes,no,on,off.'
+      ;;
+  esac
+
+  if loginctl enable-linger "$USER" >/dev/null 2>&1; then
+    log "Enabled systemd lingering for $USER."
+    return 0
+  fi
+
+  if have_cmd sudo; then
+    log "Enabling systemd lingering for $USER may ask for sudo."
+    if sudo loginctl enable-linger "$USER"; then
+      log "Enabled systemd lingering for $USER."
+      return 0
+    fi
+  fi
+
+  log "Could not enable lingering automatically. Run: sudo loginctl enable-linger $USER"
   return 0
 }
 
@@ -984,6 +1362,15 @@ open_setup_ui() {
     return 1
   fi
 
+  if [[ -n "$OORE_PUBLIC_URL" ]]; then
+    if ! have_cmd open; then
+      log "Open this URL in your browser: ${OORE_PUBLIC_URL%/}/setup"
+      return 1
+    fi
+    open "${OORE_PUBLIC_URL%/}/setup" >/dev/null 2>&1 || true
+    return 0
+  fi
+
   if ! have_cmd open; then
     log 'Cannot auto-open browser because the `open` command is unavailable.'
     return 1
@@ -1020,7 +1407,7 @@ watch_setup() {
       printf '\n'
       printf 'Setup complete! Instance ID: %s\n' "$instance_id"
       printf 'Your Oore instance is ready.\n\n'
-      printf '  Dashboard:  %s\n' "$OORE_HOSTED_UI"
+      printf '  Dashboard:  %s\n' "${OORE_PUBLIC_URL:-$OORE_HOSTED_UI}"
       printf '  API:        %s\n' "$DAEMON_URL"
       printf '  Docs:       https://docs.oore.build\n\n'
       return 0
@@ -1062,6 +1449,11 @@ print_next_steps() {
       printf 'Start the frontend:\n'
       printf '  oore-web --listen %s --backend-url %s\n' "$OORE_LOCAL_WEB_LISTEN" "$WEB_BACKEND_URL"
     fi
+    if [[ "$(uname -s)" == "Linux" && "$OORE_LOCAL_WEB_MODE" == "login" ]]; then
+      printf '\nSystemd service:\n'
+      printf '  systemctl --user status %s\n' "$WEB_SYSTEMD_SERVICE_NAME"
+      printf '  sudo loginctl enable-linger %s   # only needed if not already enabled\n' "$USER"
+    fi
     printf '\nPut your HTTPS reverse proxy / Warpgate target in front of %s.\n' "$LOCAL_WEB_URL"
     printf 'In the UI, add an instance with Backend URL empty so browser API calls use this frontend proxy.\n'
     printf '\nDocs: https://docs.oore.build\n'
@@ -1070,8 +1462,12 @@ print_next_steps() {
 
   if "$daemon_running"; then
     printf 'Daemon is running at %s\n\n' "$DAEMON_URL"
-    printf 'To keep the daemon running across login sessions:\n'
-    printf '  oored install-service --listen 127.0.0.1:8787\n\n'
+    if should_install_daemon_service; then
+      printf 'Daemon service: launchd enabled\n\n'
+    else
+      printf 'To keep the daemon running across login sessions:\n'
+      printf '  oored install-service --listen %s\n\n' "$OORE_DAEMON_LISTEN"
+    fi
     printf 'Complete setup (local-first):\n'
     if has_local_web_bundle; then
       printf '  %s/setup\n' "$LOCAL_WEB_URL"
@@ -1084,13 +1480,18 @@ print_next_steps() {
     elif has_local_web_bundle; then
       printf '  local web start:  oore-web --backend-url %s\n' "$DAEMON_URL"
     fi
-    printf '\nRemote mode (optional later, requires HTTPS backend):\n'
-    printf '  %s\n' "$OORE_HOSTED_UI"
+    if [[ -n "$OORE_PUBLIC_URL" ]]; then
+      printf '\nSplit frontend setup URL:\n'
+      printf '  %s/setup\n' "${OORE_PUBLIC_URL%/}"
+    else
+      printf '\nRemote mode (optional later, requires HTTPS backend):\n'
+      printf '  %s\n' "$OORE_HOSTED_UI"
+    fi
   else
     printf 'Start the daemon:\n'
-    printf '  oored run --listen 127.0.0.1:8787\n\n'
+    printf '  oored run --listen %s\n\n' "$OORE_DAEMON_LISTEN"
     printf 'Or install it as a launch-at-login service:\n'
-    printf '  oored install-service --listen 127.0.0.1:8787\n\n'
+    printf '  oored install-service --listen %s\n\n' "$OORE_DAEMON_LISTEN"
     printf 'Then complete setup (local-first):\n'
     if has_local_web_bundle; then
       printf '  %s/setup\n' "$LOCAL_WEB_URL"
@@ -1130,9 +1531,11 @@ main() {
   trap cleanup EXIT
   init_ui_theme
 
-  validate_install_mode
   validate_local_web_mode
   validate_channel
+  validate_optional_bool_env OORE_START_DAEMON "$OORE_START_DAEMON"
+  validate_optional_bool_env OORE_INSTALL_DAEMON_SERVICE "$OORE_INSTALL_DAEMON_SERVICE"
+  validate_optional_bool_env OORE_ENABLE_LINGER "$OORE_ENABLE_LINGER"
 
   if normalize_bool "$OORE_NONINTERACTIVE"; then
     :
@@ -1142,12 +1545,13 @@ main() {
     fi
   fi
 
-  print_install_intro
-
   detect_os
-  if [[ "$OORE_INSTALL_MODE" == "full" && "$RELEASE_OS" != "darwin" ]]; then
-    die 'Oore CI V1 backend installer currently supports macOS only.'
-  fi
+  validate_install_mode
+  configure_install_mode
+  validate_install_mode
+  configure_backend_install
+  configure_frontend_install
+  print_install_intro
 
   ensure_dependency curl
   ensure_dependency tar
@@ -1206,7 +1610,11 @@ main() {
 
   if is_noninteractive; then
     # Step 5: Non-interactive daemon handling
-    if [[ -n "$OORE_START_DAEMON" ]]; then
+    if should_install_daemon_service; then
+      step "Installing daemon service..."
+      install_daemon_service || die "Daemon service startup failed. Check logs: $DAEMON_LOG"
+      step_done "$DAEMON_URL (launchd)"
+    elif [[ -n "$OORE_START_DAEMON" ]]; then
       if normalize_bool "$OORE_START_DAEMON"; then
         step "Starting daemon..."
         start_daemon || die "Daemon startup failed. Check logs: $DAEMON_LOG"
@@ -1226,9 +1634,28 @@ main() {
       step_done "skipped (non-interactive default)"
     fi
   else
-    # Step 5: Interactive — auto-start daemon
-    step "Starting daemon..."
-    if start_daemon; then
+    # Step 5: Interactive daemon handling
+    if should_install_daemon_service; then
+      step "Installing daemon service..."
+      if install_daemon_service; then
+        daemon_started=0
+      else
+        daemon_started=1
+      fi
+    elif normalize_bool "${OORE_START_DAEMON:-true}"; then
+      step "Starting daemon..."
+      if start_daemon; then
+        daemon_started=0
+      else
+        daemon_started=1
+      fi
+    else
+      step "Starting daemon..."
+      step_done "skipped"
+      daemon_started=1
+    fi
+
+    if [[ "$daemon_started" -eq 0 ]]; then
       step_done "$DAEMON_URL (healthy)"
 
       # Auto-generate bootstrap token if not already configured

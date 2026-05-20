@@ -51,31 +51,47 @@ In this shape:
 - `oore-web` forwards `/v1/*` requests, including Warpgate identity headers and cookies, to the Mac daemon over NetBird.
 - Users add the instance with an empty **Backend URL** so browser requests stay on the HTTPS frontend origin.
 
-On the Mac Studio, start the daemon on the NetBird address:
+On the Mac Studio, install the backend on the NetBird address. The interactive installer asks for this listen address, public URL, allowed origins, and whether to install a launchd service:
 
 ```bash
-export OORED_LISTEN_ADDR=100.64.10.20:8787
-export OORE_CORS_ORIGINS=https://ci.builds.example.corp
-export RUST_LOG=info
-
-oored run --listen 100.64.10.20:8787
+curl -fsSL https://oore.build/install | OORE_CHANNEL=alpha bash
 ```
 
-Install the frontend-only bundle on Ubuntu:
+Non-interactive Mac Studio equivalent:
 
 ```bash
 curl -fsSL https://oore.build/install | \
+  OORE_CHANNEL=alpha \
+  OORE_DAEMON_LISTEN=100.64.10.20:8787 \
+  OORE_PUBLIC_URL=https://ci.builds.example.corp \
+  OORE_INSTALL_DAEMON_SERVICE=true \
+  OORE_NONINTERACTIVE=1 \
+  bash
+```
+
+Install the frontend-only bundle on Ubuntu. On Linux, `auto` mode selects frontend-only and prompts for the backend URL, loopback listen address, systemd service, and lingering:
+
+```bash
+curl -fsSL https://oore.build/install | OORE_CHANNEL=alpha bash
+```
+
+Non-interactive Ubuntu equivalent:
+
+```bash
+curl -fsSL https://oore.build/install | \
+  OORE_CHANNEL=alpha \
   OORE_INSTALL_MODE=frontend \
   OORE_WEB_BACKEND_URL=http://100.64.10.20:8787 \
   OORE_LOCAL_WEB_LISTEN=127.0.0.1:4173 \
   OORE_LOCAL_WEB_MODE=login \
+  OORE_ENABLE_LINGER=true \
   OORE_NONINTERACTIVE=1 \
   bash
 ```
 
 Replace `100.64.10.20` with the Mac Studio NetBird IP or DNS name. Keep `OORE_LOCAL_WEB_LISTEN` on loopback unless you have a reason to expose the launcher directly.
 
-For the Linux user service to survive logout and reboot:
+For the Linux user service to survive logout and reboot, the installer can run this when `OORE_ENABLE_LINGER=true`:
 
 ```bash
 sudo loginctl enable-linger "$USER"
@@ -99,6 +115,8 @@ Configure the Mac daemon's trusted proxy CIDRs to allow the Ubuntu NetBird addre
 
 ## 1. Build the binaries and web UI
 
+For release installs, prefer the installer commands above. Build from source only when you are testing local code changes.
+
 ```bash
 bun install
 bun run build:web
@@ -119,7 +137,7 @@ Choose the VPN-visible HTTPS origin you want users to open, for example:
 - `https://ci.macstudio.internal`
 - `https://ci.builds.example.corp`
 
-Then start `oored` on loopback:
+Then start `oored` on loopback, or use `oored install-service` for a persistent daemon:
 
 ```bash
 export OORED_LISTEN_ADDR=127.0.0.1:8787

@@ -43,12 +43,12 @@ curl -fsSL https://oore.build/install | OORE_CHANNEL=alpha bash
 The installer:
 
 - Detects your architecture (`arm64` or `x86_64`)
+- Chooses backend install on macOS and frontend-only install on Linux when `OORE_INSTALL_MODE=auto`
 - Downloads the matching release tarball
 - Verifies SHA-256 checksums
 - Installs `oored`, `oore`, and `oore-web` under `~/.oore/bin`
 - Installs prebuilt local web assets under `~/.oore/web-dist`
-- Prompts for optional first-run actions (start daemon, generate setup token, open links)
-- For localhost backends, asks whether you plan to expose HTTPS publicly and can start/auto-start local web UI for you
+- Prompts for first-run configuration: daemon listen address, public URL, launchd service, frontend backend URL, loopback listen address, and frontend autostart where relevant
 
 `oored` stores its local encryption key in a file under the daemon data directory
 (for example `~/Library/Application Support/oore/encryption.key`) and applies `0600` permissions.
@@ -69,7 +69,15 @@ If `OORE_NONINTERACTIVE=1` and `OORE_START_DAEMON` is not set, daemon startup is
 
 ## Frontend-only install
 
-Use frontend-only mode when `oored` runs on a Mac host but the browser-facing web UI runs on a separate Linux or macOS machine.
+Use frontend-only mode when `oored` runs on a Mac host but the browser-facing web UI runs on a separate Linux or macOS machine. On Linux, `OORE_INSTALL_MODE=auto` selects frontend-only mode automatically.
+
+For an interactive Ubuntu install, run:
+
+```bash
+curl -fsSL https://oore.build/install | OORE_CHANNEL=alpha bash
+```
+
+The installer asks for the Mac daemon URL, keeps `oore-web` on loopback by default, can install a systemd user service, and can enable lingering so the service survives logout/reboot.
 
 Example for an Ubuntu frontend host that reaches the Mac daemon through NetBird:
 
@@ -79,6 +87,7 @@ curl -fsSL https://oore.build/install | \
   OORE_WEB_BACKEND_URL=http://100.64.10.20:8787 \
   OORE_LOCAL_WEB_LISTEN=127.0.0.1:4173 \
   OORE_LOCAL_WEB_MODE=login \
+  OORE_ENABLE_LINGER=true \
   OORE_NONINTERACTIVE=1 \
   bash
 ```
@@ -90,6 +99,7 @@ Frontend-only mode:
 - Does not install or start `oored`, `oore`, or the embedded runner.
 - Proxies `/v1/*` and `/healthz` from the frontend host to `OORE_WEB_BACKEND_URL`.
 - Uses a systemd user service on Linux when `OORE_LOCAL_WEB_MODE=login`.
+- Refuses non-interactive frontend-only installs unless `OORE_WEB_BACKEND_URL` or `OORE_DAEMON_URL` was explicitly provided.
 
 For a Linux user service to survive logout and reboot, enable lingering for the service user:
 
@@ -111,7 +121,7 @@ If `oore`/`oored` are not found, open a new terminal (so your shell picks up PAT
 
 ## Run the daemon as a service
 
-For a persistent local daemon, install `oored` as a macOS launchd user service:
+For a persistent local daemon, install `oored` as a macOS launchd user service. Interactive installs ask whether to do this for you.
 
 ```bash
 oored install-service --listen 127.0.0.1:8787
@@ -172,18 +182,23 @@ Continue with [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding).
 |---|---|---|
 | `OORE_VERSION` | `latest` | Release selector (`latest` or tag like `v0.2.0`) |
 | `OORE_CHANNEL` | `stable` | Channel selector when `OORE_VERSION=latest`: `stable`, `beta`, or `alpha` |
-| `OORE_INSTALL_MODE` | `full` | Install `full` macOS backend/CLI/frontend bundle, or `frontend` web-only bundle |
+| `OORE_INSTALL_MODE` | `auto` | Install mode: `auto`, `full` macOS backend/CLI/frontend bundle, or `frontend` web-only bundle |
 | `OORE_INSTALL_ROOT` | `~/.oore` | Installation directory |
 | `OORE_GITHUB_REPO` | `devaryakjha/oore.build` | GitHub repository used to resolve `latest` and download assets |
 | `OORE_RELEASE_BASE_URL` | `https://github.com/<repo>/releases/download` | Base URL that contains `<tag>/` release assets |
 | `OORE_RELEASE_MANIFEST_URL` | `https://api.github.com/repos/<repo>/releases/latest` | Metadata URL used when `OORE_VERSION=latest` |
 | `OORE_RELEASES_LIST_URL` | `https://api.github.com/repos/<repo>/releases?per_page=100` | Release list URL used when `OORE_VERSION=latest` and `OORE_CHANNEL` is `alpha` or `beta` |
 | `OORE_NONINTERACTIVE` | `0` | Disable prompts when set to `1` |
+| `OORE_DAEMON_LISTEN` | from `OORE_DAEMON_URL` | Daemon listen address for full installs, for example `100.64.10.20:8787` on a Mac Studio backend reachable over NetBird |
 | `OORE_START_DAEMON` | unset | Non-interactive daemon startup behavior (`true` or `false`) |
+| `OORE_INSTALL_DAEMON_SERVICE` | unset | Non-interactive launchd service install/start behavior for full macOS installs (`true` or `false`) |
+| `OORE_PUBLIC_URL` | unset | Browser-visible HTTPS URL passed to the daemon service as External Access fallback |
+| `OORE_CORS_ORIGINS` | `OORE_PUBLIC_URL` when set | Comma-separated allowed browser origins passed to the daemon service |
 | `OORE_DAEMON_URL` | `http://127.0.0.1:8787` | Daemon URL used by full-mode setup helpers |
 | `OORE_WEB_BACKEND_URL` | `OORE_DAEMON_URL` | Backend URL proxied by `oore-web`, useful for frontend-only hosts |
 | `OORE_LOCAL_WEB_MODE` | unset | Non-interactive local web behavior for localhost backends: `off`, `run`, or `login` (launch-at-login) |
 | `OORE_LOCAL_WEB_LISTEN` | `127.0.0.1:4173` | Bind address for `oore-web` |
+| `OORE_ENABLE_LINGER` | unset | Enable systemd lingering for Linux frontend service installs (`true` or `false`) |
 
 ## Troubleshooting
 

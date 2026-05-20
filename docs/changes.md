@@ -20,6 +20,14 @@ Rules:
   - Updated install, production deployment, clean reinstall, troubleshooting, and CLI docs so users can run persistent daemon setups without hand-writing launchd plists.
   - Feature doc: https://linear.app/oorebuild/document/feature-oored-launchd-service-installuninstall-3878b499a450
 
+- **Guided split deployment installer**:
+  - Installer mode now supports `auto`: Linux resolves to frontend-only install, while macOS keeps the backend/runner install path by default.
+  - Frontend-only installs now prompt for the Mac Studio backend URL, keep `oore-web` loopback by default, configure `run`/`login` service behavior, and can enable systemd lingering for Ubuntu service survival across logout/reboot.
+  - Non-interactive frontend-only installs now fail fast unless a backend URL was explicitly provided, preventing accidental proxies to `127.0.0.1`.
+  - Full macOS installs now accept `OORE_DAEMON_LISTEN`, `OORE_PUBLIC_URL`, `OORE_CORS_ORIGINS`, and `OORE_INSTALL_DAEMON_SERVICE`, with interactive prompts for the same values.
+  - Updated split Mac Studio + Ubuntu + NetBird + Warpgate docs around the new guided install path.
+  - Feature doc: https://linear.app/oorebuild/document/feature-guided-split-deployment-installer-9da0d4bf02f6
+
 ## 2026-05-16
 
 - **Complexity optimization pass**:
