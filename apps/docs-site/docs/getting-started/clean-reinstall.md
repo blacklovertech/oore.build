@@ -11,7 +11,8 @@ If you need to reset your Oore CI instance after a mis‑configuration or a fail
 ```bash
 # If you started the daemon in the foreground
 Ctrl+C
-# Or stop a background service (macOS launch agent example)
+# Or remove the macOS launchd service
+oored uninstall-service 2>/dev/null || true
 launchctl bootout gui/$(id -u)/build.oore.oored 2>/dev/null || true
 ```
 

@@ -10,6 +10,16 @@ Rules:
 - Any code change under `apps/`, `crates/`, `tools/`, etc. must add an entry here.
 - Include a Linear issue/doc link for each entry.
 
+## 2026-05-20
+
+- **Daemon launchd service management**:
+  - Implemented `oored install-service` and `oored uninstall-service` for macOS launchd user services.
+  - `install-service` now writes `~/Library/LaunchAgents/build.oore.oored.plist`, starts the service by default, keeps the daemon alive, supports custom `--listen`, `--state-file`, `--label`, repeatable `--env KEY=VALUE`, and `--no-start`.
+  - `uninstall-service` unloads/removes the service plist while leaving daemon data and logs untouched.
+  - Install and uninstall scripts now use the same Oore CI banner/summary treatment in interactive and non-interactive runs, making CI logs and copied terminal output easier to follow.
+  - Updated install, production deployment, clean reinstall, troubleshooting, and CLI docs so users can run persistent daemon setups without hand-writing launchd plists.
+  - Feature doc: https://linear.app/oorebuild/document/feature-oored-launchd-service-installuninstall-3878b499a450
+
 ## 2026-05-16
 
 - **Complexity optimization pass**:

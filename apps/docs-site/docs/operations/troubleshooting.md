@@ -153,6 +153,22 @@ launchctl bootout gui/$(id -u)/build.oore.oore-web 2>/dev/null || true
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/build.oore.oore-web.plist
 ```
 
+### Daemon service does not start
+
+Check the launchd service and daemon logs:
+
+```bash
+launchctl print gui/$(id -u)/build.oore.oored
+tail -n 200 ~/.oore/logs/oored.log
+```
+
+Reload the service:
+
+```bash
+oored uninstall-service
+oored install-service --listen 127.0.0.1:8787
+```
+
 ## Signing failures
 
 ### "Certificate not found" or "Profile not found"

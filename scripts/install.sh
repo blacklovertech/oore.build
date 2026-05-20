@@ -140,6 +140,7 @@ print_install_intro() {
   printf '%bOore CI Installer%b\n' "$UI_BOLD$UI_ACCENT" "$UI_RESET"
   printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
   printf '  Mode:          %s\n' "$OORE_INSTALL_MODE"
+  printf '  Prompting:     %s\n' "$(ui_prompt_mode)"
   printf '  Install root:  %s\n' "$OORE_INSTALL_ROOT"
   if [[ "$OORE_VERSION" == "latest" ]]; then
     printf '  Release:       latest (%s channel)\n' "$OORE_CHANNEL"
@@ -188,6 +189,16 @@ normalize_bool() {
 
 is_noninteractive() {
   normalize_bool "$OORE_NONINTERACTIVE"
+}
+
+ui_prompt_mode() {
+  if is_noninteractive; then
+    printf 'non-interactive'
+  elif has_prompt_tty; then
+    printf 'interactive'
+  else
+    printf 'auto-defaults (no TTY)'
+  fi
 }
 
 prompt_yes_no() {
@@ -1039,7 +1050,8 @@ print_next_steps() {
     local_web_running=true
   fi
 
-  printf '\nInstallation complete.\n\n'
+  printf '\n%bInstallation complete%b\n' "$UI_BOLD$UI_ACCENT" "$UI_RESET"
+  printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
 
   if [[ "$OORE_INSTALL_MODE" == "frontend" ]]; then
     printf 'Frontend is installed at %s\n' "$LOCAL_WEB_URL"
@@ -1058,6 +1070,8 @@ print_next_steps() {
 
   if "$daemon_running"; then
     printf 'Daemon is running at %s\n\n' "$DAEMON_URL"
+    printf 'To keep the daemon running across login sessions:\n'
+    printf '  oored install-service --listen 127.0.0.1:8787\n\n'
     printf 'Complete setup (local-first):\n'
     if has_local_web_bundle; then
       printf '  %s/setup\n' "$LOCAL_WEB_URL"
@@ -1075,6 +1089,8 @@ print_next_steps() {
   else
     printf 'Start the daemon:\n'
     printf '  oored run --listen 127.0.0.1:8787\n\n'
+    printf 'Or install it as a launch-at-login service:\n'
+    printf '  oored install-service --listen 127.0.0.1:8787\n\n'
     printf 'Then complete setup (local-first):\n'
     if has_local_web_bundle; then
       printf '  %s/setup\n' "$LOCAL_WEB_URL"
@@ -1126,9 +1142,7 @@ main() {
     fi
   fi
 
-  if ! is_noninteractive; then
-    print_install_intro
-  fi
+  print_install_intro
 
   detect_os
   if [[ "$OORE_INSTALL_MODE" == "full" && "$RELEASE_OS" != "darwin" ]]; then

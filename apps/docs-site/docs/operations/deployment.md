@@ -30,15 +30,24 @@ cargo build --release -p oore
 
 The release binaries are at `target/release/oored` and `target/release/oore`.
 
-### 2. Configure the daemon
+### 2. Install the daemon service
 
-Set environment variables:
+Keep the daemon bound to loopback and run it as a macOS launchd user service:
 
 ```bash
-export OORED_LISTEN_ADDR=127.0.0.1:8787
-export OORE_CORS_ORIGINS=https://ci.mycompany.com
-export RUST_LOG=info
+./target/release/oored install-service \
+  --listen 127.0.0.1:8787 \
+  --env OORE_PUBLIC_URL=https://ci.mycompany.com \
+  --env OORE_CORS_ORIGINS=https://ci.mycompany.com \
+  --env RUST_LOG=info
 ```
+
+If you installed release binaries with the installer, use `oored install-service`
+instead of `./target/release/oored install-service`.
+
+The service plist is written to
+`~/Library/LaunchAgents/build.oore.oored.plist`, and daemon logs are written to
+`~/.oore/logs/oored.log`.
 
 ### 3. Set up a reverse proxy
 
@@ -99,6 +108,7 @@ For production, use S3 or R2 instead of local storage. See [Configure Storage](/
 ```bash
 curl https://ci.mycompany.com/v1/public/setup-status
 curl https://ci.mycompany.com/healthz
+launchctl print gui/$(id -u)/build.oore.oored
 ```
 
 ## Security hardening

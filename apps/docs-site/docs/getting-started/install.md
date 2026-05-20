@@ -109,6 +109,31 @@ oore version
 
 If `oore`/`oored` are not found, open a new terminal (so your shell picks up PATH changes) or use the full path under `~/.oore/bin`.
 
+## Run the daemon as a service
+
+For a persistent local daemon, install `oored` as a macOS launchd user service:
+
+```bash
+oored install-service --listen 127.0.0.1:8787
+```
+
+The service keeps `oored` running across login sessions and writes logs to
+`~/.oore/logs/oored.log`. To pass deployment-specific settings into launchd,
+repeat `--env KEY=VALUE`:
+
+```bash
+oored install-service \
+  --listen 127.0.0.1:8787 \
+  --env OORE_PUBLIC_URL=https://ci.mycompany.com \
+  --env OORE_CORS_ORIGINS=https://ci.mycompany.com
+```
+
+Remove the service without deleting data:
+
+```bash
+oored uninstall-service
+```
+
 ## Update (self-update)
 
 `oore update` downloads the latest release for your installed channel and updates binaries in-place.

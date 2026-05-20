@@ -8,12 +8,15 @@ BIN_DIR="$OORE_INSTALL_ROOT/bin"
 DAEMON_PID_FILE="$OORE_INSTALL_ROOT/oored.pid"
 WEB_PID_FILE="$OORE_INSTALL_ROOT/oore-web.pid"
 DATA_DIR="$HOME/Library/Application Support/oore"
+DAEMON_LAUNCH_AGENT_LABEL="build.oore.oored"
+DAEMON_LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/$DAEMON_LAUNCH_AGENT_LABEL.plist"
 WEB_LAUNCH_AGENT_LABEL="build.oore.oore-web"
 WEB_LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/$WEB_LAUNCH_AGENT_LABEL.plist"
 UI_RESET=""
 UI_BOLD=""
 UI_DIM=""
 UI_ACCENT=""
+UI_SUCCESS=""
 UI_WARNING=""
 UI_ERROR=""
 
@@ -48,6 +51,7 @@ init_ui_theme() {
     UI_BOLD=$'\033[1m'
     UI_DIM=$'\033[2m\033[38;2;120;113;108m'
     UI_ACCENT=$'\033[38;2;217;119;6m'
+    UI_SUCCESS=$'\033[38;2;245;158;11m'
     UI_WARNING=$'\033[38;2;251;191;36m'
     UI_ERROR=$'\033[38;2;220;38;38m'
   fi
@@ -70,8 +74,14 @@ print_uninstall_intro() {
   print_ascii_banner
   printf '%bOore CI Uninstaller%b\n' "$UI_BOLD$UI_ACCENT" "$UI_RESET"
   printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
+  printf '  Prompting:     %s\n' "$(ui_prompt_mode)"
   printf '  Install dir:   %s\n' "$OORE_INSTALL_ROOT"
   printf '  Data dir:      %s\n' "$DATA_DIR"
+  if is_noninteractive; then
+    printf '  Data action:   remove automatically\n'
+  else
+    printf '  Data action:   ask before removing\n'
+  fi
   printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
 }
 
@@ -85,6 +95,16 @@ normalize_bool() {
 
 is_noninteractive() {
   normalize_bool "$OORE_NONINTERACTIVE"
+}
+
+ui_prompt_mode() {
+  if is_noninteractive; then
+    printf 'non-interactive'
+  elif has_prompt_tty; then
+    printf 'interactive'
+  else
+    printf 'auto-defaults (no TTY)'
+  fi
 }
 
 prompt_yes_no() {
@@ -212,6 +232,24 @@ stop_daemon() {
   fi
 }
 
+remove_daemon_launch_agent() {
+  if [[ -x "$BIN_DIR/oored" ]]; then
+    "$BIN_DIR/oored" uninstall-service >/dev/null 2>&1 || true
+  fi
+
+  if command -v launchctl >/dev/null 2>&1; then
+    local uid=""
+    uid="$(id -u)"
+    launchctl bootout "gui/$uid/$DAEMON_LAUNCH_AGENT_LABEL" >/dev/null 2>&1 || true
+    launchctl remove "$DAEMON_LAUNCH_AGENT_LABEL" >/dev/null 2>&1 || true
+  fi
+
+  if [[ -f "$DAEMON_LAUNCH_AGENT_PLIST" ]]; then
+    log "Removing launch agent: $DAEMON_LAUNCH_AGENT_PLIST"
+    rm -f "$DAEMON_LAUNCH_AGENT_PLIST"
+  fi
+}
+
 stop_local_web() {
   if [[ -f "$WEB_PID_FILE" ]]; then
     local pid=""
@@ -236,10 +274,12 @@ stop_local_web() {
 }
 
 remove_local_web_launch_agent() {
-  local uid=""
-  uid="$(id -u)"
-  launchctl bootout "gui/$uid/$WEB_LAUNCH_AGENT_LABEL" >/dev/null 2>&1 || true
-  launchctl remove "$WEB_LAUNCH_AGENT_LABEL" >/dev/null 2>&1 || true
+  if command -v launchctl >/dev/null 2>&1; then
+    local uid=""
+    uid="$(id -u)"
+    launchctl bootout "gui/$uid/$WEB_LAUNCH_AGENT_LABEL" >/dev/null 2>&1 || true
+    launchctl remove "$WEB_LAUNCH_AGENT_LABEL" >/dev/null 2>&1 || true
+  fi
 
   if [[ -f "$WEB_LAUNCH_AGENT_PLIST" ]]; then
     log "Removing launch agent: $WEB_LAUNCH_AGENT_PLIST"
@@ -306,17 +346,19 @@ remove_data_dir() {
 main() {
   init_ui_theme
 
+  if normalize_bool "$OORE_NONINTERACTIVE"; then
+    :
+  else
+    if [[ "$?" -eq 2 ]]; then
+      die 'OORE_NONINTERACTIVE must be one of: 1,0,true,false,yes,no,on,off.'
+    fi
+  fi
+
+  print_uninstall_intro
+
   if [[ ! -d "$OORE_INSTALL_ROOT" ]] && ! grep -rqF "$BIN_DIR" "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile" 2>/dev/null; then
     log "Oore CI does not appear to be installed."
     exit 0
-  fi
-
-  if ! is_noninteractive; then
-    print_uninstall_intro
-  else
-    log "This will uninstall Oore CI from your system."
-    log "Install dir: $OORE_INSTALL_ROOT"
-    log "Data dir:    $DATA_DIR"
   fi
 
   if ! is_noninteractive; then
@@ -326,6 +368,7 @@ main() {
     fi
   fi
 
+  remove_daemon_launch_agent
   stop_daemon
   stop_local_web
   remove_local_web_launch_agent
@@ -333,8 +376,7 @@ main() {
   remove_install_dir
   remove_data_dir
 
-  log ""
-  log "Oore CI has been uninstalled."
+  printf '\n%bOore CI has been uninstalled.%b\n' "$UI_BOLD$UI_SUCCESS" "$UI_RESET"
   log "Open a new terminal for PATH changes to take effect."
 }
 
