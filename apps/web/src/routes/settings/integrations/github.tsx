@@ -34,7 +34,8 @@ export const Route = createFileRoute('/settings/integrations/github')({
 function GitHubSetupPage() {
   const instance = useActiveInstance()
   const startMutation = useGitHubAppStart()
-  const { data: preferences } = useInstancePreferences()
+  const { data: preferences, isLoading: preferencesLoading } =
+    useInstancePreferences()
   const remoteEnabled = preferences?.preferences.runtime_mode === 'remote'
 
   const backendUrl = instance?.url ?? ''
@@ -79,14 +80,18 @@ function GitHubSetupPage() {
             </p>
             <Button
               onClick={handleConnect}
-              disabled={startMutation.isPending || !remoteEnabled}
+              disabled={
+                startMutation.isPending || preferencesLoading || !remoteEnabled
+              }
             >
               <HugeiconsIcon icon={LinkSquare02Icon} size={16} />
-              {!remoteEnabled
-                ? 'External Access Required'
-                : startMutation.isPending
-                  ? 'Starting...'
-                  : 'Create GitHub App'}
+              {preferencesLoading
+                ? 'Checking access...'
+                : !remoteEnabled
+                  ? 'External Access Required'
+                  : startMutation.isPending
+                    ? 'Starting...'
+                    : 'Create GitHub App'}
               {!startMutation.isPending ? (
                 <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
               ) : null}
@@ -130,7 +135,7 @@ function GitHubSetupPage() {
         <AlertDescription>
           {remoteEnabled
             ? 'After GitHub installation, you will return to Sources with the connection status updated.'
-            : 'GitHub source connections are disabled in Local Only mode. Enable External Access in Preferences to continue.'}
+            : 'GitHub source connections require the backend to be in Remote mode. Update access policy in Preferences to continue.'}
         </AlertDescription>
       </Alert>
     </PageLayout>

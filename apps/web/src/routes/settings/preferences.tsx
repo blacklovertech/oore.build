@@ -12,6 +12,7 @@ import {
   CheckmarkCircle02Icon,
   Folder02Icon,
 } from '@hugeicons/core-free-icons'
+import type { RemoteAuthMode } from '@/lib/types'
 import { useMountEffect } from '@/hooks/use-mount-effect'
 
 import {
@@ -28,10 +29,12 @@ import {
   useExternalAccessNetworkSettings,
   useExternalAccessOidc,
   useExternalAccessPreflight,
+  useExternalAccessTrustedProxySettings,
   useInstancePreferences,
   useTestOidcConnection,
   useUpdateArtifactStorageSettings,
   useUpdateExternalAccessNetworkSettings,
+  useUpdateExternalAccessTrustedProxySettings,
   useUpdateInstancePreferences,
 } from '@/hooks/use-artifact-storage'
 import PageLayout from '@/components/page-layout'
@@ -159,6 +162,14 @@ const externalAccessOidcSchema = z.object({
 
 type ExternalAccessOidcFormValues = z.infer<typeof externalAccessOidcSchema>
 
+const trustedProxySchema = z.object({
+  user_email_header: z.string().trim().min(1, 'User email header is required.'),
+  trusted_proxy_cidrs: z.string().optional(),
+  shared_secret: z.string().optional(),
+})
+
+type TrustedProxyFormValues = z.infer<typeof trustedProxySchema>
+
 function guidanceForPreflight(checkId: string, failureCode?: string): string {
   if (failureCode === 'external_access_public_url_missing') {
     return 'Set a non-loopback HTTPS Public URL in External Access network settings.'
@@ -175,10 +186,30 @@ function guidanceForPreflight(checkId: string, failureCode?: string): string {
   if (checkId === 'oidc_configured') {
     return 'Configure OIDC and verify runtime auth settings.'
   }
+  if (checkId === 'trusted_proxy_configured') {
+    return 'Configure Trusted Proxy identity settings and shared secret.'
+  }
   if (checkId === 'redirect_policy_consistent') {
     return 'Ensure redirect URI policy matches your configured public origin.'
   }
   return 'Resolve this check before enabling External Access.'
+}
+
+function authModeLabel(mode: RemoteAuthMode | undefined): string {
+  return mode === 'trusted_proxy' ? 'Trusted Proxy' : 'OIDC'
+}
+
+function authModeDescription(mode: RemoteAuthMode | undefined): string {
+  return mode === 'trusted_proxy'
+    ? 'Sign-in is delegated to a trusted upstream proxy.'
+    : 'Sign-in uses your configured OIDC provider.'
+}
+
+function parseTrustedProxyCidrs(value: string | undefined): Array<string> {
+  return (value ?? '')
+    .split(/[\n,]/g)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
 }
 
 const externalAccessNetworkSchema = z.object({
@@ -223,6 +254,7 @@ function PreferencesPage() {
   const [readinessOpen, setReadinessOpen] = useState(false)
   const [networkEditorOpen, setNetworkEditorOpen] = useState(false)
   const [oidcDialogOpen, setOidcDialogOpen] = useState(false)
+  const [trustedProxyDialogOpen, setTrustedProxyDialogOpen] = useState(false)
   const [artifactDirPickerOpen, setArtifactDirPickerOpen] = useState(false)
   const canWrite = useHasPermission('instance_settings', 'write')
   const user = useAuthStore((s) => s.user)
@@ -237,7 +269,10 @@ function PreferencesPage() {
   const preflightQuery = useExternalAccessPreflight()
   const networkSettingsQuery = useExternalAccessNetworkSettings()
   const oidcConfigQuery = useExternalAccessOidc()
+  const trustedProxyQuery = useExternalAccessTrustedProxySettings()
   const configureExternalAccessOidcMutation = useConfigureExternalAccessOidc()
+  const updateTrustedProxyMutation =
+    useUpdateExternalAccessTrustedProxySettings()
   const testOidcConnectionMutation = useTestOidcConnection()
   const updateNetworkSettingsMutation = useUpdateExternalAccessNetworkSettings()
   const updateStorageMutation = useUpdateArtifactStorageSettings()
@@ -328,10 +363,29 @@ function PreferencesPage() {
     mode: 'onBlur',
   })
 
+  const trustedProxySettings = trustedProxyQuery.data?.settings
+  const trustedProxyValues = useMemo(() => {
+    if (!trustedProxySettings) return undefined
+    return {
+      user_email_header: trustedProxySettings.user_email_header,
+      trusted_proxy_cidrs: trustedProxySettings.trusted_proxy_cidrs.join('\n'),
+      shared_secret: '',
+    }
+  }, [trustedProxySettings])
+
+  const trustedProxyForm = useForm<TrustedProxyFormValues>({
+    resolver: zodResolver(trustedProxySchema),
+    defaultValues: {
+      user_email_header: 'x-oore-user-email',
+      trusted_proxy_cidrs: '',
+      shared_secret: '',
+    },
+    values: trustedProxyValues,
+    mode: 'onBlur',
+  })
+
   const backendKind = storageForm.watch('backend_kind')
   const objectService = storageForm.watch('object_service')
-
-
 
   useMountEffect(() => {
     const subscription = storageForm.watch((values, { name }) => {
@@ -349,8 +403,6 @@ function PreferencesPage() {
     })
     return () => subscription.unsubscribe()
   })
-
-
 
   function onSubmitStorage(values: StorageFormValues) {
     const provider =
@@ -500,6 +552,42 @@ function PreferencesPage() {
     )
   }
 
+  function onSubmitTrustedProxy(values: TrustedProxyFormValues) {
+    if (!isOwner) return
+
+    const sharedSecret = values.shared_secret?.trim()
+    updateTrustedProxyMutation.mutate(
+      {
+        user_email_header: values.user_email_header.trim(),
+        trusted_proxy_cidrs: parseTrustedProxyCidrs(values.trusted_proxy_cidrs),
+        ...(sharedSecret ? { shared_secret: sharedSecret } : {}),
+      },
+      {
+        onSuccess: () => {
+          toast.success('Trusted Proxy settings saved.')
+          setTrustedProxyDialogOpen(false)
+          trustedProxyForm.setValue('shared_secret', '')
+          void preflightQuery.refetch()
+        },
+        onError: (error) => {
+          toast.error(
+            getApiErrorMessage(error, {
+              external_access_owner_required:
+                'Only the owner can update Trusted Proxy settings.',
+              external_access_loopback_required:
+                'In Local Only mode, Trusted Proxy settings can only be changed from localhost on the host machine.',
+              invalid_trusted_proxy_header:
+                'Enter a valid HTTP header name for the user email header.',
+              invalid_trusted_proxy_cidr:
+                'Trusted proxy peers must be valid CIDR ranges.',
+              invalid_input: 'Check Trusted Proxy values and try again.',
+            }),
+          )
+        },
+      },
+    )
+  }
+
   const settings = settingsQuery.data?.settings
   const artifactBackendLabel = useMemo(() => {
     switch (settings?.provider) {
@@ -527,6 +615,11 @@ function PreferencesPage() {
   }, [settings?.source])
   const preferences = preferencesQuery.data?.preferences
   const externalAccessEnabled = preferences?.runtime_mode === 'remote'
+  const remoteAuthMode = preferences?.remote_auth_mode ?? 'oidc'
+  const identityCheckId =
+    remoteAuthMode === 'trusted_proxy'
+      ? 'trusted_proxy_configured'
+      : 'oidc_configured'
   const failedReadinessChecks = useMemo(
     () => preflightQuery.data?.checks.filter((check) => !check.ok) ?? [],
     [preflightQuery.data?.checks],
@@ -536,13 +629,17 @@ function PreferencesPage() {
     return new Map(entries.map((check) => [check.id, check]))
   }, [preflightQuery.data?.checks])
   const setupReady = readinessById.get('setup_ready')?.ok ?? false
-  const oidcReady = readinessById.get('oidc_configured')?.ok ?? false
-  const networkReady =
-    (readinessById.get('public_url_https')?.ok ?? false) &&
-    (readinessById.get('public_origin_allowed')?.ok ?? false) &&
-    (readinessById.get('redirect_policy_consistent')?.ok ?? false)
+  const identityReady = readinessById.get(identityCheckId)?.ok ?? false
+  const networkCheckIds = [
+    'public_url_https',
+    'public_origin_allowed',
+    ...(remoteAuthMode === 'oidc' ? ['redirect_policy_consistent'] : []),
+  ]
+  const networkReady = networkCheckIds.every(
+    (checkId) => readinessById.get(checkId)?.ok ?? false,
+  )
   const readinessReady = preflightQuery.data?.ready ?? false
-  const setupStepsComplete = Number(networkReady) + Number(oidcReady)
+  const setupStepsComplete = Number(networkReady) + Number(identityReady)
   const setupStepCount = 2
 
   function handleExternalAccessToggle() {
@@ -553,6 +650,7 @@ function PreferencesPage() {
       {
         key_storage_mode: preferences.key_storage_mode,
         runtime_mode: nextMode,
+        remote_auth_mode: preferences.remote_auth_mode,
       },
       {
         onSuccess: () => {
@@ -608,7 +706,9 @@ function PreferencesPage() {
               External Access
             </CardTitle>
             <Badge variant={externalAccessEnabled ? 'default' : 'secondary'}>
-              {externalAccessEnabled ? 'External Access' : 'Local Only'}
+              {externalAccessEnabled
+                ? `External Access - ${authModeLabel(remoteAuthMode)}`
+                : 'Local Only'}
             </Badge>
           </div>
         </CardHeader>
@@ -618,7 +718,7 @@ function PreferencesPage() {
               <p className="text-sm font-medium">Current access</p>
               <p className="text-xs text-muted-foreground">
                 {externalAccessEnabled
-                  ? 'Sign-in from network paths is active and uses OIDC.'
+                  ? authModeDescription(remoteAuthMode)
                   : 'Local Only is active. Sign-in is limited to localhost on this machine.'}
               </p>
             </div>
@@ -711,7 +811,11 @@ function PreferencesPage() {
 
                   <button
                     type="button"
-                    onClick={() => setOidcDialogOpen(true)}
+                    onClick={() =>
+                      remoteAuthMode === 'trusted_proxy'
+                        ? setTrustedProxyDialogOpen(true)
+                        : setOidcDialogOpen(true)
+                    }
                     disabled={!isOwner}
                     className="group w-full border border-border/60 bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
                   >
@@ -719,16 +823,46 @@ function PreferencesPage() {
                       <div>
                         <p className="text-sm font-medium">2. Identity</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {oidcReady
-                            ? 'OIDC provider configured.'
-                            : 'Configure OIDC provider.'}
+                          {identityReady
+                            ? `${authModeLabel(remoteAuthMode)} configured.`
+                            : `Configure ${authModeLabel(remoteAuthMode)}.`}
                         </p>
                       </div>
-                      <Badge variant={oidcReady ? 'success' : 'outline'}>
-                        {oidcReady ? 'Ready' : 'Setup'}
+                      <Badge variant={identityReady ? 'success' : 'outline'}>
+                        {identityReady ? 'Ready' : 'Setup'}
                       </Badge>
                     </div>
-                    {oidcConfig ? (
+                    {remoteAuthMode === 'trusted_proxy' &&
+                    trustedProxySettings ? (
+                      <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                        <p>
+                          <span className="font-medium text-foreground">
+                            Header:
+                          </span>{' '}
+                          <span className="font-mono">
+                            {trustedProxySettings.user_email_header}
+                          </span>
+                        </p>
+                        <p>
+                          <span className="font-medium text-foreground">
+                            Secret:
+                          </span>{' '}
+                          {trustedProxySettings.has_shared_secret
+                            ? 'Stored'
+                            : 'Missing'}
+                        </p>
+                        <p>
+                          <span className="font-medium text-foreground">
+                            Peer CIDRs:
+                          </span>{' '}
+                          {trustedProxySettings.trusted_proxy_cidrs.length > 0
+                            ? trustedProxySettings.trusted_proxy_cidrs.join(
+                                ', ',
+                              )
+                            : 'Loopback only'}
+                        </p>
+                      </div>
+                    ) : remoteAuthMode === 'oidc' && oidcConfig ? (
                       <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                         <p>
                           <span className="font-medium text-foreground">
@@ -757,7 +891,7 @@ function PreferencesPage() {
                       </div>
                     ) : null}
                     <p className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary">
-                      {oidcReady ? 'Reconfigure' : 'Configure'}
+                      {identityReady ? 'Reconfigure' : 'Configure'}
                       <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
                     </p>
                   </button>
@@ -902,13 +1036,19 @@ function PreferencesPage() {
 
                 <button
                   type="button"
-                  onClick={() => setOidcDialogOpen(true)}
+                  onClick={() =>
+                    remoteAuthMode === 'trusted_proxy'
+                      ? setTrustedProxyDialogOpen(true)
+                      : setOidcDialogOpen(true)
+                  }
                   disabled={!isOwner}
                   className="group w-full border border-border/60 bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <p className="text-sm font-medium">Identity settings</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Update issuer and client credentials.
+                    {remoteAuthMode === 'trusted_proxy'
+                      ? 'Update trusted proxy header, peer CIDRs, and secret.'
+                      : 'Update issuer and client credentials.'}
                   </p>
                   <p className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary">
                     Edit
@@ -1005,6 +1145,127 @@ function PreferencesPage() {
                     </>
                   ) : (
                     'Save Network Settings'
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={trustedProxyDialogOpen}
+        onOpenChange={(open) => {
+          setTrustedProxyDialogOpen(open)
+          if (!open) trustedProxyForm.setValue('shared_secret', '')
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Trusted Proxy Identity Settings</DialogTitle>
+            <DialogDescription>
+              Configure the backend trust contract used when an upstream proxy
+              provides the signed-in user email.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Form {...trustedProxyForm}>
+            <form
+              onSubmit={trustedProxyForm.handleSubmit(onSubmitTrustedProxy)}
+              className="space-y-4"
+            >
+              <FormField
+                control={trustedProxyForm.control}
+                name="user_email_header"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>User email header</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="x-oore-user-email"
+                        {...field}
+                        disabled={updateTrustedProxyMutation.isPending}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Header forwarded by oore-web after the upstream proxy has
+                      proven the request.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={trustedProxyForm.control}
+                name="trusted_proxy_cidrs"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Trusted proxy peer CIDRs</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        rows={4}
+                        placeholder="127.0.0.1/32&#10;10.0.0.10/32"
+                        {...field}
+                        disabled={updateTrustedProxyMutation.isPending}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      One CIDR per line. Leave blank to accept loopback peers
+                      only.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={trustedProxyForm.control}
+                name="shared_secret"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Shared secret</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        placeholder={
+                          trustedProxySettings?.has_shared_secret
+                            ? 'Leave empty to keep existing secret'
+                            : 'Paste shared secret'
+                        }
+                        {...field}
+                        disabled={updateTrustedProxyMutation.isPending}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Leave empty to keep the existing secret. Enter a new value
+                      only when rotating it.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setTrustedProxyDialogOpen(false)}
+                  disabled={updateTrustedProxyMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={!isOwner || updateTrustedProxyMutation.isPending}
+                >
+                  {updateTrustedProxyMutation.isPending ? (
+                    <>
+                      <Spinner className="size-4" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Trusted Proxy Settings'
                   )}
                 </Button>
               </DialogFooter>
@@ -1156,8 +1417,9 @@ function PreferencesPage() {
                     !externalAccessOidcForm.watch('issuer_url').trim()
                   }
                   onClick={() => {
-                    const issuerUrl =
-                      externalAccessOidcForm.getValues('issuer_url').trim()
+                    const issuerUrl = externalAccessOidcForm
+                      .getValues('issuer_url')
+                      .trim()
                     if (issuerUrl) {
                       testOidcConnectionMutation.mutate(
                         { issuer_url: issuerUrl },

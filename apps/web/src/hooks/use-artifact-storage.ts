@@ -6,6 +6,7 @@ import type {
   UpdateArtifactStorageSettingsRequest,
   UpdateExternalAccessNetworkSettingsRequest,
   UpdateInstancePreferencesRequest,
+  UpdateTrustedProxySettingsRequest,
 } from '@/lib/types'
 import {
   configureExternalAccessOidc,
@@ -13,10 +14,12 @@ import {
   getExternalAccessNetworkSettings,
   getExternalAccessOidc,
   getExternalAccessPreflight,
+  getExternalAccessTrustedProxySettings,
   getInstancePreferences,
   testOidcConnection,
   updateArtifactStorageSettings,
   updateExternalAccessNetworkSettings,
+  updateExternalAccessTrustedProxySettings,
   updateInstancePreferences,
 } from '@/lib/api'
 import { useActiveInstance } from '@/stores/instance-store'
@@ -197,6 +200,42 @@ export function useUpdateExternalAccessNetworkSettings() {
           instance?.id ?? '__none__',
           'external-access-network-settings',
         ],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'external-access-preflight'],
+      })
+    },
+  })
+}
+
+export function useExternalAccessTrustedProxySettings() {
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useQuery({
+    queryKey: [instance?.id ?? '__none__', 'external-access-trusted-proxy'],
+    queryFn: () => getExternalAccessTrustedProxySettings(baseUrl!, token!),
+    enabled: !!baseUrl && !!token,
+  })
+}
+
+export function useUpdateExternalAccessTrustedProxySettings() {
+  const queryClient = useQueryClient()
+  const baseUrl = useBaseUrl()
+  const token = useAuthToken()
+  const instance = useActiveInstance()
+
+  return useMutation({
+    mutationFn: (data: UpdateTrustedProxySettingsRequest) => {
+      if (!baseUrl || !token) {
+        return Promise.reject(new Error('Not authenticated'))
+      }
+      return updateExternalAccessTrustedProxySettings(baseUrl, token, data)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [instance?.id ?? '__none__', 'external-access-trusted-proxy'],
       })
       void queryClient.invalidateQueries({
         queryKey: [instance?.id ?? '__none__', 'external-access-preflight'],

@@ -53,9 +53,13 @@ export const Route = createFileRoute('/settings/integrations/')({
 function IntegrationsPage() {
   const search = useSearch({ from: '/settings/integrations/' })
   const { data, isLoading, error } = useIntegrations()
-  const { data: preferences } = useInstancePreferences()
+  const {
+    data: preferences,
+    isLoading: preferencesLoading,
+    error: preferencesError,
+  } = useInstancePreferences()
   const deleteMutation = useDeleteIntegration()
-  const runtimeMode = preferences?.preferences.runtime_mode ?? 'local'
+  const runtimeMode = preferences?.preferences.runtime_mode
   const remoteEnabled = runtimeMode === 'remote'
 
   useMountEffect(() => {
@@ -86,7 +90,21 @@ function IntegrationsPage() {
         description="Source connections used to discover repositories and trigger builds."
       />
 
-      {!remoteEnabled ? (
+      {preferencesLoading ? (
+        <Card>
+          <CardContent className="space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-2/3" />
+          </CardContent>
+        </Card>
+      ) : preferencesError ? (
+        <Alert variant="destructive">
+          <HugeiconsIcon icon={InformationCircleIcon} size={16} />
+          <AlertDescription>
+            Failed to load access policy: {preferencesError.message}
+          </AlertDescription>
+        </Alert>
+      ) : !remoteEnabled ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
@@ -95,9 +113,9 @@ function IntegrationsPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Source connections (GitHub/GitLab) are available only when
-              External Access is enabled. In Local Only mode, choose a local
-              directory during project creation.
+              Source connections (GitHub/GitLab) are available only when the
+              backend is in Remote mode. In Local Only mode, choose a local
+              repository during project creation.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -160,13 +178,13 @@ function IntegrationsPage() {
         </section>
       )}
 
-      {!remoteEnabled ? (
+      {!preferencesLoading && !preferencesError && !remoteEnabled ? (
         <Alert>
           <HugeiconsIcon icon={InformationCircleIcon} size={16} />
           <AlertDescription>
             Access mode is <code>local only</code>. GitHub/GitLab sources are
-            disabled until External Access is enabled from Preferences. Local
-            directories are selected in project creation.
+            disabled until the backend is switched to Remote mode from
+            Preferences. Local repositories are selected in project creation.
           </AlertDescription>
         </Alert>
       ) : null}

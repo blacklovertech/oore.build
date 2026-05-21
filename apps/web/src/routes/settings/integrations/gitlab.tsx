@@ -82,7 +82,8 @@ export const Route = createFileRoute('/settings/integrations/gitlab')({
 function GitLabSetupPage() {
   const navigate = useNavigate()
   const startMutation = useGitLabStart()
-  const { data: preferences } = useInstancePreferences()
+  const { data: preferences, isLoading: preferencesLoading } =
+    useInstancePreferences()
   const remoteEnabled = preferences?.preferences.runtime_mode === 'remote'
 
   const form = useForm<GitLabSetupForm>({
@@ -164,8 +165,8 @@ function GitLabSetupPage() {
           {!remoteEnabled ? (
             <Alert>
               <AlertDescription>
-                GitLab source connections are disabled in Local Only mode.
-                Enable External Access in Preferences to continue.
+                GitLab source connections require the backend to be in Remote
+                mode. Update access policy in Preferences to continue.
               </AlertDescription>
             </Alert>
           ) : null}
@@ -302,13 +303,19 @@ function GitLabSetupPage() {
 
               <Button
                 type="submit"
-                disabled={startMutation.isPending || !remoteEnabled}
+                disabled={
+                  startMutation.isPending ||
+                  preferencesLoading ||
+                  !remoteEnabled
+                }
               >
-                {!remoteEnabled
-                  ? 'External Access Required'
-                  : startMutation.isPending
-                    ? 'Connecting...'
-                    : 'Connect GitLab'}
+                {preferencesLoading
+                  ? 'Checking access...'
+                  : !remoteEnabled
+                    ? 'External Access Required'
+                    : startMutation.isPending
+                      ? 'Connecting...'
+                      : 'Connect GitLab'}
               </Button>
             </form>
           </Form>

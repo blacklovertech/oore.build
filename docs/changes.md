@@ -12,6 +12,11 @@ Rules:
 
 ## 2026-05-21
 
+- **Remote auth mode preferences UI**:
+  - Preferences now represents Remote OIDC and Remote Trusted Proxy as distinct access states instead of treating every Remote setup as OIDC.
+  - Sources and source setup screens no longer default to Local Only while access policy is still loading, and their copy now follows the backend runtime mode instead of frontend-only assumptions.
+  - Docs index: https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda
+
 - **Web TypeScript release-build compatibility**:
   - Kept the required `ignoreDeprecations` compiler option and restored it to the TypeScript-supported `5.0` value so release builds pass `tsc`.
   - Docs index: https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda

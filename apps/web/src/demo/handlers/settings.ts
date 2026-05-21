@@ -80,22 +80,39 @@ function buildPreflight(origin: string) {
       message: 'Frontend origin is present in allowed origins.',
       failure_code: 'external_access_origin_not_allowed',
     },
-    {
-      id: 'redirect_policy_consistent',
-      label: 'Redirect policy is consistent',
-      ok: true,
-      message: 'Redirect URI policy matches configured origins.',
-    },
-    {
-      id: 'oidc_configured',
-      label: 'OIDC configured',
-      ok: oidcConfigured,
-      message: oidcConfigured
-        ? `OIDC is configured (${oidcIssuer}).`
-        : 'Configure OIDC to enable External Access.',
-      failure_code: 'external_access_oidc_not_configured',
-    },
   ]
+
+  if (instancePreferences.remote_auth_mode === 'trusted_proxy') {
+    checks.push({
+      id: 'trusted_proxy_configured',
+      label: 'Trusted proxy configured',
+      ok:
+        !!trustedProxySettings.user_email_header &&
+        trustedProxySettings.has_shared_secret,
+      message: trustedProxySettings.has_shared_secret
+        ? 'Trusted Proxy settings are configured.'
+        : 'Configure Trusted Proxy to enable External Access.',
+      failure_code: 'external_access_trusted_proxy_not_configured',
+    })
+  } else {
+    checks.push(
+      {
+        id: 'redirect_policy_consistent',
+        label: 'Redirect policy is consistent',
+        ok: true,
+        message: 'Redirect URI policy matches configured origins.',
+      },
+      {
+        id: 'oidc_configured',
+        label: 'OIDC configured',
+        ok: oidcConfigured,
+        message: oidcConfigured
+          ? `OIDC is configured (${oidcIssuer}).`
+          : 'Configure OIDC to enable External Access.',
+        failure_code: 'external_access_oidc_not_configured',
+      },
+    )
+  }
 
   return {
     ready: checks.every((check) => check.ok),
