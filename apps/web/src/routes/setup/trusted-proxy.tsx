@@ -32,6 +32,7 @@ import {
   requireSetupSessionOrRedirect,
 } from '@/lib/instance-context'
 import { PageMeta } from '@/lib/seo'
+import { loadTrustedProxySetupPrefill } from '@/lib/setup-prefill'
 import { useSetupStore } from '@/stores/setup-store'
 
 const trustedProxyPresetSchema = z.enum(['generic', 'warpgate', 'custom'])
@@ -96,15 +97,22 @@ function SetupTrustedProxyStep() {
   const navigate = useNavigate()
   const sessionToken = useSetupStore((s) => s.sessionToken)
   const setCurrentStep = useSetupStore((s) => s.setCurrentStep)
+  const setupInstanceId = useSetupStore((s) => s.instanceId)
   const configureMutation = useSetupTrustedProxyConfigure()
   const { data: status } = useSetupStatus()
+  const prefill = loadTrustedProxySetupPrefill(setupInstanceId)
+  const prefillPreset = prefill?.proxyPreset ?? 'generic'
+  const prefillHeader =
+    prefill?.userEmailHeader ??
+    headerForPreset(prefillPreset) ??
+    presetHeaders.generic
 
   const form = useForm<TrustedProxyForm>({
     resolver: zodResolver(trustedProxySchema),
     defaultValues: {
-      proxyPreset: 'generic',
-      ownerEmail: '',
-      userEmailHeader: presetHeaders.generic,
+      proxyPreset: prefillPreset,
+      ownerEmail: prefill?.ownerEmail ?? '',
+      userEmailHeader: prefillHeader,
       trustedProxyCidrs: '',
       sharedSecret: '',
     },

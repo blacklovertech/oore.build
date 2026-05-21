@@ -23,6 +23,9 @@ OORE_PUBLIC_URL="${OORE_PUBLIC_URL:-}"
 OORE_CORS_ORIGINS="${OORE_CORS_ORIGINS:-}"
 OORE_ENABLE_LINGER="${OORE_ENABLE_LINGER:-}"
 OORE_HOSTED_UI="${OORE_HOSTED_UI:-https://ci.oore.build}"
+OORE_SETUP_OWNER_EMAIL="${OORE_SETUP_OWNER_EMAIL:-}"
+OORE_SETUP_PROXY_PRESET="${OORE_SETUP_PROXY_PRESET:-generic}"
+OORE_SETUP_USER_EMAIL_HEADER="${OORE_SETUP_USER_EMAIL_HEADER:-}"
 OORE_DAEMON_URL="${OORE_DAEMON_URL:-http://127.0.0.1:8787}"
 OORE_WEB_BACKEND_URL="${OORE_WEB_BACKEND_URL:-$OORE_DAEMON_URL}"
 OORE_LOCAL_WEB_MODE="${OORE_LOCAL_WEB_MODE:-}"
@@ -85,6 +88,9 @@ Environment overrides:
   OORE_LOCAL_WEB_LISTEN      Local web listen address (default: 127.0.0.1:4173)
   OORE_ENABLE_LINGER         Enable systemd lingering for Linux frontend login service (true/false)
   OORE_HOSTED_UI             Hosted UI URL (default: https://ci.oore.build)
+  OORE_SETUP_OWNER_EMAIL     Initial owner email to prefill for Trusted Proxy setup
+  OORE_SETUP_PROXY_PRESET    Trusted Proxy preset: generic|warpgate|custom (default: generic)
+  OORE_SETUP_USER_EMAIL_HEADER Custom Trusted Proxy email header when preset=custom
   OORE_GITHUB_REPO           GitHub repo (default: devaryakjha/oore.build)
   OORE_RELEASE_BASE_URL      Release asset base URL (default: GitHub Releases download base)
   OORE_RELEASE_MANIFEST_URL  Release metadata URL for latest tag resolution (default: GitHub Releases API)
@@ -150,18 +156,39 @@ EOF
   printf '%b\n' "$UI_RESET"
 }
 
-print_install_intro() {
+print_install_welcome() {
   printf '\n'
   print_ascii_banner
   printf '%bOore CI Installer%b\n' "$UI_BOLD$UI_ACCENT" "$UI_RESET"
   printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
-  printf '  Mode:          %s\n' "$OORE_INSTALL_MODE"
   printf '  Prompting:     %s\n' "$(ui_prompt_mode)"
   printf '  Install root:  %s\n' "$OORE_INSTALL_ROOT"
+  if [[ "$OORE_VERSION" == "latest" ]]; then
+    printf '  Release:       latest (%s channel)\n' "$OORE_CHANNEL"
+  else
+    printf '  Release:       %s\n' "$OORE_VERSION"
+  fi
+  printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
+}
+
+print_install_summary() {
+  printf '\n%bInstall configuration%b\n' "$UI_BOLD$UI_ACCENT" "$UI_RESET"
+  printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
+  printf '  Mode:          %s\n' "$OORE_INSTALL_MODE"
   if is_daemon_install; then
     printf '  Daemon listen: %s\n' "$OORE_DAEMON_LISTEN"
     if [[ -n "$OORE_PUBLIC_URL" ]]; then
       printf '  Public URL:    %s\n' "$OORE_PUBLIC_URL"
+    fi
+    if [[ -n "$OORE_CORS_ORIGINS" ]]; then
+      printf '  CORS origins:  %s\n' "$OORE_CORS_ORIGINS"
+    fi
+    if [[ -n "$OORE_SETUP_OWNER_EMAIL" ]]; then
+      printf '  Setup owner:   %s\n' "$OORE_SETUP_OWNER_EMAIL"
+      printf '  Proxy preset:  %s\n' "$OORE_SETUP_PROXY_PRESET"
+      if [[ "$OORE_SETUP_PROXY_PRESET" == "custom" ]]; then
+        printf '  Email header:  %s\n' "$OORE_SETUP_USER_EMAIL_HEADER"
+      fi
     fi
   fi
   if [[ "$OORE_VERSION" == "latest" ]]; then
@@ -175,6 +202,20 @@ print_install_intro() {
   fi
   printf '  Hosted setup:  %s\n' "$OORE_HOSTED_UI"
   printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
+}
+
+print_prompt_section() {
+  local title="$1"
+  local help="${2:-}"
+
+  if is_noninteractive || ! has_prompt_tty; then
+    return 0
+  fi
+
+  printf '\n%b%s%b\n' "$UI_BOLD$UI_ACCENT" "$title" "$UI_RESET" > /dev/tty
+  if [[ -n "$help" ]]; then
+    printf '%b%s%b\n' "$UI_DIM" "$help" "$UI_RESET" > /dev/tty
+  fi
 }
 
 have_cmd() {
@@ -346,6 +387,7 @@ prompt_text() {
   local default="${2:-}"
   local required="${3:-optional}"
   local answer=""
+  local prompt_label="Enter value"
 
   if is_noninteractive || ! has_prompt_tty; then
     if [[ -z "$default" && "$required" == "required" ]]; then
@@ -356,11 +398,15 @@ prompt_text() {
   fi
 
   while true; do
+    printf '\n%b%s%b\n' "$UI_BOLD" "$question" "$UI_RESET" > /dev/tty
+
     if [[ -n "$default" ]]; then
-      printf '\n%b%s%b\n%bDefault:%b %s\n> ' \
-        "$UI_BOLD" "$question" "$UI_RESET" "$UI_DIM" "$UI_RESET" "$default" > /dev/tty
+      printf '  %bdefault%b %s\n' "$UI_DIM" "$UI_RESET" "$default" > /dev/tty
+      printf '%b%s [%s]:%b ' "$UI_DIM" "$prompt_label" "$default" "$UI_RESET" > /dev/tty
+    elif [[ "$required" == "required" ]]; then
+      printf '%b%s:%b ' "$UI_DIM" "$prompt_label" "$UI_RESET" > /dev/tty
     else
-      printf '\n%b%s%b\n> ' "$UI_BOLD" "$question" "$UI_RESET" > /dev/tty
+      printf '%b%s (optional):%b ' "$UI_DIM" "$prompt_label" "$UI_RESET" > /dev/tty
     fi
 
     if ! read -r answer < /dev/tty; then
@@ -454,6 +500,34 @@ validate_channel() {
   esac
 }
 
+validate_setup_proxy_preset() {
+  case "${OORE_SETUP_PROXY_PRESET:-}" in
+    generic|warpgate|custom)
+      return 0
+      ;;
+    *)
+      die 'OORE_SETUP_PROXY_PRESET must be one of: generic,warpgate,custom.'
+      ;;
+  esac
+}
+
+setup_header_for_preset() {
+  case "${1:-generic}" in
+    generic)
+      printf 'x-oore-user-email'
+      ;;
+    warpgate)
+      printf 'x-warpgate-username'
+      ;;
+    custom)
+      printf '%s' "$OORE_SETUP_USER_EMAIL_HEADER"
+      ;;
+    *)
+      die "Unsupported trusted proxy preset: $1"
+      ;;
+  esac
+}
+
 url_to_host_port() {
   local raw="$1"
   local without_scheme="${raw#http://}"
@@ -538,31 +612,50 @@ configure_backend_install() {
 
   if ! is_noninteractive && has_prompt_tty; then
     local listen_default="$OORE_DAEMON_LISTEN"
+    local access_choice=""
+
+    print_prompt_section \
+      "Backend setup" \
+      "Configure how oored should bind and whether browser clients will call it directly."
 
     OORE_DAEMON_LISTEN="$(
       prompt_text \
-        "Daemon listen address. Use 127.0.0.1:8787 for same-host or same-host reverse-proxy setups, or a private/LAN/VPN address when another frontend host must reach this daemon." \
+        "Daemon listen address. Use host:port. Keep 127.0.0.1:8787 for same-host use; bind a private interface when another machine must reach oored." \
         "$listen_default" \
         "required"
     )"
 
-    OORE_PUBLIC_URL="$(
-      prompt_text \
-        "Browser-visible HTTPS URL for this instance. Leave blank if you will configure External Access later." \
-        "$OORE_PUBLIC_URL" \
-        "optional"
-    )"
-
-    if [[ -z "$OORE_CORS_ORIGINS" && -n "$OORE_PUBLIC_URL" ]]; then
-      OORE_CORS_ORIGINS="$OORE_PUBLIC_URL"
+    if [[ -n "$OORE_PUBLIC_URL" || -n "$OORE_CORS_ORIGINS" ]]; then
+      access_choice="direct"
+    else
+      access_choice="$(
+        prompt_select \
+          "How will browsers reach the backend API?" \
+          "proxy" \
+          "proxy:Through oore-web or a reverse proxy on the same origin" \
+          "direct:Directly from another browser origin (configure External Access now)"
+      )"
     fi
 
-    OORE_CORS_ORIGINS="$(
-      prompt_text \
-        "Allowed browser origins for the daemon." \
-        "$OORE_CORS_ORIGINS" \
-        "optional"
-    )"
+    if [[ "$access_choice" == "direct" ]]; then
+      OORE_PUBLIC_URL="$(
+        prompt_text \
+          "Public HTTPS URL for the backend API. Leave blank only if you will set it later in External Access." \
+          "$OORE_PUBLIC_URL" \
+          "optional"
+      )"
+
+      if [[ -z "$OORE_CORS_ORIGINS" && -n "$OORE_PUBLIC_URL" ]]; then
+        OORE_CORS_ORIGINS="$OORE_PUBLIC_URL"
+      fi
+
+      OORE_CORS_ORIGINS="$(
+        prompt_text \
+          "Allowed frontend origins for direct browser API calls, comma-separated." \
+          "$OORE_CORS_ORIGINS" \
+          "optional"
+      )"
+    fi
 
     if [[ -z "$OORE_INSTALL_DAEMON_SERVICE" ]]; then
       local service_choice=""
@@ -652,6 +745,50 @@ configure_frontend_install() {
 
   WEB_BACKEND_URL="$OORE_WEB_BACKEND_URL"
   resolve_local_web_url
+}
+
+configure_setup_prefill() {
+  is_daemon_install || return 0
+
+  if ! is_noninteractive && has_prompt_tty; then
+    print_prompt_section \
+      "First-run setup defaults" \
+      "Optional values to prefill the web setup wizard. Leave blank if you will use Local Only or OIDC."
+
+    OORE_SETUP_OWNER_EMAIL="$(
+      prompt_text \
+        "Initial owner email for Trusted Proxy setup." \
+        "$OORE_SETUP_OWNER_EMAIL" \
+        "optional"
+    )"
+
+    OORE_SETUP_OWNER_EMAIL="$(printf '%s' "$OORE_SETUP_OWNER_EMAIL" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ -n "$OORE_SETUP_OWNER_EMAIL" ]]; then
+      OORE_SETUP_PROXY_PRESET="$(
+        prompt_select \
+          "Trusted Proxy identity header preset?" \
+          "$OORE_SETUP_PROXY_PRESET" \
+          "generic:Generic proxy (x-oore-user-email)" \
+          "warpgate:Warpgate (x-warpgate-username)" \
+          "custom:Custom header"
+      )"
+      if [[ "$OORE_SETUP_PROXY_PRESET" == "custom" ]]; then
+        OORE_SETUP_USER_EMAIL_HEADER="$(
+          prompt_text \
+            "Trusted Proxy user email header." \
+            "$OORE_SETUP_USER_EMAIL_HEADER" \
+            "required"
+        )"
+      fi
+    fi
+  fi
+
+  validate_setup_proxy_preset
+
+  if [[ "$OORE_SETUP_PROXY_PRESET" == "custom" && -n "$OORE_SETUP_OWNER_EMAIL" && -z "$OORE_SETUP_USER_EMAIL_HEADER" ]]; then
+    die 'OORE_SETUP_USER_EMAIL_HEADER is required when OORE_SETUP_PROXY_PRESET=custom and OORE_SETUP_OWNER_EMAIL is set.'
+  fi
 }
 
 infer_channel_from_tag() {
@@ -835,6 +972,77 @@ compute_sha256() {
   die "shasum or sha256sum is required to verify release checksums."
 }
 
+urlencode() {
+  local LC_ALL=C
+  local value="$1"
+  local out=""
+  local char=""
+  local hex=""
+  local i
+
+  for ((i = 0; i < ${#value}; i++)); do
+    char="${value:i:1}"
+    case "$char" in
+      [a-zA-Z0-9.~_-])
+        out+="$char"
+        ;;
+      *)
+        printf -v hex '%%%02X' "'$char"
+        out+="$hex"
+        ;;
+    esac
+  done
+
+  printf '%s' "$out"
+}
+
+setup_prefill_query() {
+  local query=""
+  local sep=""
+  local header=""
+
+  if [[ -n "$OORE_SETUP_OWNER_EMAIL" ]]; then
+    query+="setup_owner_email=$(urlencode "$OORE_SETUP_OWNER_EMAIL")"
+    sep="&"
+    query+="${sep}proxy_preset=$(urlencode "$OORE_SETUP_PROXY_PRESET")"
+    header="$(setup_header_for_preset "$OORE_SETUP_PROXY_PRESET")"
+    if [[ -n "$header" ]]; then
+      query+="&user_email_header=$(urlencode "$header")"
+    fi
+  fi
+
+  printf '%s' "$query"
+}
+
+setup_url_with_prefill() {
+  local base="$1"
+  local query=""
+  query="$(setup_prefill_query)"
+
+  if [[ -z "$query" ]]; then
+    printf '%s' "$base"
+  elif [[ "$base" == *\?* ]]; then
+    printf '%s&%s' "$base" "$query"
+  else
+    printf '%s?%s' "$base" "$query"
+  fi
+}
+
+setup_url_with_backend_and_prefill() {
+  local base="$1"
+  local query="backend=$(urlencode "$DAEMON_URL")"
+  local prefill=""
+  prefill="$(setup_prefill_query)"
+  if [[ -n "$prefill" ]]; then
+    query+="&$prefill"
+  fi
+  printf '%s?%s' "$base" "$query"
+}
+
+curl_quick() {
+  curl -fsS --connect-timeout 2 --max-time 5 "$@"
+}
+
 verify_archive_checksum() {
   local archive_name
   local checksum_name="oore_${RELEASE_VERSION}_checksums.txt"
@@ -902,6 +1110,17 @@ install_binaries() {
   fi
 }
 
+persist_cli_daemon_url() {
+  is_daemon_install || return 0
+  [[ -x "$BIN_DIR/oore" ]] || return 0
+
+  if "$BIN_DIR/oore" config set daemon_url "$DAEMON_URL" >/dev/null 2>&1; then
+    log "Saved CLI daemon URL: $DAEMON_URL"
+  else
+    log "Could not save CLI daemon URL automatically. Run: oore config set daemon_url $DAEMON_URL"
+  fi
+}
+
 ensure_on_path() {
   # Already on PATH — nothing to do
   case ":$PATH:" in
@@ -936,7 +1155,7 @@ ensure_on_path() {
 start_daemon() {
   mkdir -p "$LOG_DIR"
 
-  if curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
+  if curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
     log "A healthy daemon is already running on $DAEMON_URL."
     return 0
   fi
@@ -947,7 +1166,7 @@ start_daemon() {
 
   local i
   for i in $(seq 1 15); do
-    if curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
+    if curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
       log 'Daemon is healthy.'
       return 0
     fi
@@ -973,7 +1192,7 @@ install_daemon_service() {
 
   local i
   for i in $(seq 1 15); do
-    if curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
+    if curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
       log 'Daemon service is healthy.'
       return 0
     fi
@@ -986,13 +1205,13 @@ install_daemon_service() {
 
 is_already_configured() {
   local status_json
-  status_json="$(curl -fsS "$DAEMON_URL/v1/public/setup-status" 2>/dev/null)" || return 1
+  status_json="$(curl_quick "$DAEMON_URL/v1/public/setup-status" 2>/dev/null)" || return 1
   # Check if is_configured is true in the JSON response
   echo "$status_json" | grep -q '"is_configured"[[:space:]]*:[[:space:]]*true'
 }
 
 generate_setup_token() {
-  if ! curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
+  if ! curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
     log "Daemon is not healthy. Skipping token generation. Check logs: $DAEMON_LOG"
     return 1
   fi
@@ -1057,7 +1276,7 @@ has_local_web_bundle() {
 }
 
 is_local_web_healthy() {
-  curl -fsS "${LOCAL_WEB_URL}/__oore_web_healthz" >/dev/null 2>&1
+  curl_quick "${LOCAL_WEB_URL}/__oore_web_healthz" >/dev/null 2>&1
 }
 
 start_local_web() {
@@ -1312,7 +1531,7 @@ handle_local_backend_onboarding() {
             "no:Not now"
         )"
         if [[ "$open_choice" == "yes" ]]; then
-          open "${LOCAL_WEB_URL}/setup" >/dev/null 2>&1 || true
+          open "$(setup_url_with_prefill "${LOCAL_WEB_URL}/setup")" >/dev/null 2>&1 || true
         fi
       fi
 
@@ -1349,7 +1568,7 @@ open_setup_ui() {
       log 'Cannot auto-open browser because the `open` command is unavailable.'
       return 1
     fi
-    open "${LOCAL_WEB_URL}/setup" >/dev/null 2>&1 || true
+    open "$(setup_url_with_prefill "${LOCAL_WEB_URL}/setup")" >/dev/null 2>&1 || true
     return 0
   fi
 
@@ -1361,57 +1580,27 @@ open_setup_ui() {
 
   if [[ -n "$OORE_PUBLIC_URL" ]]; then
     if ! have_cmd open; then
-      log "Open this URL in your browser: ${OORE_PUBLIC_URL%/}/setup"
+      log "Open this URL in your browser: $(setup_url_with_prefill "${OORE_PUBLIC_URL%/}/setup")"
       return 1
     fi
-    open "${OORE_PUBLIC_URL%/}/setup" >/dev/null 2>&1 || true
+    open "$(setup_url_with_prefill "${OORE_PUBLIC_URL%/}/setup")" >/dev/null 2>&1 || true
     return 0
+  fi
+
+  if [[ "$DAEMON_URL" != https://* ]]; then
+    log "Setup UI was not auto-opened because hosted HTTPS UI cannot call a plain HTTP backend directly."
+    log "Finish frontend/reverse-proxy setup first, then open its /setup URL."
+    return 1
   fi
 
   if ! have_cmd open; then
     log 'Cannot auto-open browser because the `open` command is unavailable.'
     return 1
   fi
-  local setup_url="${OORE_HOSTED_UI}/setup?backend=${DAEMON_URL}"
+  local setup_url
+  setup_url="$(setup_url_with_backend_and_prefill "${OORE_HOSTED_UI}/setup")"
   open "$setup_url" >/dev/null 2>&1 || true
   return 0
-}
-
-watch_setup() {
-  printf '\nWaiting for setup to complete in the browser...\n'
-
-  local prev_state=""
-  local current_state=""
-  local status_json=""
-
-  while true; do
-    status_json="$(curl -fsS "$DAEMON_URL/v1/public/setup-status" 2>/dev/null)" || {
-      sleep 5
-      continue
-    }
-
-    current_state="$(echo "$status_json" | sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-
-    if [[ "$current_state" != "$prev_state" ]]; then
-      printf '  Current state: %s\n' "$current_state"
-      prev_state="$current_state"
-    fi
-
-    # Check if setup is complete
-    if echo "$status_json" | grep -q '"is_configured"[[:space:]]*:[[:space:]]*true'; then
-      local instance_id
-      instance_id="$(echo "$status_json" | sed -n 's/.*"instance_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-      printf '\n'
-      printf 'Setup complete! Instance ID: %s\n' "$instance_id"
-      printf 'Your Oore instance is ready.\n\n'
-      printf '  Dashboard:  %s\n' "${OORE_PUBLIC_URL:-$OORE_HOSTED_UI}"
-      printf '  API:        %s\n' "$DAEMON_URL"
-      printf '  Docs:       https://docs.oore.build\n\n'
-      return 0
-    fi
-
-    sleep 5
-  done
 }
 
 open_links() {
@@ -1424,10 +1613,26 @@ open_links() {
   return 0
 }
 
+print_setup_prefill_next_steps() {
+  local query=""
+  [[ -n "$OORE_SETUP_OWNER_EMAIL" ]] || return 0
+
+  query="$(setup_prefill_query)"
+  printf '\nTrusted Proxy setup defaults:\n'
+  printf '  Owner email:  %s\n' "$OORE_SETUP_OWNER_EMAIL"
+  printf '  Proxy preset: %s\n' "$OORE_SETUP_PROXY_PRESET"
+  if [[ "$OORE_SETUP_PROXY_PRESET" == "custom" ]]; then
+    printf '  Email header: %s\n' "$OORE_SETUP_USER_EMAIL_HEADER"
+  fi
+  if [[ -n "$query" ]]; then
+    printf '  Setup URL suffix: ?%s\n' "$query"
+  fi
+}
+
 print_next_steps() {
   local daemon_running=false
   local local_web_running=false
-  if curl -fsS "$DAEMON_URL/healthz" >/dev/null 2>&1; then
+  if curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
     daemon_running=true
   fi
   if [[ -n "$LOCAL_WEB_URL" ]] && is_local_web_healthy; then
@@ -1467,7 +1672,7 @@ print_next_steps() {
     fi
     printf 'Complete setup (local-first):\n'
     if has_local_web_bundle; then
-      printf '  %s/setup\n' "$LOCAL_WEB_URL"
+      printf '  %s\n' "$(setup_url_with_prefill "${LOCAL_WEB_URL}/setup")"
       printf '  (or use CLI below)\n'
     fi
     printf '  oore setup                    # interactive CLI setup\n'
@@ -1479,11 +1684,12 @@ print_next_steps() {
     fi
     if [[ -n "$OORE_PUBLIC_URL" ]]; then
       printf '\nConfigured public setup URL:\n'
-      printf '  %s/setup\n' "${OORE_PUBLIC_URL%/}"
+      printf '  %s\n' "$(setup_url_with_prefill "${OORE_PUBLIC_URL%/}/setup")"
     else
       printf '\nRemote mode (optional later, requires HTTPS backend):\n'
       printf '  %s\n' "$OORE_HOSTED_UI"
     fi
+    print_setup_prefill_next_steps
   else
     printf 'Start the daemon:\n'
     printf '  oored run --listen %s\n\n' "$OORE_DAEMON_LISTEN"
@@ -1491,7 +1697,7 @@ print_next_steps() {
     printf '  oored install-service --listen %s\n\n' "$OORE_DAEMON_LISTEN"
     printf 'Then complete setup (local-first):\n'
     if has_local_web_bundle; then
-      printf '  %s/setup\n' "$LOCAL_WEB_URL"
+      printf '  %s\n' "$(setup_url_with_prefill "${LOCAL_WEB_URL}/setup")"
       printf '  (or use CLI below)\n'
     fi
     printf '  oore setup                    # interactive CLI setup\n'
@@ -1501,6 +1707,7 @@ print_next_steps() {
     fi
     printf '\nRemote mode (optional later, requires HTTPS backend):\n'
     printf '  %s\n' "$OORE_HOSTED_UI"
+    print_setup_prefill_next_steps
   fi
 
   printf '\nDocs: https://docs.oore.build\n'
@@ -1544,11 +1751,13 @@ main() {
 
   detect_os
   validate_install_mode
+  print_install_welcome
   configure_install_mode
   validate_install_mode
   configure_backend_install
   configure_frontend_install
-  print_install_intro
+  configure_setup_prefill
+  print_install_summary
 
   ensure_dependency curl
   ensure_dependency tar
@@ -1594,6 +1803,7 @@ main() {
   fi
 
   ensure_on_path
+  persist_cli_daemon_url
 
   if [[ "$OORE_INSTALL_MODE" == "frontend" ]]; then
     step "Configuring frontend..."
@@ -1665,13 +1875,9 @@ main() {
         if is_localhost_backend; then
           handle_local_backend_onboarding
         else
-          printf '\nPress Ctrl+C to exit (setup can continue in the browser).\n'
-
-          # Open hosted UI with pre-filled backend URL
+          printf '\n'
+          log "Backend install is done. Setup can continue from your frontend or HTTPS proxy."
           open_setup_ui || true
-
-          # Watch for setup completion
-          watch_setup || true
         fi
       else
         printf '\n'

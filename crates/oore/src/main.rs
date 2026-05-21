@@ -106,8 +106,8 @@ struct UpdateArgs {
 
 #[derive(Debug, Args)]
 struct SetupArgs {
-    #[arg(long, env = "OORE_DAEMON_URL", default_value = "http://127.0.0.1:8787")]
-    daemon_url: String,
+    #[arg(long, env = "OORE_DAEMON_URL")]
+    daemon_url: Option<String>,
 
     #[command(subcommand)]
     command: Option<SetupSubcommand>,
@@ -2583,14 +2583,16 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Setup(setup) => match setup.command {
             Some(SetupSubcommand::Token(args) | SetupSubcommand::Open(args)) => {
+                let daemon_url = resolve_daemon_url(setup.daemon_url.as_deref())?;
                 let runtime =
                     tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
-                runtime.block_on(handle_setup_token(args, &setup.daemon_url))?;
+                runtime.block_on(handle_setup_token(args, &daemon_url))?;
             }
             None => {
+                let daemon_url = resolve_daemon_url(setup.daemon_url.as_deref())?;
                 let runtime =
                     tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
-                runtime.block_on(handle_setup_interactive(&setup.daemon_url))?;
+                runtime.block_on(handle_setup_interactive(&daemon_url))?;
             }
         },
         Commands::Login(args) => {

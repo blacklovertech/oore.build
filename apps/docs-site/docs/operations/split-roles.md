@@ -47,13 +47,16 @@ curl -fsSL https://alpha.oore.pages.dev/install | \
   OORE_CHANNEL=alpha \
   OORE_INSTALL_MODE=backend \
   OORE_DAEMON_LISTEN=10.0.0.20:8787 \
-  OORE_PUBLIC_URL=https://ci.example.internal \
+  OORE_SETUP_OWNER_EMAIL=owner@example.com \
+  OORE_SETUP_PROXY_PRESET=generic \
   OORE_INSTALL_DAEMON_SERVICE=true \
   OORE_NONINTERACTIVE=1 \
   bash
 ```
 
 Use `127.0.0.1:8787` when a reverse proxy runs on the same backend host. Use a private interface address when a separate frontend host must call the daemon directly.
+
+For frontend-proxy topologies, keep External Access/CORS unset on the backend install unless browsers will call `oored` directly. The installer saves the selected daemon URL for `oore` CLI commands and exits after daemon install/start; first-run setup continues from the frontend URL.
 
 ## Frontend Host
 

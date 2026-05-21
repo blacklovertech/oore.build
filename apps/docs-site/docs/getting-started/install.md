@@ -96,11 +96,14 @@ curl -fsSL https://alpha.oore.pages.dev/install | \
   OORE_CHANNEL=alpha \
   OORE_INSTALL_MODE=backend \
   OORE_DAEMON_LISTEN=10.0.0.20:8787 \
-  OORE_PUBLIC_URL=https://ci.example.internal \
+  OORE_SETUP_OWNER_EMAIL=owner@example.com \
+  OORE_SETUP_PROXY_PRESET=generic \
   OORE_INSTALL_DAEMON_SERVICE=true \
   OORE_NONINTERACTIVE=1 \
   bash
 ```
+
+For split deployments where the browser reaches the API through `oore-web` on the frontend host, leave `OORE_PUBLIC_URL` / `OORE_CORS_ORIGINS` unset during backend install. The installer can prefill Trusted Proxy setup values, but it does not block the terminal waiting for the browser wizard to finish.
 
 ## Frontend-only install
 
@@ -232,6 +235,9 @@ Continue with [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding).
 | `OORE_CORS_ORIGINS` | `OORE_PUBLIC_URL` when set | Comma-separated allowed browser origins passed to the daemon service |
 | `OORE_DAEMON_URL` | `http://127.0.0.1:8787` | Daemon URL used by backend setup helpers |
 | `OORE_WEB_BACKEND_URL` | `OORE_DAEMON_URL` | Backend URL proxied by `oore-web`, useful for frontend-only hosts |
+| `OORE_SETUP_OWNER_EMAIL` | unset | Initial owner email to prefill in Trusted Proxy setup |
+| `OORE_SETUP_PROXY_PRESET` | `generic` | Trusted Proxy setup prefill: `generic`, `warpgate`, or `custom` |
+| `OORE_SETUP_USER_EMAIL_HEADER` | unset | Custom Trusted Proxy email header when `OORE_SETUP_PROXY_PRESET=custom` |
 | `OORE_LOCAL_WEB_MODE` | unset | Non-interactive local web behavior for localhost backends: `off`, `run`, or `login` (launch-at-login) |
 | `OORE_LOCAL_WEB_LISTEN` | `127.0.0.1:4173` | Bind address for `oore-web` |
 | `OORE_ENABLE_LINGER` | unset | Enable systemd lingering for Linux frontend service installs (`true` or `false`) |

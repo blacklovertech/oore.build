@@ -29,6 +29,9 @@ Rules:
   - Trusted-proxy setup now captures an initial owner email and rejects owner claims from a different forwarded identity, avoiding manual owner/admin edits in SQLite.
   - Trusted-proxy setup UI now includes proxy presets: generic `x-oore-user-email`, Warpgate `x-warpgate-username`, and a custom editable header.
   - Setup completion now promotes an existing matching user row to `owner` instead of ignoring it when the email already exists.
+  - Installer prompts now start after the Oore CI banner/welcome, use consistent question-block formatting for text and option prompts, and backend installs only ask External Access/CORS questions when direct browser-to-daemon API access is selected or preconfigured.
+  - Backend installs can now capture Trusted Proxy setup defaults (`OORE_SETUP_OWNER_EMAIL`, proxy preset, custom email header), pass them into the web setup wizard, and persist the selected daemon URL into `oore` CLI config so follow-up commands do not silently fall back to `127.0.0.1:8787`.
+  - Split/backend installs no longer block the terminal waiting for browser setup completion.
   - Updated generic split role docs and kept the Mac Studio + NetBird + Warpgate guide as one provider-specific example.
   - Documented the prerelease installer endpoints so alpha/beta testers use the matching installer script, not the stable production installer.
   - Feature doc: https://linear.app/oorebuild/document/feature-guided-split-deployment-installer-9da0d4bf02f6
