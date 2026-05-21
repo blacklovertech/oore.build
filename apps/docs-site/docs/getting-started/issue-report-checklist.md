@@ -12,7 +12,7 @@ Before filing a report on GitHub, use this checklist to ensure the team has enou
 Every issue must include the following four sections:
 
 1. **Reproduction Steps**: A numbered list of exactly what you clicked or typed.
-2. **Environment Details**: macOS version, Oore channel (`alpha`/`beta`/`stable`), and setup path (`Local-only` or `Hosted UI`).
+2. **Environment Details**: macOS version, Oore channel (`alpha`/`beta`/`stable`), setup mode (`Local Only`/`Remote OIDC`/`Remote Trusted Proxy`), and UI path (`CLI`/`local frontend`/`hosted UI`/`split frontend`).
 3. **Expected vs Actual Result**: What you thought would happen, versus what actually happened.
 4. **Logs or Diagnostics**: Output from `oore doctor --json` or build logs from the UI.
 
@@ -41,7 +41,7 @@ Every issue must include the following four sections:
 Before filing, try these high-level checks:
 - Is the daemon running? (`oore status`)
 - Is your browser online?
-- Did you check the [Cloudflare Troubleshooting](/getting-started/public-alpha#tunnel-troubleshooting) section in the Public Alpha guide?
+- If using a temporary tunnel, did you check the [tunnel troubleshooting example](/getting-started/public-alpha#tunnel-troubleshooting) in the Public Alpha guide?
 
 ## Where to file
 

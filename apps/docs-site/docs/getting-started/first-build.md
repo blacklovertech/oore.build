@@ -17,7 +17,7 @@ This tutorial walks you through creating a project, configuring a pipeline, and 
 ## 1. Create a project
 
 1. Open the web UI at `https://ci.oore.build` (or your self-hosted UI)
-2. Sign in with your OIDC provider
+2. Sign in using the auth mode configured for your instance
 3. Click **New Project**
 4. Select your integration (GitHub or GitLab)
 5. Choose the repository containing your Flutter app

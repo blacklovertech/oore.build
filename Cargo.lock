@@ -2637,6 +2637,7 @@ name = "oore"
 version = "0.1.10"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "dialoguer",
@@ -2644,11 +2645,13 @@ dependencies = [
  "flate2",
  "hex",
  "humantime",
+ "ipnet",
  "libc",
  "oore-contract",
  "oore-runner",
  "rand 0.8.5",
  "reqwest",
+ "ring",
  "semver",
  "serde",
  "serde_json",

@@ -101,18 +101,6 @@ async fn auto_complete_local_setup_if_needed(
         oidc_subject: Some(owner_subject.clone()),
         created_at: owner_created_at,
     });
-    state_file.setup_state = SetupState::Ready;
-    state_file.setup_session = None;
-    state_file.updated_at = now;
-
-    store.save(state_file).await.map_err(|e| {
-        error!(error = %e, "failed to save setup state during local auto-bootstrap");
-        api_err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "store_error",
-            "Failed to finalize local setup",
-        )
-    })?;
 
     let user_id_seed = Uuid::new_v4().to_string();
     let pool = store.pool();
@@ -165,6 +153,19 @@ async fn auto_complete_local_setup_if_needed(
         Some("auto-bootstrap on first local login"),
     )
     .await;
+
+    state_file.setup_state = SetupState::Ready;
+    state_file.setup_session = None;
+    state_file.updated_at = now;
+
+    store.save(state_file).await.map_err(|e| {
+        error!(error = %e, "failed to save setup state during local auto-bootstrap");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to finalize local setup",
+        )
+    })?;
 
     info!(
         email = %owner_email,

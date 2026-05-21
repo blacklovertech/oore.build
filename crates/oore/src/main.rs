@@ -5,16 +5,21 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{Local, TimeZone};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use oore_contract::{
     ApiError, BootstrapTokenRecord, BootstrapTokenVerifyRequest, BootstrapTokenVerifyResponse,
     ListBuildsResponse, ListRunnersResponse, LocalLoginRequest, LocalLoginResponse,
-    OidcConfigureRequest, OidcConfigureResponse, RegisterRunnerResponse, SetupCompleteResponse,
-    SetupOidcStartRequest, SetupOidcStartResponse, SetupOidcVerifyRequest, SetupOidcVerifyResponse,
-    SetupState, SetupStateFile, SetupStatus, UserProfileResponse,
+    OidcConfigureRequest, OidcConfigureResponse, RegisterRunnerResponse, RemoteAuthMode,
+    RuntimeMode, SetupCompleteResponse, SetupOidcStartRequest, SetupOidcStartResponse,
+    SetupOidcVerifyRequest, SetupOidcVerifyResponse, SetupState, SetupStateFile, SetupStatus,
+    UserProfileResponse,
 };
 use rand::RngCore;
+use ring::aead::{self, AES_256_GCM, Aad, BoundKey, NONCE_LEN, Nonce, NonceSequence, UnboundKey};
+use ring::rand::{SecureRandom, SystemRandom};
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
@@ -115,11 +120,60 @@ struct SetupArgs {
 
 #[derive(Debug, Subcommand)]
 enum SetupSubcommand {
+    /// Initialize setup directly on the backend host
+    Init(SetupInitArgs),
     /// Generate a bootstrap token for web UI setup
     Token(SetupTokenArgs),
     /// Alias for 'token' (deprecated, use 'token' instead)
     #[command(hide = true)]
     Open(SetupTokenArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum SetupInitMode {
+    /// Loopback-only local mode; creates the local owner and completes setup.
+    Local,
+    /// Remote mode where an upstream trusted proxy authenticates users.
+    TrustedProxy,
+}
+
+#[derive(Debug, Args)]
+struct SetupInitArgs {
+    /// Setup mode to initialize.
+    #[arg(long, value_enum)]
+    mode: SetupInitMode,
+
+    /// Initial owner email.
+    #[arg(long)]
+    owner_email: String,
+
+    /// Trusted proxy identity header. Required only for trusted-proxy mode.
+    #[arg(long, default_value = "x-oore-user-email")]
+    user_email_header: String,
+
+    /// Trusted proxy peer CIDR. Repeat for multiple frontend/proxy networks.
+    #[arg(long = "trusted-proxy-cidr")]
+    trusted_proxy_cidrs: Vec<String>,
+
+    /// Shared secret expected from the trusted proxy/oore-web hop.
+    #[arg(long, env = "OORE_TRUSTED_PROXY_SHARED_SECRET")]
+    shared_secret: Option<String>,
+
+    /// File containing the shared secret expected from the trusted proxy/oore-web hop.
+    #[arg(long, env = "OORE_TRUSTED_PROXY_SHARED_SECRET_FILE")]
+    shared_secret_file: Option<String>,
+
+    /// Path to the setup database file.
+    #[arg(long, env = "OORE_SETUP_STATE_FILE")]
+    state_file: Option<String>,
+
+    /// Re-initialize an incomplete setup. Refuses to change a ready instance.
+    #[arg(long, default_value = "false")]
+    force: bool,
+
+    /// Print machine-readable output.
+    #[arg(long, default_value = "false")]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -424,6 +478,8 @@ CREATE TABLE IF NOT EXISTS setup_state (
 )
 "#;
 
+const TRUSTED_PROXY_SHARED_SECRET_HEADER: &str = "x-oore-trusted-proxy-secret";
+
 async fn connect_db(path: &PathBuf) -> anyhow::Result<SqlitePool> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -469,6 +525,168 @@ fn str_to_setup_state(s: &str) -> anyhow::Result<SetupState> {
         "ready" => Ok(SetupState::Ready),
         other => anyhow::bail!("unknown setup state: {other}"),
     }
+}
+
+struct SingleNonce(Option<[u8; NONCE_LEN]>);
+
+impl NonceSequence for SingleNonce {
+    fn advance(&mut self) -> Result<Nonce, ring::error::Unspecified> {
+        let bytes = self.0.take().ok_or(ring::error::Unspecified)?;
+        Ok(Nonce::assume_unique_for_key(bytes))
+    }
+}
+
+fn resolve_encryption_key_path() -> anyhow::Result<PathBuf> {
+    if let Ok(path) = std::env::var("OORE_ENCRYPTION_KEY_FILE") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+
+    if let Ok(data_dir) = std::env::var("OORED_DATA_DIR")
+        && !data_dir.trim().is_empty()
+    {
+        return Ok(PathBuf::from(data_dir.trim()).join("encryption.key"));
+    }
+    if let Ok(data_dir) = std::env::var("OORE_DATA_DIR")
+        && !data_dir.trim().is_empty()
+    {
+        return Ok(PathBuf::from(data_dir.trim()).join("encryption.key"));
+    }
+
+    let data_dir =
+        dirs::data_dir().context("could not determine platform data directory (dirs::data_dir)")?;
+    Ok(data_dir.join("oore").join("encryption.key"))
+}
+
+fn load_or_generate_encryption_key() -> anyhow::Result<Vec<u8>> {
+    let path = resolve_encryption_key_path()?;
+    if path.exists() {
+        let key = fs::read(&path)
+            .with_context(|| format!("failed to read encryption key: {}", path.display()))?;
+        if key.len() != 32 {
+            anyhow::bail!(
+                "encryption key at {} has invalid length: expected 32 bytes, got {}",
+                path.display(),
+                key.len()
+            );
+        }
+        return Ok(key);
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+    }
+
+    let rng = SystemRandom::new();
+    let mut key = vec![0u8; 32];
+    rng.fill(&mut key)
+        .map_err(|_| anyhow::anyhow!("failed to generate encryption key"))?;
+    fs::write(&path, &key)
+        .with_context(|| format!("failed to write encryption key: {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+    }
+    Ok(key)
+}
+
+fn encrypt_secret(plaintext: &str, key: &[u8]) -> anyhow::Result<String> {
+    let rng = SystemRandom::new();
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    rng.fill(&mut nonce_bytes)
+        .map_err(|_| anyhow::anyhow!("failed to generate encryption nonce"))?;
+
+    let unbound_key = UnboundKey::new(&AES_256_GCM, key)
+        .map_err(|_| anyhow::anyhow!("invalid encryption key"))?;
+    let mut sealing_key = aead::SealingKey::new(unbound_key, SingleNonce(Some(nonce_bytes)));
+    let mut in_out = plaintext.as_bytes().to_vec();
+    sealing_key
+        .seal_in_place_append_tag(Aad::empty(), &mut in_out)
+        .map_err(|_| anyhow::anyhow!("encryption failed"))?;
+
+    let mut out = Vec::with_capacity(NONCE_LEN + in_out.len());
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&in_out);
+    Ok(BASE64.encode(out))
+}
+
+fn normalize_email(raw: &str) -> anyhow::Result<String> {
+    let email = raw.trim().to_lowercase();
+    if email.is_empty() || email.len() > 256 || !email.contains('@') {
+        anyhow::bail!("owner email must be a valid email address");
+    }
+    Ok(email)
+}
+
+fn normalize_header_name(raw: &str) -> anyhow::Result<String> {
+    let header = raw.trim().to_ascii_lowercase();
+    let valid = !header.is_empty()
+        && header.len() <= 128
+        && header.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(
+                    ch,
+                    '!' | '#'
+                        | '$'
+                        | '%'
+                        | '&'
+                        | '\''
+                        | '*'
+                        | '+'
+                        | '-'
+                        | '.'
+                        | '^'
+                        | '_'
+                        | '`'
+                        | '|'
+                        | '~'
+                )
+        });
+    if !valid {
+        anyhow::bail!("trusted proxy user email header is invalid");
+    }
+    Ok(header)
+}
+
+fn trusted_proxy_subject_for_email(email: &str) -> String {
+    format!("trusted-proxy::{}", email.trim().to_lowercase())
+}
+
+fn local_subject_for_email(email: &str) -> String {
+    format!("local::{}", email.trim().to_lowercase())
+}
+
+fn resolve_secret_value(
+    value: Option<&str>,
+    file: Option<&str>,
+    label: &str,
+) -> anyhow::Result<Option<String>> {
+    if let Some(value) = value {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Ok(Some(trimmed.to_string()));
+        }
+    }
+
+    let Some(file) = file else {
+        return Ok(None);
+    };
+    let file = file.trim();
+    if file.is_empty() {
+        return Ok(None);
+    }
+    let secret =
+        fs::read_to_string(file).with_context(|| format!("failed to read {label} file: {file}"))?;
+    let secret = secret.trim();
+    if secret.is_empty() {
+        anyhow::bail!("{label} file is empty: {file}");
+    }
+    Ok(Some(secret.to_string()))
 }
 
 async fn load_state(pool: &SqlitePool) -> anyhow::Result<Option<SetupStateFile>> {
@@ -716,6 +934,268 @@ async fn generate_bootstrap_token(
     Ok(plaintext_token)
 }
 
+fn normalize_trusted_proxy_cidrs(values: Vec<String>) -> anyhow::Result<Vec<String>> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let cidr = trimmed
+            .parse::<ipnet::IpNet>()
+            .with_context(|| format!("invalid trusted proxy CIDR: {trimmed}"))?;
+        let canonical = cidr.to_string();
+        if !normalized.iter().any(|existing| existing == &canonical) {
+            normalized.push(canonical);
+        }
+    }
+    Ok(normalized)
+}
+
+async fn persist_instance_preferences(
+    pool: &SqlitePool,
+    runtime_mode: RuntimeMode,
+    remote_auth_mode: RemoteAuthMode,
+    now: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO instance_preferences (id, key_storage_mode, runtime_mode, remote_auth_mode, updated_by, created_at, updated_at)
+         VALUES (1, 'file', ?1, ?2, NULL, ?3, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+            key_storage_mode = excluded.key_storage_mode,
+            runtime_mode = excluded.runtime_mode,
+            remote_auth_mode = excluded.remote_auth_mode,
+            updated_at = excluded.updated_at",
+    )
+    .bind(runtime_mode.to_string())
+    .bind(remote_auth_mode.to_string())
+    .bind(now)
+    .execute(pool)
+    .await
+    .context("failed to save instance preferences")?;
+    Ok(())
+}
+
+async fn ensure_setup_init_schema(pool: &SqlitePool) -> anyhow::Result<()> {
+    for table in ["instance_preferences", "trusted_proxy_settings", "users"] {
+        let exists: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+        )
+        .bind(table)
+        .fetch_optional(pool)
+        .await
+        .with_context(|| format!("failed to inspect database schema for {table}"))?;
+        if exists.is_none() {
+            anyhow::bail!(
+                "setup database is not migrated yet (missing table: {table}). Start `oored run` once, then rerun `oore setup init`."
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn persist_trusted_proxy_settings(
+    pool: &SqlitePool,
+    owner_email: &str,
+    user_email_header: &str,
+    trusted_proxy_cidrs: &[String],
+    encrypted_shared_secret: Option<&str>,
+    now: i64,
+) -> anyhow::Result<()> {
+    let cidrs_json = serde_json::to_string(trusted_proxy_cidrs)
+        .context("failed to serialize trusted proxy CIDRs")?;
+    sqlx::query(
+        "INSERT INTO trusted_proxy_settings (id, user_email_header, setup_owner_email, trusted_proxy_cidrs_json, encrypted_shared_secret, updated_by, created_at, updated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, NULL, ?5, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+            user_email_header = excluded.user_email_header,
+            setup_owner_email = excluded.setup_owner_email,
+            trusted_proxy_cidrs_json = excluded.trusted_proxy_cidrs_json,
+            encrypted_shared_secret = excluded.encrypted_shared_secret,
+            updated_at = excluded.updated_at",
+    )
+    .bind(user_email_header)
+    .bind(owner_email)
+    .bind(cidrs_json)
+    .bind(encrypted_shared_secret)
+    .bind(now)
+    .execute(pool)
+    .await
+    .context("failed to save trusted proxy settings")?;
+    Ok(())
+}
+
+async fn upsert_owner_user(
+    pool: &SqlitePool,
+    owner_email: &str,
+    subject: &str,
+    now: i64,
+) -> anyhow::Result<()> {
+    let user_id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO users (id, email, oidc_subject, display_name, role, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'owner', 'active', ?5, ?5)
+         ON CONFLICT(email) DO UPDATE SET
+            oidc_subject = excluded.oidc_subject,
+            display_name = excluded.display_name,
+            role = 'owner',
+            status = 'active',
+            updated_at = excluded.updated_at",
+    )
+    .bind(&user_id)
+    .bind(owner_email)
+    .bind(subject)
+    .bind(owner_email)
+    .bind(now)
+    .execute(pool)
+    .await
+    .context("failed to create owner user")?;
+    Ok(())
+}
+
+async fn handle_setup_init(args: SetupInitArgs) -> anyhow::Result<()> {
+    let db_path = resolve_db_path(args.state_file.as_deref())?;
+    let pool = connect_db(&db_path).await?;
+    let mut state = load_or_create_state(&pool).await?;
+
+    if state.setup_state == SetupState::Ready {
+        anyhow::bail!("setup is already complete; refusing to change a ready instance");
+    }
+    if !args.force
+        && !matches!(
+            state.setup_state,
+            SetupState::Uninitialized | SetupState::BootstrapPending
+        )
+    {
+        anyhow::bail!(
+            "setup is already in {} state; pass --force to re-initialize before owner creation",
+            state_label(state.setup_state)
+        );
+    }
+
+    let owner_email = normalize_email(&args.owner_email)?;
+    let now = now_epoch_secs();
+    ensure_setup_init_schema(&pool).await?;
+
+    let (runtime_mode, remote_auth_mode, owner_subject) = match args.mode {
+        SetupInitMode::Local => (
+            RuntimeMode::Local,
+            RemoteAuthMode::Oidc,
+            local_subject_for_email(&owner_email),
+        ),
+        SetupInitMode::TrustedProxy => (
+            RuntimeMode::Remote,
+            RemoteAuthMode::TrustedProxy,
+            trusted_proxy_subject_for_email(&owner_email),
+        ),
+    };
+
+    persist_instance_preferences(&pool, runtime_mode, remote_auth_mode, now).await?;
+
+    let mut trusted_proxy_cidrs = Vec::new();
+    let mut user_email_header = None;
+    let mut has_shared_secret = false;
+    if args.mode == SetupInitMode::TrustedProxy {
+        let header = normalize_header_name(&args.user_email_header)?;
+        let cidrs = normalize_trusted_proxy_cidrs(args.trusted_proxy_cidrs)?;
+        let shared_secret = resolve_secret_value(
+            args.shared_secret.as_deref(),
+            args.shared_secret_file.as_deref(),
+            "trusted proxy shared secret",
+        )?
+        .context(
+            "trusted-proxy setup init requires a shared secret; pass --shared-secret-file or set OORE_TRUSTED_PROXY_SHARED_SECRET_FILE",
+        )?;
+        let key = load_or_generate_encryption_key()?;
+        let encrypted_shared_secret = Some(encrypt_secret(&shared_secret, &key)?);
+        has_shared_secret = encrypted_shared_secret.is_some();
+        persist_trusted_proxy_settings(
+            &pool,
+            &owner_email,
+            &header,
+            &cidrs,
+            encrypted_shared_secret.as_deref(),
+            now,
+        )
+        .await?;
+        trusted_proxy_cidrs = cidrs;
+        user_email_header = Some(header);
+    }
+
+    state.owner = Some(oore_contract::OwnerRecord {
+        email: owner_email.clone(),
+        oidc_subject: Some(owner_subject.clone()),
+        created_at: now,
+    });
+    upsert_owner_user(&pool, &owner_email, &owner_subject, now).await?;
+    state.setup_state = SetupState::Ready;
+    state.setup_session = None;
+    state.bootstrap_token = None;
+    state.updated_at = now;
+    save_state(&pool, &state).await?;
+
+    if args.json {
+        let output = serde_json::json!({
+            "ok": true,
+            "state": "ready",
+            "mode": match args.mode {
+                SetupInitMode::Local => "local",
+                SetupInitMode::TrustedProxy => "trusted_proxy",
+            },
+            "owner_email": owner_email,
+            "database": db_path.display().to_string(),
+            "instance_id": state.instance_id,
+            "trusted_proxy": {
+                "user_email_header": user_email_header,
+                "trusted_proxy_cidrs": trusted_proxy_cidrs,
+                "has_shared_secret": has_shared_secret,
+                "shared_secret_header": TRUSTED_PROXY_SHARED_SECRET_HEADER,
+            },
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    println!("Setup initialized.");
+    println!();
+    println!("State:    ready");
+    println!("Instance: {}", state.instance_id);
+    println!("Owner:    {}", owner_email);
+    println!("DB:       {}", db_path.display());
+    match args.mode {
+        SetupInitMode::Local => {
+            println!("Mode:     local");
+            println!();
+            println!("Local login is available only from loopback.");
+        }
+        SetupInitMode::TrustedProxy => {
+            println!("Mode:     remote trusted-proxy");
+            println!(
+                "Header:   {}",
+                user_email_header.as_deref().unwrap_or("x-oore-user-email")
+            );
+            if trusted_proxy_cidrs.is_empty() {
+                println!("Peers:    loopback only");
+            } else {
+                println!("Peers:    {}", trusted_proxy_cidrs.join(", "));
+            }
+            println!(
+                "Secret:   {}",
+                if has_shared_secret {
+                    "configured"
+                } else {
+                    "not configured"
+                }
+            );
+            if has_shared_secret {
+                println!("Proxy must forward: {}", TRUSTED_PROXY_SHARED_SECRET_HEADER);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn handle_setup_token(args: SetupTokenArgs, daemon_url: &str) -> anyhow::Result<()> {
     let ttl = parse_ttl(&args.ttl)?;
 
@@ -726,7 +1206,10 @@ async fn handle_setup_token(args: SetupTokenArgs, daemon_url: &str) -> anyhow::R
     let pool = connect_db(&db_path).await?;
     let mut state = load_or_create_state(&pool).await?;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .context("failed to build HTTP client")?;
     let daemon_status = fetch_setup_status(&client, daemon_url).await;
     if let Ok(status) = &daemon_status {
         if status.instance_id != state.instance_id {
@@ -1103,10 +1586,100 @@ Use OORE_SETUP_STATE_FILE or --state-file to point at the daemon setup DB and re
 }
 
 async fn handle_setup_interactive(daemon_url: &str) -> anyhow::Result<()> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .context("failed to build HTTP client")?;
 
     println!("oore setup — interactive instance configuration");
     println!();
+
+    let mode_choice = dialoguer::Select::new()
+        .with_prompt("What kind of setup do you want?")
+        .default(0)
+        .item("Local Only - loopback-only owner login, no external auth")
+        .item("Remote Trusted Proxy - an upstream proxy provides user identity")
+        .item("Remote OIDC - users sign in with an identity provider")
+        .item("Generate a web setup token")
+        .interact()
+        .context("failed to read setup mode")?;
+
+    match mode_choice {
+        0 => {
+            let owner_email: String = dialoguer::Input::new()
+                .with_prompt("Owner email")
+                .default("owner@local".to_string())
+                .interact_text()
+                .context("failed to read owner email")?;
+            return handle_setup_init(SetupInitArgs {
+                mode: SetupInitMode::Local,
+                owner_email,
+                user_email_header: "x-oore-user-email".to_string(),
+                trusted_proxy_cidrs: Vec::new(),
+                shared_secret: None,
+                shared_secret_file: None,
+                state_file: None,
+                force: false,
+                json: false,
+            })
+            .await;
+        }
+        1 => {
+            let owner_email: String = dialoguer::Input::new()
+                .with_prompt("Initial owner email")
+                .interact_text()
+                .context("failed to read owner email")?;
+            let user_email_header: String = dialoguer::Input::new()
+                .with_prompt("Trusted proxy user email header")
+                .default("x-oore-user-email".to_string())
+                .interact_text()
+                .context("failed to read trusted proxy header")?;
+            let cidrs_raw: String = dialoguer::Input::new()
+                .with_prompt("Trusted proxy CIDRs (comma-separated, leave blank for loopback only)")
+                .allow_empty(true)
+                .interact_text()
+                .context("failed to read trusted proxy CIDRs")?;
+            let shared_secret: String = dialoguer::Password::new()
+                .with_prompt("Shared secret injected by proxy/oore-web (recommended)")
+                .allow_empty_password(true)
+                .interact()
+                .context("failed to read trusted proxy shared secret")?;
+            let trusted_proxy_cidrs = cidrs_raw
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect();
+            return handle_setup_init(SetupInitArgs {
+                mode: SetupInitMode::TrustedProxy,
+                owner_email,
+                user_email_header,
+                trusted_proxy_cidrs,
+                shared_secret: if shared_secret.trim().is_empty() {
+                    None
+                } else {
+                    Some(shared_secret)
+                },
+                shared_secret_file: None,
+                state_file: None,
+                force: false,
+                json: false,
+            })
+            .await;
+        }
+        3 => {
+            return handle_setup_token(
+                SetupTokenArgs {
+                    ttl: "15m".to_string(),
+                    json: false,
+                    state_file: None,
+                },
+                daemon_url,
+            )
+            .await;
+        }
+        _ => {}
+    }
 
     // ── Step 0: Check daemon connectivity and get current state ──
 
@@ -2582,6 +3155,11 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Setup(setup) => match setup.command {
+            Some(SetupSubcommand::Init(args)) => {
+                let runtime =
+                    tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
+                runtime.block_on(handle_setup_init(args))?;
+            }
             Some(SetupSubcommand::Token(args) | SetupSubcommand::Open(args)) => {
                 let daemon_url = resolve_daemon_url(setup.daemon_url.as_deref())?;
                 let runtime =

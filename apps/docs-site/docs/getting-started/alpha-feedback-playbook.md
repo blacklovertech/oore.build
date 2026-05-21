@@ -11,7 +11,7 @@ Use this checklist when filing public alpha feedback so issues are reproducible 
 
 Try these steps to exercise the core "happy path" of Oore CI.
 
-1. **Install Oore**: Run `curl -fsSL https://oore.build/install | bash -s -- --channel alpha`.
+1. **Install Oore**: Run `curl -fsSL https://alpha.oore.pages.dev/install | OORE_CHANNEL=alpha bash`.
 2. **Fresh Initialize**: Run `oored run` in one terminal and `oore setup` in another.
 3. **Connect a Repository**: Connect a GitHub/GitLab repo through the UI or via `oore projects create`.
 4. **Trigger Build**: Start a manual build from the web dashboard.
@@ -43,8 +43,9 @@ Copy this snippet when opening an issue:
 ### Environment Facts
 - **macOS Version**:
 - **Install Channel**: alpha/beta/stable
-- **Setup Path**: Local-only / Hosted UI
-- **OIDC Provider**: (if used)
+- **Setup Mode**: Local Only / Remote OIDC / Remote Trusted Proxy
+- **UI Path**: CLI / local frontend / hosted UI / split frontend
+- **OIDC Provider or Trusted Proxy**: (if used)
 
 ### Reproduction Steps
 1.

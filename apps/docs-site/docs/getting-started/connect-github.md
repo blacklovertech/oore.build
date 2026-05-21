@@ -16,7 +16,7 @@ This tutorial walks you through connecting a GitHub account to your Oore CI inst
 ## 1. Start the GitHub integration
 
 1. Open the Oore CI web UI at `https://ci.oore.build` (or your self-hosted UI)
-2. Sign in with your OIDC provider
+2. Sign in using the auth mode configured for your instance
 3. Navigate to **Settings** and select **Integrations**
 4. Click **Connect GitHub**
 

@@ -1791,22 +1791,10 @@ async fn complete_setup(
     {
         owner.oidc_subject = Some(local_subject_for_email(&owner.email));
     }
-    sf.setup_state = SetupState::Ready;
-    sf.setup_session = None; // Clear session on completion
-    sf.updated_at = now;
-
     let instance_id = sf.instance_id.clone();
 
-    store.save(&sf).await.map_err(|e| {
-        error!(error = %e, "failed to save setup state");
-        api_err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "store_error",
-            "Failed to save setup state",
-        )
-    })?;
-
-    // Insert owner into users table
+    // Insert owner into users table before marking setup ready. That prevents
+    // a half-ready instance with no usable owner if user creation fails.
     if let Some(ref owner) = sf.owner {
         let oidc_subject = owner
             .oidc_subject
@@ -1863,6 +1851,19 @@ async fn complete_setup(
 
         info!(email = %owner.email, "owner user created in users table");
     }
+
+    sf.setup_state = SetupState::Ready;
+    sf.setup_session = None; // Clear session on completion
+    sf.updated_at = now;
+
+    store.save(&sf).await.map_err(|e| {
+        error!(error = %e, "failed to save setup state");
+        api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "Failed to save setup state",
+        )
+    })?;
 
     Ok(Json(SetupCompleteResponse {
         state: SetupState::Ready,

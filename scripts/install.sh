@@ -26,6 +26,13 @@ OORE_HOSTED_UI="${OORE_HOSTED_UI:-https://ci.oore.build}"
 OORE_SETUP_OWNER_EMAIL="${OORE_SETUP_OWNER_EMAIL:-}"
 OORE_SETUP_PROXY_PRESET="${OORE_SETUP_PROXY_PRESET:-generic}"
 OORE_SETUP_USER_EMAIL_HEADER="${OORE_SETUP_USER_EMAIL_HEADER:-}"
+OORE_TRUSTED_PROXY_SHARED_SECRET="${OORE_TRUSTED_PROXY_SHARED_SECRET:-}"
+OORE_TRUSTED_PROXY_SHARED_SECRET_FILE="${OORE_TRUSTED_PROXY_SHARED_SECRET_FILE:-}"
+OORE_TRUSTED_PROXY_CIDRS="${OORE_TRUSTED_PROXY_CIDRS:-}"
+OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER="${OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER:-}"
+OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET="${OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET:-}"
+OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE="${OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE:-}"
+OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER="${OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER:-x-oore-web-trusted-proxy-secret}"
 OORE_DAEMON_URL="${OORE_DAEMON_URL:-http://127.0.0.1:8787}"
 OORE_WEB_BACKEND_URL="${OORE_WEB_BACKEND_URL:-$OORE_DAEMON_URL}"
 OORE_LOCAL_WEB_MODE="${OORE_LOCAL_WEB_MODE:-}"
@@ -55,6 +62,9 @@ RESOLVED_CHANNEL=""
 TMP_DIR=""
 CURRENT_STEP=0
 TOTAL_STEPS=5
+BACKEND_SETUP_INITIALIZED=0
+DAEMON_HEALTH_REACHABLE=0
+DAEMON_STARTED=0
 UI_RESET=""
 UI_BOLD=""
 UI_DIM=""
@@ -91,6 +101,13 @@ Environment overrides:
   OORE_SETUP_OWNER_EMAIL     Initial owner email to prefill for Trusted Proxy setup
   OORE_SETUP_PROXY_PRESET    Trusted Proxy preset: generic|warpgate|custom (default: generic)
   OORE_SETUP_USER_EMAIL_HEADER Custom Trusted Proxy email header when preset=custom
+  OORE_TRUSTED_PROXY_SHARED_SECRET Shared secret injected by proxy/oore-web for Trusted Proxy mode
+  OORE_TRUSTED_PROXY_SHARED_SECRET_FILE File containing the Trusted Proxy shared secret
+  OORE_TRUSTED_PROXY_CIDRS  Comma-separated proxy/frontend peer CIDRs allowed to send Trusted Proxy identity
+  OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER Header oore-web may forward after upstream proof
+  OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET Secret your auth proxy sends to oore-web before identity headers are forwarded
+  OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE File containing the auth proxy -> oore-web proof secret
+  OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER Header carrying the auth proxy -> oore-web proof secret
   OORE_GITHUB_REPO           GitHub repo (default: devaryakjha/oore.build)
   OORE_RELEASE_BASE_URL      Release asset base URL (default: GitHub Releases download base)
   OORE_RELEASE_MANIFEST_URL  Release metadata URL for latest tag resolution (default: GitHub Releases API)
@@ -189,6 +206,11 @@ print_install_summary() {
       if [[ "$OORE_SETUP_PROXY_PRESET" == "custom" ]]; then
         printf '  Email header:  %s\n' "$OORE_SETUP_USER_EMAIL_HEADER"
       fi
+      if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET" ]]; then
+        printf '  Proxy secret:  configured\n'
+      elif [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+        printf '  Proxy secret:  file configured\n'
+      fi
     fi
   fi
   if [[ "$OORE_VERSION" == "latest" ]]; then
@@ -199,6 +221,13 @@ print_install_summary() {
   if [[ "$OORE_INSTALL_MODE" == "frontend" ]]; then
     printf '  Backend URL:   %s\n' "$WEB_BACKEND_URL"
     printf '  Web listen:    %s\n' "$OORE_LOCAL_WEB_LISTEN"
+    if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET" || -n "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+      printf '  Proxy secret:  configured\n'
+      printf '  Identity hdr:  %s\n' "${OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER:-$(setup_header_for_preset "$OORE_SETUP_PROXY_PRESET")}"
+    fi
+    if [[ -n "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET" || -n "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+      printf '  Upstream auth: configured\n'
+    fi
   fi
   printf '  Hosted setup:  %s\n' "$OORE_HOSTED_UI"
   printf '%b----------------------------------------%b\n' "$UI_DIM" "$UI_RESET"
@@ -220,6 +249,109 @@ print_prompt_section() {
 
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+xml_escape() {
+  local value="$1"
+  value="${value//&/&amp;}"
+  value="${value//</&lt;}"
+  value="${value//>/&gt;}"
+  value="${value//\"/&quot;}"
+  value="${value//\'/&apos;}"
+  printf '%s' "$value"
+}
+
+systemd_env_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\\\$}"
+  value="${value//\`/\\\`}"
+  printf '"%s"' "$value"
+}
+
+write_secret_file() {
+  local path="$1"
+  local value="$2"
+  local previous_umask
+
+  mkdir -p "$(dirname "$path")"
+  previous_umask="$(umask)"
+  umask 077
+  printf '%s\n' "$value" > "$path"
+  umask "$previous_umask"
+}
+
+trusted_proxy_secret_file_path() {
+  printf '%s' "${OORE_TRUSTED_PROXY_SHARED_SECRET_FILE:-$OORE_INSTALL_ROOT/trusted-proxy-shared-secret}"
+}
+
+upstream_trusted_proxy_secret_file_path() {
+  printf '%s' "${OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE:-$OORE_INSTALL_ROOT/oore-web-upstream-trusted-proxy-secret}"
+}
+
+ensure_backend_trusted_proxy_secret_file() {
+  local path
+  path="$(trusted_proxy_secret_file_path)"
+
+  if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET" ]]; then
+    write_secret_file "$path" "$OORE_TRUSTED_PROXY_SHARED_SECRET"
+  elif [[ ! -s "$path" ]]; then
+    OORE_TRUSTED_PROXY_SHARED_SECRET="$(generate_shared_secret)"
+    write_secret_file "$path" "$OORE_TRUSTED_PROXY_SHARED_SECRET"
+    log "Generated Trusted Proxy shared secret: $path"
+  fi
+
+  OORE_TRUSTED_PROXY_SHARED_SECRET_FILE="$path"
+}
+
+ensure_frontend_secret_files() {
+  if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET" ]]; then
+    OORE_TRUSTED_PROXY_SHARED_SECRET_FILE="$(trusted_proxy_secret_file_path)"
+    write_secret_file "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" "$OORE_TRUSTED_PROXY_SHARED_SECRET"
+  fi
+
+  if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" && -z "$OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER" ]]; then
+    OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER="$(setup_header_for_preset "$OORE_SETUP_PROXY_PRESET")"
+  fi
+
+  if [[ -n "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET" ]]; then
+    OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE="$(upstream_trusted_proxy_secret_file_path)"
+    write_secret_file "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE" "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET"
+  fi
+}
+
+launchd_env_entry() {
+  local key="$1"
+  local value="$2"
+  [[ -n "$value" ]] || return 0
+  printf '      <key>%s</key>\n      <string>%s</string>\n' "$(xml_escape "$key")" "$(xml_escape "$value")"
+}
+
+launchd_environment_dict() {
+  local entries=""
+  entries="$(
+    launchd_env_entry OORE_TRUSTED_PROXY_SHARED_SECRET_FILE "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE"
+    launchd_env_entry OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER "$OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER"
+    launchd_env_entry OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE"
+    launchd_env_entry OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER"
+  )"
+  [[ -n "$entries" ]] || return 0
+  printf '    <key>EnvironmentVariables</key>\n    <dict>\n%s\n    </dict>\n' "$entries"
+}
+
+systemd_env_line() {
+  local key="$1"
+  local value="$2"
+  [[ -n "$value" ]] || return 0
+  printf 'Environment=%s\n' "$(systemd_env_quote "$key=$value")"
+}
+
+systemd_secret_environment_lines() {
+  systemd_env_line OORE_TRUSTED_PROXY_SHARED_SECRET_FILE "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE"
+  systemd_env_line OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER "$OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER"
+  systemd_env_line OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE"
+  systemd_env_line OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER"
 }
 
 ensure_install_root_writable() {
@@ -528,6 +660,14 @@ setup_header_for_preset() {
   esac
 }
 
+generate_shared_secret() {
+  if have_cmd openssl; then
+    openssl rand -hex 32
+    return 0
+  fi
+  od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+}
+
 url_to_host_port() {
   local raw="$1"
   local without_scheme="${raw#http://}"
@@ -737,12 +877,42 @@ configure_frontend_install() {
         OORE_ENABLE_LINGER=false
       fi
     fi
+
+    if [[ -z "$OORE_TRUSTED_PROXY_SHARED_SECRET" && -z "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+      OORE_TRUSTED_PROXY_SHARED_SECRET="$(
+        prompt_text \
+          "Backend Trusted Proxy shared secret. Use the value from the backend host; leave blank to disable trusted-proxy identity forwarding here." \
+          "$OORE_TRUSTED_PROXY_SHARED_SECRET" \
+          "optional"
+      )"
+    fi
+
+    if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET" || -n "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+      if [[ -z "$OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER" ]]; then
+        OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER="$(
+          prompt_text \
+            "Trusted Proxy user email header that your auth proxy sets for oore-web." \
+            "$(setup_header_for_preset "$OORE_SETUP_PROXY_PRESET")" \
+            "required"
+        )"
+      fi
+
+      if [[ -z "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET" && -z "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+        OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET="$(
+          prompt_text \
+            "Auth proxy -> oore-web proof secret. Configure your auth proxy to send this in ${OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER} with the user email header." \
+            "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET" \
+            "optional"
+        )"
+      fi
+    fi
   else
     if [[ "$OORE_WEB_BACKEND_URL_WAS_SET" -eq 0 && "$OORE_DAEMON_URL_WAS_SET" -eq 0 ]]; then
       die 'Frontend-only non-interactive install requires OORE_WEB_BACKEND_URL, for example http://<backend-host>:8787.'
     fi
   fi
 
+  ensure_frontend_secret_files
   WEB_BACKEND_URL="$OORE_WEB_BACKEND_URL"
   resolve_local_web_url
 }
@@ -753,7 +923,7 @@ configure_setup_prefill() {
   if ! is_noninteractive && has_prompt_tty; then
     print_prompt_section \
       "First-run setup defaults" \
-      "Optional values to prefill the web setup wizard. Leave blank if you will use Local Only or OIDC."
+      "Optional backend-owned setup initialization. Leave blank if you will use Local Only or OIDC."
 
     OORE_SETUP_OWNER_EMAIL="$(
       prompt_text \
@@ -779,6 +949,22 @@ configure_setup_prefill() {
             "Trusted Proxy user email header." \
             "$OORE_SETUP_USER_EMAIL_HEADER" \
             "required"
+        )"
+      fi
+      if [[ -z "$OORE_TRUSTED_PROXY_SHARED_SECRET" && -z "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+        OORE_TRUSTED_PROXY_SHARED_SECRET="$(
+          prompt_text \
+            "Trusted Proxy shared secret for backend/frontend proxy hop. Leave blank to generate one." \
+            "$OORE_TRUSTED_PROXY_SHARED_SECRET" \
+            "optional"
+        )"
+      fi
+      if [[ -z "$OORE_TRUSTED_PROXY_CIDRS" ]]; then
+        OORE_TRUSTED_PROXY_CIDRS="$(
+          prompt_text \
+            "Trusted proxy/frontend peer CIDRs allowed to send identity headers. Use comma-separated CIDRs; leave blank for loopback-only." \
+            "$OORE_TRUSTED_PROXY_CIDRS" \
+            "optional"
         )"
       fi
     fi
@@ -1157,6 +1343,8 @@ start_daemon() {
 
   if curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
     log "A healthy daemon is already running on $DAEMON_URL."
+    DAEMON_HEALTH_REACHABLE=1
+    DAEMON_STARTED=1
     return 0
   fi
 
@@ -1168,12 +1356,20 @@ start_daemon() {
   for i in $(seq 1 15); do
     if curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
       log 'Daemon is healthy.'
+      DAEMON_HEALTH_REACHABLE=1
+      DAEMON_STARTED=1
       return 0
     fi
     sleep 1
   done
 
-  log "Daemon failed to become healthy. Check logs: $DAEMON_LOG"
+  if [[ -f "$DAEMON_PID_FILE" ]] && kill -0 "$(cat "$DAEMON_PID_FILE")" >/dev/null 2>&1; then
+    log "Daemon process started, but this host could not reach $DAEMON_URL/healthz. Continuing; check logs if clients cannot connect."
+    DAEMON_STARTED=1
+    return 0
+  fi
+
+  log "Daemon failed to start. Check logs: $DAEMON_LOG"
   return 1
 }
 
@@ -1194,13 +1390,16 @@ install_daemon_service() {
   for i in $(seq 1 15); do
     if curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
       log 'Daemon service is healthy.'
+      DAEMON_HEALTH_REACHABLE=1
+      DAEMON_STARTED=1
       return 0
     fi
     sleep 1
   done
 
-  log "Daemon service did not become healthy yet. Check logs: $DAEMON_LOG"
-  return 1
+  log "Daemon service was installed, but this host could not reach $DAEMON_URL/healthz. Continuing; check logs if clients cannot connect."
+  DAEMON_STARTED=1
+  return 0
 }
 
 is_already_configured() {
@@ -1224,6 +1423,40 @@ generate_setup_token() {
 
   "$BIN_DIR/oore" setup token --ttl 15m \
     || die "Failed to generate setup token. Check daemon logs: $DAEMON_LOG"
+}
+
+initialize_backend_setup_if_requested() {
+  is_daemon_install || return 0
+  [[ -n "$OORE_SETUP_OWNER_EMAIL" ]] || return 0
+
+  local header
+  header="$(setup_header_for_preset "$OORE_SETUP_PROXY_PRESET")"
+  [[ -n "$header" ]] || die 'Trusted Proxy user email header is required.'
+
+  ensure_backend_trusted_proxy_secret_file
+
+  local args=(
+    setup init
+    --mode trusted-proxy
+    --owner-email "$OORE_SETUP_OWNER_EMAIL"
+    --user-email-header "$header"
+  )
+  local cidr=""
+  if [[ -n "$OORE_TRUSTED_PROXY_CIDRS" ]]; then
+    IFS=',' read -ra cidr_values <<< "$OORE_TRUSTED_PROXY_CIDRS"
+    for cidr in "${cidr_values[@]}"; do
+      cidr="$(printf '%s' "$cidr" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [[ -n "$cidr" ]] || continue
+      args+=(--trusted-proxy-cidr "$cidr")
+    done
+  fi
+
+  log "Initializing backend setup in Remote Trusted Proxy mode..."
+  env -u OORE_TRUSTED_PROXY_SHARED_SECRET \
+    OORE_TRUSTED_PROXY_SHARED_SECRET_FILE="$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" \
+    "$BIN_DIR/oore" "${args[@]}" >/dev/null \
+    || die 'Failed to initialize backend Trusted Proxy setup.'
+  BACKEND_SETUP_INITIALIZED=1
 }
 
 is_localhost_backend() {
@@ -1292,10 +1525,22 @@ start_local_web() {
     return 0
   fi
 
-  nohup "$WEB_BINARY" \
-    --listen "$OORE_LOCAL_WEB_LISTEN" \
-    --backend-url "$WEB_BACKEND_URL" \
-    --dist-dir "$WEB_DIST_DIR" >"$WEB_LOG" 2>&1 &
+  local web_cmd=(
+    "$WEB_BINARY"
+    --listen "$OORE_LOCAL_WEB_LISTEN"
+    --backend-url "$WEB_BACKEND_URL"
+    --dist-dir "$WEB_DIST_DIR"
+  )
+  local web_env=()
+  [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]] && web_env+=(OORE_TRUSTED_PROXY_SHARED_SECRET_FILE="$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE")
+  [[ -n "$OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER" ]] && web_env+=(OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER="$OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER")
+  [[ -n "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE" ]] && web_env+=(OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE="$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE")
+  [[ -n "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER" ]] && web_env+=(OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER="$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER")
+  nohup env \
+    -u OORE_TRUSTED_PROXY_SHARED_SECRET \
+    -u OORE_WEB_TRUSTED_PROXY_SHARED_SECRET \
+    -u OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET \
+    "${web_env[@]}" "${web_cmd[@]}" >"$WEB_LOG" 2>&1 &
   echo "$!" > "$WEB_PID_FILE"
 
   local i
@@ -1335,6 +1580,7 @@ install_local_web_launch_agent() {
       <string>--dist-dir</string>
       <string>$WEB_DIST_DIR</string>
     </array>
+$(launchd_environment_dict)
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -1388,6 +1634,7 @@ ExecStart=$WEB_BINARY --listen $OORE_LOCAL_WEB_LISTEN --backend-url $WEB_BACKEND
 Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production
+$(systemd_secret_environment_lines)
 
 [Install]
 WantedBy=default.target
@@ -1614,18 +1861,23 @@ open_links() {
 }
 
 print_setup_prefill_next_steps() {
-  local query=""
   [[ -n "$OORE_SETUP_OWNER_EMAIL" ]] || return 0
 
-  query="$(setup_prefill_query)"
-  printf '\nTrusted Proxy setup defaults:\n'
+  printf '\nTrusted Proxy setup:\n'
   printf '  Owner email:  %s\n' "$OORE_SETUP_OWNER_EMAIL"
   printf '  Proxy preset: %s\n' "$OORE_SETUP_PROXY_PRESET"
   if [[ "$OORE_SETUP_PROXY_PRESET" == "custom" ]]; then
     printf '  Email header: %s\n' "$OORE_SETUP_USER_EMAIL_HEADER"
   fi
-  if [[ -n "$query" ]]; then
-    printf '  Setup URL suffix: ?%s\n' "$query"
+  if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET" || -n "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+    printf '  Secret:       configured\n'
+    if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+      printf '  Secret file:  %s\n' "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE"
+    fi
+    printf '  Proxy header: x-oore-trusted-proxy-secret\n'
+  fi
+  if [[ -n "$OORE_TRUSTED_PROXY_CIDRS" ]]; then
+    printf '  Proxy CIDRs:  %s\n' "$OORE_TRUSTED_PROXY_CIDRS"
   fi
 }
 
@@ -1633,6 +1885,9 @@ print_next_steps() {
   local daemon_running=false
   local local_web_running=false
   if curl_quick "$DAEMON_URL/healthz" >/dev/null 2>&1; then
+    daemon_running=true
+  fi
+  if [[ "$DAEMON_STARTED" -eq 1 ]]; then
     daemon_running=true
   fi
   if [[ -n "$LOCAL_WEB_URL" ]] && is_local_web_healthy; then
@@ -1658,25 +1913,36 @@ print_next_steps() {
     fi
     printf '\nPut your HTTPS reverse proxy in front of %s.\n' "$LOCAL_WEB_URL"
     printf 'In the UI, add an instance with Backend URL empty so browser API calls use this frontend proxy.\n'
+    if [[ -n "$OORE_TRUSTED_PROXY_SHARED_SECRET_FILE" ]]; then
+      printf 'Trusted Proxy identity headers are forwarded only when your auth proxy also sends %s.\n' "$OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER"
+    fi
     printf '\nDocs: https://docs.oore.build\n'
     return 0
   fi
 
   if "$daemon_running"; then
-    printf 'Daemon is running at %s\n\n' "$DAEMON_URL"
+    if [[ "$DAEMON_HEALTH_REACHABLE" -eq 1 ]]; then
+      printf 'Daemon is running at %s\n\n' "$DAEMON_URL"
+    else
+      printf 'Daemon service/process started. Health was not reachable from this host at %s.\n\n' "$DAEMON_URL"
+    fi
     if should_install_daemon_service; then
       printf 'Daemon service: launchd enabled\n\n'
     else
       printf 'To keep the daemon running across login sessions:\n'
       printf '  oored install-service --listen %s\n\n' "$OORE_DAEMON_LISTEN"
     fi
-    printf 'Complete setup (local-first):\n'
-    if has_local_web_bundle; then
-      printf '  %s\n' "$(setup_url_with_prefill "${LOCAL_WEB_URL}/setup")"
-      printf '  (or use CLI below)\n'
+    if [[ "$BACKEND_SETUP_INITIALIZED" -eq 1 ]]; then
+      printf 'Setup is initialized. Sign in through your configured auth path.\n'
+    else
+      printf 'Complete setup:\n'
+      if has_local_web_bundle; then
+        printf '  %s\n' "$(setup_url_with_prefill "${LOCAL_WEB_URL}/setup")"
+        printf '  (or use CLI below)\n'
+      fi
+      printf '  oore setup                    # interactive CLI setup\n'
+      printf '  oore setup token --ttl 15m     # generate a new bootstrap token\n'
     fi
-    printf '  oore setup                    # interactive CLI setup\n'
-    printf '  oore setup token --ttl 15m     # generate a new bootstrap token\n'
     if has_local_web_bundle && "$local_web_running"; then
       printf '  local web status: running\n'
     elif has_local_web_bundle; then
@@ -1695,13 +1961,17 @@ print_next_steps() {
     printf '  oored run --listen %s\n\n' "$OORE_DAEMON_LISTEN"
     printf 'Or install it as a launch-at-login service:\n'
     printf '  oored install-service --listen %s\n\n' "$OORE_DAEMON_LISTEN"
-    printf 'Then complete setup (local-first):\n'
-    if has_local_web_bundle; then
-      printf '  %s\n' "$(setup_url_with_prefill "${LOCAL_WEB_URL}/setup")"
-      printf '  (or use CLI below)\n'
+    if [[ "$BACKEND_SETUP_INITIALIZED" -eq 1 ]]; then
+      printf 'Setup is already initialized. After the daemon starts, sign in through your configured auth path.\n'
+    else
+      printf 'Then complete setup:\n'
+      if has_local_web_bundle; then
+        printf '  %s\n' "$(setup_url_with_prefill "${LOCAL_WEB_URL}/setup")"
+        printf '  (or use CLI below)\n'
+      fi
+      printf '  oore setup                    # interactive CLI setup\n'
+      printf '  oore setup token --ttl 15m     # generate a bootstrap token\n'
     fi
-    printf '  oore setup                    # interactive CLI setup\n'
-    printf '  oore setup token --ttl 15m     # generate a bootstrap token\n'
     if has_local_web_bundle; then
       printf '  local web start:  oore-web --backend-url %s\n' "$DAEMON_URL"
     fi
@@ -1822,15 +2092,25 @@ main() {
     if should_install_daemon_service; then
       step "Installing daemon service..."
       install_daemon_service || die "Daemon service startup failed. Check logs: $DAEMON_LOG"
-      step_done "$DAEMON_URL (launchd)"
+      initialize_backend_setup_if_requested
+      if [[ "$DAEMON_HEALTH_REACHABLE" -eq 1 ]]; then
+        step_done "$DAEMON_URL (launchd)"
+      else
+        step_done "launchd installed (health not reachable from this host)"
+      fi
     elif [[ -n "$OORE_START_DAEMON" ]]; then
       if normalize_bool "$OORE_START_DAEMON"; then
         step "Starting daemon..."
         start_daemon || die "Daemon startup failed. Check logs: $DAEMON_LOG"
+        initialize_backend_setup_if_requested
         if is_localhost_backend; then
           configure_local_web_noninteractive
         fi
-        step_done "$DAEMON_URL (healthy)"
+        if [[ "$DAEMON_HEALTH_REACHABLE" -eq 1 ]]; then
+          step_done "$DAEMON_URL (healthy)"
+        else
+          step_done "started (health not reachable from this host)"
+        fi
       else
         if [[ "$?" -eq 2 ]]; then
           die 'OORE_START_DAEMON must be one of: true,false,1,0,yes,no,on,off.'
@@ -1847,6 +2127,7 @@ main() {
     if should_install_daemon_service; then
       step "Installing daemon service..."
       if install_daemon_service; then
+        initialize_backend_setup_if_requested
         daemon_started=0
       else
         daemon_started=1
@@ -1854,6 +2135,7 @@ main() {
     elif normalize_bool "${OORE_START_DAEMON:-true}"; then
       step "Starting daemon..."
       if start_daemon; then
+        initialize_backend_setup_if_requested
         daemon_started=0
       else
         daemon_started=1
@@ -1865,10 +2147,17 @@ main() {
     fi
 
     if [[ "$daemon_started" -eq 0 ]]; then
-      step_done "$DAEMON_URL (healthy)"
+      if [[ "$DAEMON_HEALTH_REACHABLE" -eq 1 ]]; then
+        step_done "$DAEMON_URL (healthy)"
+      else
+        step_done "started (health not reachable from this host)"
+      fi
 
       # Auto-generate bootstrap token if not already configured
-      if ! is_already_configured; then
+      if [[ "$BACKEND_SETUP_INITIALIZED" -eq 1 ]]; then
+        printf '\n'
+        log "Backend setup was initialized by the installer."
+      elif ! is_already_configured; then
         printf '\n'
         generate_setup_token || true
 

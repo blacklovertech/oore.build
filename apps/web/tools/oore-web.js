@@ -9,10 +9,39 @@ import { spawnSync } from 'node:child_process'
 const DEFAULT_LISTEN = process.env.OORE_WEB_LISTEN || '127.0.0.1:4173'
 const DEFAULT_BACKEND_URL =
   process.env.OORE_WEB_BACKEND_URL || 'http://127.0.0.1:8787'
+const DEFAULT_TRUSTED_PROXY_SECRET =
+  process.env.OORE_TRUSTED_PROXY_SHARED_SECRET ||
+  process.env.OORE_WEB_TRUSTED_PROXY_SHARED_SECRET ||
+  ''
+const DEFAULT_TRUSTED_PROXY_SECRET_FILE =
+  process.env.OORE_TRUSTED_PROXY_SHARED_SECRET_FILE ||
+  process.env.OORE_WEB_TRUSTED_PROXY_SHARED_SECRET_FILE ||
+  ''
+const DEFAULT_TRUSTED_PROXY_USER_EMAIL_HEADER =
+  process.env.OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER ||
+  process.env.OORE_SETUP_USER_EMAIL_HEADER ||
+  'x-oore-user-email'
+const DEFAULT_UPSTREAM_TRUSTED_PROXY_SECRET =
+  process.env.OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET || ''
+const DEFAULT_UPSTREAM_TRUSTED_PROXY_SECRET_FILE =
+  process.env.OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE || ''
+const DEFAULT_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER =
+  process.env.OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER ||
+  'x-oore-web-trusted-proxy-secret'
 const DEFAULT_DIST_DIR =
   process.env.OORE_WEB_DIST_DIR ||
   path.resolve(path.dirname(process.execPath), '..', 'web-dist')
 const DEFAULT_GITHUB_REPO = 'devaryakjha/oore.build'
+const BACKEND_TRUSTED_PROXY_SECRET_HEADER = 'x-oore-trusted-proxy-secret'
+const CLIENT_CONTROLLED_IDENTITY_HEADERS = [
+  'x-oore-user-email',
+  'x-warpgate-username',
+  'x-auth-request-email',
+  'x-auth-request-user',
+  'x-forwarded-email',
+  'x-forwarded-user',
+  'remote-user',
+]
 
 function printHelp() {
   console.log(`oore-web - local self-hosted Oore CI frontend launcher
@@ -26,8 +55,50 @@ Options:
   --listen        Listen address (default: ${DEFAULT_LISTEN})
   --backend-url   Backend API base URL (default: ${DEFAULT_BACKEND_URL})
   --dist-dir      Path to web static assets (default: ${DEFAULT_DIST_DIR})
+  --trusted-proxy-secret
+                  Secret injected only on proxied backend API requests
+  --trusted-proxy-secret-file
+                  File containing the backend trusted-proxy secret
+  --trusted-proxy-user-email-header
+                  Identity header to forward after upstream proof (default: ${DEFAULT_TRUSTED_PROXY_USER_EMAIL_HEADER})
+  --upstream-trusted-proxy-secret
+                  Secret required from the auth proxy before identity headers are forwarded
+  --upstream-trusted-proxy-secret-file
+                  File containing the upstream auth-proxy secret
+  --upstream-trusted-proxy-secret-header
+                  Header carrying the upstream proof (default: ${DEFAULT_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER})
   --help          Show this help text
 `)
+}
+
+function readSecretFile(rawPath, label) {
+  const filePath = rawPath.trim()
+  if (!filePath) return ''
+  const value = fs.readFileSync(filePath, 'utf8').trim()
+  if (!value) throw new Error(`${label} file is empty: ${filePath}`)
+  return value
+}
+
+function resolveSecret(value, filePath, label) {
+  const inline = value.trim()
+  if (inline) return inline
+  return readSecretFile(filePath, label)
+}
+
+function normalizeHeaderName(raw, label) {
+  const value = raw.trim().toLowerCase()
+  const valid =
+    value.length > 0 &&
+    value.length <= 128 &&
+    /^[!#$%&'*+\-.^_`|~0-9a-z]+$/.test(value)
+  if (!valid) throw new Error(`${label} is not a valid HTTP header name`)
+  return value
+}
+
+function timingSafeStringEqual(a, b) {
+  const left = Buffer.from(a)
+  const right = Buffer.from(b)
+  return left.length === right.length && crypto.timingSafeEqual(left, right)
 }
 
 function printUpdateHelp() {
@@ -78,6 +149,13 @@ function parseServeArgs(argv) {
     listen: DEFAULT_LISTEN,
     backendUrl: DEFAULT_BACKEND_URL,
     distDir: DEFAULT_DIST_DIR,
+    trustedProxySecret: DEFAULT_TRUSTED_PROXY_SECRET,
+    trustedProxySecretFile: DEFAULT_TRUSTED_PROXY_SECRET_FILE,
+    trustedProxyUserEmailHeader: DEFAULT_TRUSTED_PROXY_USER_EMAIL_HEADER,
+    upstreamTrustedProxySecret: DEFAULT_UPSTREAM_TRUSTED_PROXY_SECRET,
+    upstreamTrustedProxySecretFile: DEFAULT_UPSTREAM_TRUSTED_PROXY_SECRET_FILE,
+    upstreamTrustedProxySecretHeader:
+      DEFAULT_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER,
   }
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -111,8 +189,79 @@ function parseServeArgs(argv) {
       continue
     }
 
+    if (arg === '--trusted-proxy-secret') {
+      const value = argv[i + 1]
+      if (!value) throw new Error('--trusted-proxy-secret requires a value')
+      config.trustedProxySecret = value
+      i += 1
+      continue
+    }
+
+    if (arg === '--trusted-proxy-secret-file') {
+      const value = argv[i + 1]
+      if (!value) throw new Error('--trusted-proxy-secret-file requires a value')
+      config.trustedProxySecretFile = value
+      i += 1
+      continue
+    }
+
+    if (arg === '--trusted-proxy-user-email-header') {
+      const value = argv[i + 1]
+      if (!value)
+        throw new Error('--trusted-proxy-user-email-header requires a value')
+      config.trustedProxyUserEmailHeader = value
+      i += 1
+      continue
+    }
+
+    if (arg === '--upstream-trusted-proxy-secret') {
+      const value = argv[i + 1]
+      if (!value)
+        throw new Error('--upstream-trusted-proxy-secret requires a value')
+      config.upstreamTrustedProxySecret = value
+      i += 1
+      continue
+    }
+
+    if (arg === '--upstream-trusted-proxy-secret-file') {
+      const value = argv[i + 1]
+      if (!value)
+        throw new Error('--upstream-trusted-proxy-secret-file requires a value')
+      config.upstreamTrustedProxySecretFile = value
+      i += 1
+      continue
+    }
+
+    if (arg === '--upstream-trusted-proxy-secret-header') {
+      const value = argv[i + 1]
+      if (!value)
+        throw new Error('--upstream-trusted-proxy-secret-header requires a value')
+      config.upstreamTrustedProxySecretHeader = value
+      i += 1
+      continue
+    }
+
     throw new Error(`unknown argument: ${arg}`)
   }
+
+  config.trustedProxySecret = resolveSecret(
+    config.trustedProxySecret,
+    config.trustedProxySecretFile,
+    'trusted proxy secret',
+  )
+  config.upstreamTrustedProxySecret = resolveSecret(
+    config.upstreamTrustedProxySecret,
+    config.upstreamTrustedProxySecretFile,
+    'upstream trusted proxy secret',
+  )
+  config.trustedProxyUserEmailHeader = normalizeHeaderName(
+    config.trustedProxyUserEmailHeader,
+    'trusted proxy user email header',
+  )
+  config.upstreamTrustedProxySecretHeader = normalizeHeaderName(
+    config.upstreamTrustedProxySecretHeader,
+    'upstream trusted proxy secret header',
+  )
 
   return config
 }
@@ -526,11 +675,47 @@ function withProxyHeader(response) {
   })
 }
 
-async function proxyRequest(request, backendUrl, url) {
+function headersToStripForTrustedProxy(config) {
+  return new Set([
+    BACKEND_TRUSTED_PROXY_SECRET_HEADER,
+    config.upstreamTrustedProxySecretHeader,
+    config.trustedProxyUserEmailHeader,
+    ...CLIENT_CONTROLLED_IDENTITY_HEADERS,
+  ])
+}
+
+function applyTrustedProxyHeaders(request, headers, config) {
+  const trustedProxySecret = config.trustedProxySecret.trim()
+  const upstreamSecret = config.upstreamTrustedProxySecret.trim()
+  const identityHeader = config.trustedProxyUserEmailHeader
+  const upstreamSecretHeader = config.upstreamTrustedProxySecretHeader
+  const inboundIdentity = request.headers.get(identityHeader)?.trim() || ''
+  const inboundUpstreamSecret =
+    request.headers.get(upstreamSecretHeader)?.trim() || ''
+
+  for (const header of headersToStripForTrustedProxy(config)) {
+    headers.delete(header)
+  }
+
+  if (!trustedProxySecret) return
+
+  headers.set(BACKEND_TRUSTED_PROXY_SECRET_HEADER, trustedProxySecret)
+
+  if (
+    upstreamSecret &&
+    inboundIdentity &&
+    timingSafeStringEqual(inboundUpstreamSecret, upstreamSecret)
+  ) {
+    headers.set(identityHeader, inboundIdentity)
+  }
+}
+
+async function proxyRequest(request, backendUrl, url, config) {
   const upstream = new URL(`${url.pathname}${url.search}`, backendUrl)
   const headers = new Headers(request.headers)
   headers.delete('host')
   headers.delete('content-length')
+  applyTrustedProxyHeaders(request, headers, config)
 
   const init = {
     method: request.method,
@@ -671,7 +856,7 @@ async function main() {
       }
 
       if (isApiPath(url.pathname)) {
-        return proxyRequest(request, backendUrl, url)
+        return proxyRequest(request, backendUrl, url, config)
       }
 
       const acceptHeader = request.headers.get('accept') || ''
@@ -682,6 +867,18 @@ async function main() {
   console.log(
     `[oore-web] listening on http://${listen.hostname}:${listen.port} (backend: ${backendUrl.toString()})`,
   )
+  if (config.trustedProxySecret?.trim()) {
+    console.log('[oore-web] trusted proxy shared secret injection enabled')
+    if (config.upstreamTrustedProxySecret?.trim()) {
+      console.log(
+        `[oore-web] trusted proxy identity forwarding requires ${config.upstreamTrustedProxySecretHeader}`,
+      )
+    } else {
+      console.log(
+        '[oore-web] trusted proxy identity headers are stripped until an upstream proxy secret is configured',
+      )
+    }
+  }
 
   const shutdown = () => {
     try {

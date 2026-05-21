@@ -11,7 +11,7 @@ This tutorial walks you through inviting team members to your Oore CI instance a
 
 - **Role**: owner or admin
 - A running Oore CI instance in `ready` state
-- Your team members' email addresses (must match their OIDC provider accounts)
+- Your team members' email addresses (must match their OIDC or trusted-proxy identity)
 
 ## 1. Open user management
 
@@ -21,7 +21,7 @@ This tutorial walks you through inviting team members to your Oore CI instance a
 ## 2. Invite a user
 
 1. Click **Invite User**
-2. Enter the user's **email address** (must match the email in their OIDC provider account)
+2. Enter the user's **email address** (must match the email from your configured auth mode)
 3. Select a **role**:
 
    | Role | What they can do |
@@ -32,7 +32,7 @@ This tutorial walks you through inviting team members to your Oore CI instance a
 
 4. Click **Invite**
 
-The user is created in `invited` status. They complete activation by signing in through the OIDC provider for the first time.
+The user is created in `invited` status. They complete activation by signing in through the configured remote auth mode for the first time.
 
 ## 3. User activates their account
 
@@ -40,7 +40,7 @@ When the invited user:
 
 1. Opens the web UI
 2. Clicks **Sign in**
-3. Authenticates with the OIDC provider using the same email they were invited with
+3. Authenticates using the same email they were invited with
 
 Their account moves from `invited` to `active` status automatically.
 

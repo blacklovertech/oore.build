@@ -26,11 +26,13 @@ In Trusted Proxy mode, Oore CI trusts identity headers from an upstream proxy an
 
 - Default identity header: `x-oore-user-email` (expected to be an email)
 - Setup UI presets can switch the header to provider-specific defaults such as `x-warpgate-username`
-- Optional shared-secret header: `x-oore-trusted-proxy-secret`
+- Shared-secret header for protected proxy hops: `x-oore-trusted-proxy-secret`
 - Trust boundary: headers are accepted only when the immediate peer is trusted (loopback by default, optional CIDR allowlist for remote proxy peers)
 - Authorization stays in Oore RBAC (owner/admin/developer/qa_viewer) via Oore users and roles
 
 This mode does not introduce local passwords; it shifts authentication to the upstream access proxy while preserving Oore sessioning, RBAC, and audit attribution.
+
+When `oore-web` sits between the browser and backend, it treats browser-supplied identity headers as untrusted. It strips common identity headers unless the upstream auth proxy also sends an `oore-web` proof header, then it forwards the identity header and injects the backend shared secret on the proxied API request.
 
 ### PKCE and CSRF protection (OIDC mode)
 
@@ -82,7 +84,7 @@ The first-run bootstrap token (required for Remote-mode setup flows) has multipl
 | Setup session token | SHA-256 hash in SQLite | 30-minute sliding TTL |
 | User session token | SHA-256 hash in SQLite | 24-hour TTL |
 | OIDC client secret | AES-256-GCM encrypted in SQLite | File-stored encryption key |
-| Trusted proxy shared secret (optional) | AES-256-GCM encrypted in SQLite | File-stored encryption key |
+| Trusted proxy shared secret | AES-256-GCM encrypted in SQLite | File-stored encryption key |
 | Signing certificates | AES-256-GCM encrypted in SQLite | Same encryption key |
 | Keystore passwords | AES-256-GCM encrypted in SQLite | Same encryption key |
 

@@ -6,13 +6,15 @@ description: "Install Oore CI backend or frontend roles with a single command."
 # Install Oore CI
 
 This page walks you through installing prebuilt Oore CI release assets from GitHub Releases.
+Installation puts the daemon, CLI, and/or frontend launcher on disk. First-run setup is a separate step owned by the backend daemon; the hosted and self-hosted web UIs are clients for that backend setup flow.
 
 ## What you need
 
 - macOS host for backend mode (V1 backend runtime target)
 - Linux or macOS host for frontend-only mode
 - `curl`
-- Internet access to GitHub (`github.com`), `ci.oore.build`, and `docs.oore.build`
+- Internet access to GitHub (`github.com`) and the installer endpoint for your channel
+- Access to `ci.oore.build` only if you plan to use the hosted UI
 
 ## Install (latest release)
 
@@ -51,6 +53,18 @@ The installer is role-based:
 - `frontend`: installs only `oore-web` and static frontend assets on a Linux or macOS frontend host.
 
 `full` is still accepted as a compatibility alias for `all`, but new docs and scripts should use role names. A future runner-only mode will be added separately when external runner packaging is ready.
+
+## Deployment shapes and setup modes
+
+Install roles describe where binaries run. Setup modes describe how the backend will authenticate users after first-run setup.
+
+| Shape | Install role | Setup mode | Use when |
+|---|---|---|---|
+| Single Mac, local evaluation | `all` | `Local Only` | You only access the daemon from loopback on the same machine. No OIDC, proxy, or local passwords. |
+| Single Mac, remote browser access | `all` or `backend` | `Remote OIDC` | Users reach the backend through HTTPS and sign in with any OIDC-compatible identity provider. |
+| Single Mac behind an identity proxy | `all` or `backend` | `Remote Trusted Proxy` | Your proxy already authenticates users and forwards a trusted identity header. |
+| Split frontend/backend | `backend` on macOS plus `frontend` on Linux/macOS | Usually `Remote Trusted Proxy` or `Remote OIDC` | A browser-facing `oore-web` host proxies API calls to the macOS backend over a controlled network path. |
+| Hosted UI | `backend` on macOS | `Remote OIDC` or `Remote Trusted Proxy` | `ci.oore.build` serves only the frontend app; your macOS backend still owns setup, auth, data, builds, and signing keys. |
 
 The installer:
 
@@ -103,7 +117,7 @@ curl -fsSL https://alpha.oore.pages.dev/install | \
   bash
 ```
 
-For split deployments where the browser reaches the API through `oore-web` on the frontend host, leave `OORE_PUBLIC_URL` / `OORE_CORS_ORIGINS` unset during backend install. The installer can prefill Trusted Proxy setup values, but it does not block the terminal waiting for the browser wizard to finish.
+For split deployments where the browser reaches the API through `oore-web` on the frontend host, leave `OORE_PUBLIC_URL` / `OORE_CORS_ORIGINS` unset during backend install unless browsers will call `oored` directly. When you provide `OORE_SETUP_OWNER_EMAIL`, the installer initializes Remote Trusted Proxy setup on the backend host and writes the backend shared secret to `~/.oore/trusted-proxy-shared-secret` if you did not provide one.
 
 ## Frontend-only install
 
@@ -149,6 +163,15 @@ sudo loginctl enable-linger "$USER"
 
 Put your HTTPS reverse proxy in front of the frontend host, then proxy traffic to `http://127.0.0.1:4173`.
 In the web UI, add an instance with **Backend URL** left empty so API calls use the same HTTPS origin and flow through the frontend proxy.
+
+### Trusted Proxy through `oore-web`
+
+If the frontend origin is behind an identity-aware proxy, `oore-web` uses two separate proofs:
+
+- backend proof: `OORE_TRUSTED_PROXY_SHARED_SECRET_FILE`, copied from the backend host, lets `oore-web` call `oored` as the trusted proxy hop.
+- upstream proof: `OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE` lets `oore-web` know the identity header came from your authenticated reverse proxy, not from browser JavaScript.
+
+Your reverse proxy must strip any browser-supplied identity headers, set the configured user email header, and send `OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER` (default `x-oore-web-trusted-proxy-secret`) with the upstream proof secret. Without that upstream proof, `oore-web` strips identity headers before proxying API requests.
 
 ## Verify installation
 
@@ -201,20 +224,18 @@ oore update --channel alpha
 
 ## Next step: choose setup path
 
-Before using hosted UI, ensure your backend is HTTPS-reachable from the browser.
-`https://ci.oore.build` cannot call `http://127.0.0.1:*` directly.
+Before using the hosted UI, ensure your backend is HTTPS-reachable from the browser network path.
+`https://ci.oore.build` is UI-only and cannot call `http://127.0.0.1:*` directly.
 
-If your backend is local-only:
+Choose the path that matches how the browser reaches the backend:
 
-- Use CLI setup: `oore setup`, or
-- expose it via tunnel first (for example `cloudflared tunnel --url http://127.0.0.1:8787`), or
-- run local frontend: `oore-web --backend-url http://127.0.0.1:8787`.
-  In the local web UI, add an instance and leave **Backend URL** empty so requests use the built-in proxy.
+- Local Only backend: run `oore setup` and choose `Local Only`, or run `oore-web --backend-url http://127.0.0.1:8787` and open the local UI.
+- HTTPS-reachable backend: open [ci.oore.build](https://ci.oore.build), add the backend URL, and choose `Remote OIDC` or `Remote Trusted Proxy`.
+- Split frontend/backend: open your frontend origin, add the instance with **Backend URL** empty so API calls stay on the same origin and flow through `oore-web`.
 
-For hosted setup, open [ci.oore.build](https://ci.oore.build), add your backend URL, and complete setup.  
 For local setup UI, open `http://127.0.0.1:4173/setup` (or your configured `OORE_LOCAL_WEB_LISTEN` address).
 
-Continue with [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding).
+Continue with [Set Up Your Instance](/getting-started/first-instance). If you plan to use `ci.oore.build`, read [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding) first.
 
 ## Installer environment variables
 
@@ -239,6 +260,13 @@ Continue with [Hosted UI Onboarding](/getting-started/hosted-ui-onboarding).
 | `OORE_SETUP_OWNER_EMAIL` | unset | Initial owner email to prefill in Trusted Proxy setup |
 | `OORE_SETUP_PROXY_PRESET` | `generic` | Trusted Proxy setup prefill: `generic`, `warpgate`, or `custom` |
 | `OORE_SETUP_USER_EMAIL_HEADER` | unset | Custom Trusted Proxy email header when `OORE_SETUP_PROXY_PRESET=custom` |
+| `OORE_TRUSTED_PROXY_SHARED_SECRET` | unset | Trusted Proxy backend shared secret; installer persists it to a restrictive file when needed |
+| `OORE_TRUSTED_PROXY_SHARED_SECRET_FILE` | `~/.oore/trusted-proxy-shared-secret` when generated | File containing the backend shared secret for `oore setup init` and `oore-web` |
+| `OORE_TRUSTED_PROXY_CIDRS` | unset | Comma-separated trusted proxy/frontend peer CIDRs allowed to send identity to the backend |
+| `OORE_WEB_TRUSTED_PROXY_USER_EMAIL_HEADER` | preset-derived | Identity header `oore-web` may forward only after upstream proof |
+| `OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET` | unset | Auth proxy to `oore-web` proof secret; installer persists it to a restrictive file when needed |
+| `OORE_WEB_UPSTREAM_TRUSTED_PROXY_SHARED_SECRET_FILE` | `~/.oore/oore-web-upstream-trusted-proxy-secret` when generated | File containing the auth proxy to `oore-web` proof secret |
+| `OORE_WEB_UPSTREAM_TRUSTED_PROXY_SECRET_HEADER` | `x-oore-web-trusted-proxy-secret` | Header your auth proxy sends to prove the identity header is proxy-set |
 | `OORE_LOCAL_WEB_MODE` | unset | Non-interactive local web behavior for localhost backends: `off`, `run`, or `login` (launch-at-login) |
 | `OORE_LOCAL_WEB_LISTEN` | `127.0.0.1:4173` | Bind address for `oore-web` |
 | `OORE_ENABLE_LINGER` | unset | Enable systemd lingering for Linux frontend service installs (`true` or `false`) |

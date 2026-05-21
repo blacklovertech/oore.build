@@ -12,6 +12,18 @@ Rules:
 
 ## 2026-05-21
 
+- **Backend-owned setup initialization for trusted proxy deployments**:
+  - Added `oore setup init --mode local|trusted-proxy` so backend-host setup can create the owner and complete setup without a browser bootstrap-token flow when the operator already knows the deployment mode.
+  - Backend and installer trusted-proxy setup now require a shared secret for direct Trusted Proxy initialization, store it in restrictive files for service use, and let `oore-web` inject the backend secret only on proxied API requests.
+  - `oore-web` now strips browser-supplied identity headers unless an upstream auth proxy proof header is present, preventing the frontend proxy from turning client headers into trusted backend identities.
+  - Installer health checks no longer mark private-interface installs as failed just because the host cannot reach its own advertised address; they continue with a warning and clearer next steps.
+  - Linear feature doc: https://linear.app/oorebuild/document/feature-backend-owned-setup-init-for-local-and-trusted-proxy-modes-e850cb76e746
+
+- **Public setup/auth/install docs IA cleanup**:
+  - Reframed public onboarding docs around backend-owned setup/auth with frontend clients kept dumb, and clarified the generic setup modes: Local Only, Remote OIDC, and Remote Trusted Proxy.
+  - Updated install, first-instance, hosted UI, public alpha, setup-state, and feedback docs to distinguish install roles from setup modes, hosted UI from hosted backend, and split frontend/backend from provider-specific examples.
+  - Docs index: https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda
+
 - **Trusted-proxy sign-in UX**:
   - The web app now treats configured Remote + Trusted Proxy instances as proxy-authenticated sessions, auto-exchanging the forwarded identity header for an Oore session from both the dashboard guard and login page.
   - Trusted Proxy mode no longer falls through to Local Only or OIDC copy, and blocked Local Only access now points users back to daemon-host setup or their selected Remote auth mode instead of assuming OIDC.
