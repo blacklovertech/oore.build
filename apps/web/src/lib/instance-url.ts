@@ -5,7 +5,7 @@ type InstanceUrl = Pick<Instance, 'url'> | null | undefined
 export function resolveInstanceApiBaseUrl(
   instance: InstanceUrl,
 ): string | null {
-  const rawUrl = instance?.url?.trim() ?? ''
+  const rawUrl = instance?.url.trim() ?? ''
 
   if (!rawUrl || rawUrl === 'local') {
     if (typeof window === 'undefined') return null

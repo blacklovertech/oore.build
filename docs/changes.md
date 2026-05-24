@@ -20,6 +20,7 @@ Rules:
 - **Same-origin proxy instance URL resolution**:
   - Web API hooks now resolve empty or `local` instance URLs to the current browser origin, so frontend-only/proxied deployments use the oore-web same-origin `/v1` proxy instead of silently disabling server-state queries.
   - Sources, setup status, login, project creation, and admin data hooks now share the same API base resolution for local-proxy instances.
+  - Cleaned up the URL resolver to satisfy strict web linting in CI.
   - Docs index: https://linear.app/oorebuild/document/docs-index-linear-first-457d9edc9cda
 
 - **Runtime version visibility and restart flag accuracy**:
